@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Modules\Catalog\Infrastructure\Models\Product;
 use App\Modules\Identity\Domain\Permissions;
 use App\Modules\Identity\Domain\Roles;
 use Database\Seeders\DatabaseSeeder;
@@ -69,6 +70,15 @@ class QaTestDataSeederTest extends TestCase
 
         try {
             $this->seed(DatabaseSeeder::class);
+            $legacyProduct = Product::query()->where('sku', 'QA-P-01')->firstOrFail()->replicate();
+            $legacyProduct->forceFill([
+                'uuid' => null,
+                'name' => 'Legacy Product',
+                'slug' => 'legacy-product',
+                'sku' => 'LEGACY-KEEP-01',
+                'meta' => ['legacy' => true],
+            ])->save();
+
             $counts = [
                 'qa_users' => DB::table('users')->where('email', 'like', '%@gosika.com.np')->count(),
                 'qa_vendors' => DB::table('vendors')->count(),
@@ -85,6 +95,11 @@ class QaTestDataSeederTest extends TestCase
                 'qa_products' => DB::table('products')->where('sku', 'like', 'QA-%')->count(),
                 'qa_addresses' => DB::table('customer_addresses')->count(),
                 'catalog_seed_logs' => DB::table('activity_logs')->where('activity_type', 'catalog.seeded')->count(),
+            ]);
+            $this->assertDatabaseHas('products', [
+                'sku' => 'LEGACY-KEEP-01',
+                'name' => 'Legacy Product',
+                'slug' => 'legacy-product',
             ]);
             Storage::disk('local')->assertExists('qa-test-data/KYC-DUMMY/sample.pdf');
             Storage::disk('public')->assertExists('qa-test-data/P-01.svg');
