@@ -78,4 +78,4 @@ Migration order respects FK dependencies: users → platform → vendor → cata
 ## Seeders
 - RolePermissionSeeder (4 roles, 41 permissions)
 - NepalGeoSchemaSeeder (1 country, 7 provinces, 77 districts, 208 major municipalities)
-- DatabaseSeeder: super admin + demo customer
+- DatabaseSeeder: production-safe baseline and demo catalog; QA accounts and marketplace fixtures are local/testing-only and require `QA_TEST_PASSWORD`
