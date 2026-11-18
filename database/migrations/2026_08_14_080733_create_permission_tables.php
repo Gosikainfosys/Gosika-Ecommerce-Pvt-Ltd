@@ -1,8 +1,10 @@
 <?php
 
+use App\Modules\Identity\Domain\Permissions;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
+use Spatie\Permission\Models\Permission;
 
 return new class extends Migration
 {
@@ -114,6 +116,10 @@ return new class extends Migration
         app('cache')
             ->store(config('permission.cache.store') != 'default' ? config('permission.cache.store') : null)
             ->forget(config('permission.cache.key'));
+
+        foreach (Permissions::ALL as $permission) {
+            Permission::query()->updateOrCreate(['name' => $permission], ['guard_name' => 'web']);
+        }
     }
 
     /**

@@ -2,10 +2,13 @@
 
 namespace Tests\Feature;
 
+use App\Modules\Identity\Domain\Permissions;
+use App\Modules\Identity\Domain\Roles;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Spatie\Permission\Models\Role;
 use Tests\TestCase;
 
 class QaTestDataSeederTest extends TestCase
@@ -29,6 +32,10 @@ class QaTestDataSeederTest extends TestCase
             $this->assertSame(0, DB::table('users')->count());
             $this->assertSame(5, DB::table('categories')->count());
             $this->assertSame(4, DB::table('brands')->count());
+            $this->assertTrue(
+                Role::query()->where('name', Roles::VENDOR_ADMIN)->firstOrFail()
+                    ->hasPermissionTo(Permissions::ORDERS_MANAGE)
+            );
         } finally {
             putenv($previousProcessValue === false ? 'QA_TEST_PASSWORD' : 'QA_TEST_PASSWORD='.$previousProcessValue);
 
