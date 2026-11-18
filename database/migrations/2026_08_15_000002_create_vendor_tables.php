@@ -8,6 +8,30 @@ return new class extends Migration
 {
     public function up(): void
     {
+        Schema::create('seller_tiers', function (Blueprint $table) {
+            $table->id();
+            $table->uuid()->unique();
+            $table->string('name', 100);
+            $table->string('slug', 120)->unique();
+            $table->unsignedSmallInteger('badge_level')->default(0);
+            $table->unsignedBigInteger('min_orders')->default(0);
+            $table->decimal('min_gmv', 14, 2)->default(0);
+            $table->decimal('commission_percent', 5, 2)->nullable()->comment('Overrides vendor commission when set');
+            $table->string('badge_color', 40)->nullable();
+            $table->string('badge_icon', 40)->nullable();
+            $table->string('description', 500)->nullable();
+            $table->json('benefits')->nullable();
+            $table->unsignedInteger('sort_order')->default(0);
+            $table->boolean('is_active')->default(true);
+            $table->unsignedBigInteger('created_by')->nullable();
+            $table->unsignedBigInteger('updated_by')->nullable();
+            $table->unsignedBigInteger('deleted_by')->nullable();
+            $table->timestamps();
+            $table->softDeletes();
+
+            $table->index(['is_active', 'badge_level']);
+        });
+
         Schema::create('vendors', function (Blueprint $table) {
             $table->id();
             $table->uuid()->unique();
@@ -20,6 +44,7 @@ return new class extends Migration
             $table->string('logo')->nullable();
             $table->string('status', 25)->default('pending')->index();
             $table->string('commission_rate')->nullable()->comment('Overrides platform default when set');
+            $table->foreignId('seller_tier_id')->nullable()->constrained('seller_tiers')->nullOnDelete();
             $table->text('rejection_reason')->nullable();
             $table->json('meta')->nullable();
             $table->unsignedBigInteger('approved_by')->nullable();
@@ -43,6 +68,7 @@ return new class extends Migration
             $table->string('owner_phone', 20)->nullable();
             $table->string('business_type', 60)->nullable();
             $table->string('address', 255)->nullable();
+            $table->string('landmark', 255)->nullable();
             $table->string('province', 100)->nullable();
             $table->string('district', 100)->nullable();
             $table->string('municipality', 120)->nullable();
@@ -154,10 +180,33 @@ return new class extends Migration
 
             $table->unique(['vendor_id', 'account_number']);
         });
+
+        Schema::create('vendor_promotions', function (Blueprint $table) {
+            $table->id();
+            $table->uuid()->unique();
+            $table->foreignId('vendor_id')->constrained()->cascadeOnDelete();
+            $table->string('name', 250);
+            $table->text('tagline')->nullable();
+            $table->string('type', 30)->default('percentage')->comment('percentage|fixed|free_shipping|buy_one_get_one');
+            $table->decimal('discount_value', 12, 2)->default(0);
+            $table->string('category', 120)->nullable();
+            $table->string('banner_image', 600)->nullable();
+            $table->date('start_date')->nullable();
+            $table->date('end_date')->nullable();
+            $table->string('status', 20)->default('scheduled')->comment('draft|scheduled|active|ended');
+            $table->unsignedBigInteger('created_by')->nullable();
+            $table->unsignedBigInteger('updated_by')->nullable();
+            $table->unsignedBigInteger('deleted_by')->nullable();
+            $table->timestamps();
+            $table->softDeletes();
+
+            $table->index(['vendor_id', 'status']);
+        });
     }
 
     public function down(): void
     {
+        Schema::dropIfExists('vendor_promotions');
         Schema::dropIfExists('bank_accounts');
         Schema::dropIfExists('store_operating_hours');
         Schema::dropIfExists('store_addresses');
@@ -165,5 +214,6 @@ return new class extends Migration
         Schema::dropIfExists('vendor_documents');
         Schema::dropIfExists('vendor_kycs');
         Schema::dropIfExists('vendors');
+        Schema::dropIfExists('seller_tiers');
     }
 };

@@ -2,22 +2,23 @@
 
 namespace Database\Seeders;
 
+use App\Modules\Platform\Infrastructure\Models\Country;
+use App\Modules\Platform\Infrastructure\Models\District;
+use App\Modules\Platform\Infrastructure\Models\Province;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 class NepalGeoSchemaSeeder extends Seeder
 {
     public function run(): void
     {
-        DB::table('countries')->updateOrInsert(['code' => 'NP'], [
-            'uuid' => \Illuminate\Support\Str::uuid()->toString(),
+        $country = Country::query()->updateOrCreate(['code' => 'NP'], [
             'name' => 'Nepal',
             'phone_code' => '+977',
             'is_active' => true,
-            'created_at' => now(),
-            'updated_at' => now(),
         ]);
-        $countryId = DB::table('countries')->where('code', 'NP')->value('id');
+        $countryId = $country->id;
 
         $provinces = [
             ['name' => 'Koshi Province', 'code' => 'P1'],
@@ -30,15 +31,12 @@ class NepalGeoSchemaSeeder extends Seeder
         ];
 
         foreach ($provinces as $province) {
-            DB::table('provinces')->updateOrInsert(
-                ['name' => $province['name']],
+            Province::query()->updateOrCreate(
+                ['name' => $province['name'], 'country_id' => $countryId],
                 [
-                    'uuid' => \Illuminate\Support\Str::uuid()->toString(),
                     'country_id' => $countryId,
                     'code' => $province['code'],
                     'is_active' => true,
-                    'created_at' => now(),
-                    'updated_at' => now(),
                 ]
             );
         }
@@ -135,17 +133,14 @@ class NepalGeoSchemaSeeder extends Seeder
         ];
 
         foreach ($districts as $provinceName => $districtNames) {
-            $provinceId = DB::table('provinces')->where('name', $provinceName)->value('id');
+            $provinceId = Province::query()->where('name', $provinceName)->value('id');
 
             foreach ($districtNames as $districtName) {
-                DB::table('districts')->updateOrInsert(
+                District::query()->updateOrCreate(
                     ['name' => $districtName, 'province_id' => $provinceId],
                     [
-                        'uuid' => \Illuminate\Support\Str::uuid()->toString(),
-                        'code' => strtoupper(\Illuminate\Support\Str::slug($districtName, '')),
+                        'code' => strtoupper(Str::slug($districtName, '')),
                         'is_active' => true,
-                        'created_at' => now(),
-                        'updated_at' => now(),
                     ]
                 );
             }
@@ -196,7 +191,7 @@ class NepalGeoSchemaSeeder extends Seeder
 
                         if (! $existing) {
                             DB::table('municipalities')->insert([
-                                'uuid' => \Illuminate\Support\Str::uuid()->toString(),
+                                'uuid' => Str::uuid()->toString(),
                                 'district_id' => $districtRow->id,
                                 'name' => $muniName,
                                 'type' => strtolower(str_replace(' ', '_', $type)),

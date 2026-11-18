@@ -47,6 +47,8 @@ return new class extends Migration
             $table->string('status', 25)->default('assigned')->index();
             $table->decimal('delivery_fee', 12, 2)->default(0);
             $table->decimal('cod_amount', 12, 2)->default(0)->comment('Collected amount for COD orders');
+            $table->timestamp('cod_reconciled_at')->nullable();
+            $table->foreignId('cod_reconciled_by')->nullable()->constrained('users')->nullOnDelete();
             $table->string('pickup_address', 500)->nullable();
             $table->string('dropoff_address', 500)->nullable();
             $table->string('recipient_name', 180)->nullable();
@@ -99,10 +101,51 @@ return new class extends Migration
             $table->unsignedBigInteger('updated_by')->nullable();
             $table->timestamps();
         });
+
+        Schema::create('shipping_zones', function (Blueprint $table) {
+            $table->id();
+            $table->uuid()->unique();
+            $table->string('name', 180);
+            $table->text('description')->nullable();
+            $table->json('provinces')->nullable()->comment('Nepal province names covered by this zone');
+            $table->decimal('standard_charge', 12, 2)->default(0);
+            $table->decimal('express_charge', 12, 2)->default(0);
+            $table->unsignedTinyInteger('estimated_days')->default(2);
+            $table->boolean('is_active')->default(true);
+            $table->unsignedBigInteger('created_by')->nullable();
+            $table->unsignedBigInteger('updated_by')->nullable();
+            $table->unsignedBigInteger('deleted_by')->nullable();
+            $table->timestamps();
+            $table->softDeletes();
+
+            $table->index(['is_active']);
+        });
+
+        Schema::create('couriers', function (Blueprint $table) {
+            $table->id();
+            $table->uuid()->unique();
+            $table->string('name', 180);
+            $table->string('code', 60)->unique()->nullable();
+            $table->string('logo', 500)->nullable();
+            $table->string('contact_phone', 30)->nullable();
+            $table->string('contact_email')->nullable();
+            $table->string('tracking_url_pattern', 500)->nullable();
+            $table->text('description')->nullable();
+            $table->boolean('is_active')->default(true);
+            $table->unsignedBigInteger('created_by')->nullable();
+            $table->unsignedBigInteger('updated_by')->nullable();
+            $table->unsignedBigInteger('deleted_by')->nullable();
+            $table->timestamps();
+            $table->softDeletes();
+
+            $table->index(['is_active']);
+        });
     }
 
     public function down(): void
     {
+        Schema::dropIfExists('couriers');
+        Schema::dropIfExists('shipping_zones');
         Schema::dropIfExists('delivery_partner_documents');
         Schema::dropIfExists('delivery_tracking');
         Schema::dropIfExists('delivery_assignments');

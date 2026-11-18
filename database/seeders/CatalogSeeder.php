@@ -24,7 +24,6 @@ class CatalogSeeder extends Seeder
             Category::query()->updateOrCreate(
                 ['slug' => $category['slug']],
                 [
-                    'uuid' => (string) Str::uuid(),
                     'name' => $category['name'],
                     'description' => $category['description'],
                     'icon' => $category['icon'],
@@ -46,7 +45,6 @@ class CatalogSeeder extends Seeder
             Brand::query()->updateOrCreate(
                 ['slug' => $brand['slug']],
                 [
-                    'uuid' => (string) Str::uuid(),
                     'name' => $brand['name'],
                     'description' => $brand['description'],
                     'status' => 'active',
@@ -54,14 +52,16 @@ class CatalogSeeder extends Seeder
             );
         }
 
-        DB::table('activity_logs')->insertOrIgnore([
-            'uuid' => (string) Str::uuid(),
-            'user_id' => null,
-            'activity_type' => 'catalog.seeded',
-            'description' => 'Seeded '.count($categories).' categories and '.count($brands).' brands.',
-            'properties' => null,
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
+        if (! DB::table('activity_logs')->where('activity_type', 'catalog.seeded')->exists()) {
+            DB::table('activity_logs')->insert([
+                'uuid' => (string) Str::uuid(),
+                'user_id' => null,
+                'activity_type' => 'catalog.seeded',
+                'description' => 'Seeded '.count($categories).' categories and '.count($brands).' brands.',
+                'properties' => null,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
     }
 }

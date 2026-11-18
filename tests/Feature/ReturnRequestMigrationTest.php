@@ -11,24 +11,16 @@ class ReturnRequestMigrationTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_return_request_migrations_resume_when_some_columns_already_exist(): void
+    public function test_return_request_schema_is_in_the_original_migration_and_number_repair_is_idempotent(): void
     {
-        Schema::table('return_requests', function (Blueprint $table) {
-            $table->dropConstrainedForeignId('pickup_collected_by');
-            $table->dropColumn('preferred_resolution');
-        });
-
-        $pickupMigration = require database_path('migrations/2026_11_04_000001_add_pickup_confirmation_to_return_requests.php');
-        $requestTypeMigration = require database_path('migrations/2026_11_04_000002_add_request_type_to_return_requests.php');
-
-        $pickupMigration->up();
-        $requestTypeMigration->up();
-        $pickupMigration->up();
-        $requestTypeMigration->up();
-
+        $this->assertTrue(Schema::hasColumn('return_requests', 'request_type'));
+        $this->assertTrue(Schema::hasColumn('return_requests', 'preferred_resolution'));
         $this->assertTrue(Schema::hasColumn('return_requests', 'pickup_collected_at'));
         $this->assertTrue(Schema::hasColumn('return_requests', 'pickup_collected_by'));
-        $this->assertTrue(Schema::hasColumn('return_requests', 'preferred_resolution'));
+        $this->assertTrue(Schema::hasColumn('return_requests', 'exchange_order_id'));
+        $this->assertTrue(Schema::hasTable('return_request_media'));
+        $this->assertTrue(Schema::hasTable('return_status_history'));
+        $this->assertTrue(Schema::hasTable('return_status_histories'));
 
         Schema::table('return_requests', function (Blueprint $table) {
             $table->dropUnique('return_requests_return_number_unique');

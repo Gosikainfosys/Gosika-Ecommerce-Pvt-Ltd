@@ -127,6 +127,21 @@ return new class extends Migration
             $table->foreignId('store_id')->constrained()->cascadeOnDelete();
             $table->string('reason_type', 60);
             $table->text('reason', 1000)->nullable();
+            $table->string('request_type', 30)->default('return_refund');
+            $table->string('preferred_resolution', 80)->nullable();
+            $table->string('return_method', 30)->nullable();
+            $table->text('pickup_instructions')->nullable();
+            $table->timestamp('pickup_collected_at')->nullable();
+            $table->foreignId('pickup_collected_by')->nullable()->constrained('users')->nullOnDelete();
+            $table->string('inspection_condition', 30)->nullable();
+            $table->text('inspection_notes')->nullable();
+            $table->json('inspection_photos')->nullable();
+            $table->timestamp('inspected_at')->nullable();
+            $table->foreignId('inspected_by')->nullable()->constrained('users')->nullOnDelete();
+            $table->foreignId('exchange_order_id')->nullable()->constrained('orders')->nullOnDelete();
+            $table->timestamp('exchange_dispatched_at')->nullable();
+            $table->timestamp('replacement_dispatched_at')->nullable();
+            $table->timestamp('closed_at')->nullable();
             $table->unsignedBigInteger('quantity')->default(1);
             $table->decimal('refund_amount', 12, 2)->default(0);
             $table->string('status', 25)->default('requested')->index();
@@ -141,10 +156,52 @@ return new class extends Migration
             $table->index(['user_id', 'status']);
             $table->index(['vendor_order_id', 'status']);
         });
+
+        Schema::create('return_request_media', function (Blueprint $table) {
+            $table->id();
+            $table->uuid()->unique();
+            $table->foreignId('return_request_id')->constrained()->cascadeOnDelete();
+            $table->string('type', 20)->default('photo');
+            $table->string('path', 500);
+            $table->string('mime_type', 100)->nullable();
+            $table->unsignedBigInteger('size')->nullable();
+            $table->string('original_name', 255)->nullable();
+            $table->foreignId('uploaded_by')->nullable()->constrained('users')->nullOnDelete();
+            $table->timestamps();
+
+            $table->index('return_request_id');
+        });
+
+        Schema::create('return_status_history', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('return_request_id')->constrained()->cascadeOnDelete();
+            $table->string('from_status', 30)->nullable();
+            $table->string('to_status', 30);
+            $table->text('notes')->nullable();
+            $table->foreignId('changed_by')->nullable()->constrained('users')->nullOnDelete();
+            $table->timestamps();
+
+            $table->index('return_request_id');
+        });
+
+        Schema::create('return_status_histories', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('return_request_id')->constrained()->cascadeOnDelete();
+            $table->string('from_status', 30)->nullable();
+            $table->string('to_status', 30);
+            $table->text('notes')->nullable();
+            $table->foreignId('changed_by')->nullable()->constrained('users')->nullOnDelete();
+            $table->timestamps();
+
+            $table->index('return_request_id');
+        });
     }
 
     public function down(): void
     {
+        Schema::dropIfExists('return_status_histories');
+        Schema::dropIfExists('return_status_history');
+        Schema::dropIfExists('return_request_media');
         Schema::dropIfExists('return_requests');
         Schema::dropIfExists('order_status_history');
         Schema::dropIfExists('order_items');

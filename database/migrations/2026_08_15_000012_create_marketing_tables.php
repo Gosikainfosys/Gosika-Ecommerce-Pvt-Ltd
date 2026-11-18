@@ -53,10 +53,37 @@ return new class extends Migration
             $table->index(['coupon_id', 'user_id']);
             $table->unique(['coupon_id', 'order_id']);
         });
+
+        Schema::create('campaigns', function (Blueprint $table) {
+            $table->id();
+            $table->uuid()->unique();
+            $table->string('title', 200);
+            $table->string('tagline', 300)->nullable();
+            $table->text('description')->nullable();
+            $table->string('image', 600)->nullable();
+            $table->string('type', 30)->default('promo')->index();
+            $table->string('target_type', 20)->default('all');
+            $table->json('target_ids')->nullable();
+            $table->string('discount_type', 20)->nullable();
+            $table->decimal('discount_value', 12, 2)->nullable();
+            $table->decimal('min_order_amount', 12, 2)->nullable();
+            $table->string('status', 20)->default('draft')->index();
+            $table->unsignedInteger('sort_order')->default(0);
+            $table->unsignedBigInteger('created_by')->nullable();
+            $table->unsignedBigInteger('updated_by')->nullable();
+            $table->unsignedBigInteger('deleted_by')->nullable();
+            $table->timestamp('start_date')->nullable();
+            $table->timestamp('end_date')->nullable();
+            $table->timestamps();
+            $table->softDeletes();
+
+            $table->index(['status', 'start_date', 'end_date']);
+        });
     }
 
     public function down(): void
     {
+        Schema::dropIfExists('campaigns');
         Schema::dropIfExists('coupon_redemptions');
         Schema::dropIfExists('coupons');
     }

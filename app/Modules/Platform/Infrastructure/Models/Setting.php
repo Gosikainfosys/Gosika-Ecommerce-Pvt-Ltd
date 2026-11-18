@@ -4,7 +4,6 @@ namespace App\Modules\Platform\Infrastructure\Models;
 
 use App\Modules\Shared\Infrastructure\Models\BaseModel;
 use Illuminate\Support\Facades\Crypt;
-use Illuminate\Support\Str;
 
 class Setting extends BaseModel
 {
@@ -34,6 +33,7 @@ class Setting extends BaseModel
 
         try {
             $decrypted = Crypt::decryptString($this->value);
+
             return $this->castTypedValue($decrypted);
         } catch (\Throwable) {
             return $this->castTypedValue($this->value);
@@ -84,7 +84,6 @@ class Setting extends BaseModel
         }
 
         return static::updateOrCreate(['key' => $key], [
-            'uuid' => (string) Str::uuid(),
             'value' => $storeValue === null ? null : (string) $storeValue,
             'group' => $group,
             'type' => $type,

@@ -27,6 +27,17 @@ return new class extends Migration
             $table->softDeletes();
         });
 
+        Schema::create('category_commission_rules', function (Blueprint $table) {
+            $table->id();
+            $table->unsignedBigInteger('category_id')->unique();
+            $table->decimal('commission_rate', 5, 2)->default(0);
+            $table->unsignedBigInteger('created_by')->nullable();
+            $table->unsignedBigInteger('updated_by')->nullable();
+            $table->timestamps();
+
+            $table->foreign('category_id')->references('id')->on('categories')->cascadeOnDelete();
+        });
+
         Schema::create('brands', function (Blueprint $table) {
             $table->id();
             $table->uuid()->unique();
@@ -192,6 +203,7 @@ return new class extends Migration
         Schema::dropIfExists('products');
         Schema::dropIfExists('brand_requests');
         Schema::dropIfExists('brands');
+        Schema::dropIfExists('category_commission_rules');
         Schema::dropIfExists('categories');
     }
 };

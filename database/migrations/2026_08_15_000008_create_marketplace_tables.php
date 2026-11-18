@@ -54,6 +54,7 @@ return new class extends Migration
             $table->unsignedTinyInteger('rating')->comment('1-5');
             $table->string('title', 200)->nullable();
             $table->text('body')->nullable();
+            $table->json('photos')->nullable();
             $table->text('reply')->nullable();
             $table->unsignedBigInteger('replied_by')->nullable();
             $table->timestamp('replied_at')->nullable();
