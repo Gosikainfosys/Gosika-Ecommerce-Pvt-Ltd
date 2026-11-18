@@ -16,12 +16,6 @@ class DatabaseSeeder extends Seeder
             CategoryCommissionSeeder::class,
         ]);
 
-        if (app()->isProduction()) {
-            $this->command?->warn('QA test accounts and marketplace fixtures were skipped in production.');
-
-            return;
-        }
-
         if (blank(env('QA_TEST_PASSWORD'))) {
             $this->command?->warn('QA test accounts and marketplace fixtures were skipped because QA_TEST_PASSWORD is not set.');
 

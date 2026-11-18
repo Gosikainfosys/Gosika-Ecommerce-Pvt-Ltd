@@ -30,9 +30,10 @@ clearly labeled demo products and their generated images:
 php artisan db:seed --force
 ```
 
-The seeding is repeatable and uses a suspended demo owner account. QA test
-accounts remain local/testing-only and require `QA_TEST_PASSWORD` from an
-environment secret; no default password is committed.
+The seeding is repeatable and uses a suspended demo-catalog owner. QA accounts
+are skipped unless `QA_TEST_PASSWORD` is set. In production, setting this
+server secret enables all nine active demo logins; all nine share its value,
+which must be at least 12 characters. Never commit the secret.
 
 ## About Laravel
 

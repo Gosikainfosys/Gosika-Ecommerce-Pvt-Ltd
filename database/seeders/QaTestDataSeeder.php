@@ -57,8 +57,9 @@ class QaTestDataSeeder extends Seeder
 
     public function run(): void
     {
-        if (! app()->environment(['local', 'testing'])) {
-            throw new RuntimeException('QA test data may only be seeded in local or testing environments.');
+        $productionDemoEnabled = app()->isProduction() && filled(env('QA_TEST_PASSWORD'));
+        if (! app()->environment(['local', 'testing']) && ! $productionDemoEnabled) {
+            throw new RuntimeException('Production QA fixtures require QA_TEST_PASSWORD to be configured as a server secret.');
         }
 
         $password = (string) env('QA_TEST_PASSWORD', '');

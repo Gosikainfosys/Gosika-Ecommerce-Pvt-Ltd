@@ -8,6 +8,7 @@ use App\Modules\Identity\Domain\Roles;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 use Spatie\Permission\Models\Role;
 use Tests\TestCase;
@@ -63,6 +64,13 @@ class QaTestDataSeederTest extends TestCase
     public function test_database_seeder_runs_safe_seeders_in_production_without_qa_accounts(): void
     {
         $previousEnvironment = app()->environment();
+        $hadEnvValue = array_key_exists('QA_TEST_PASSWORD', $_ENV);
+        $previousEnvValue = $_ENV['QA_TEST_PASSWORD'] ?? null;
+        $hadServerValue = array_key_exists('QA_TEST_PASSWORD', $_SERVER);
+        $previousServerValue = $_SERVER['QA_TEST_PASSWORD'] ?? null;
+        $previousProcessValue = getenv('QA_TEST_PASSWORD');
+        putenv('QA_TEST_PASSWORD');
+        unset($_ENV['QA_TEST_PASSWORD'], $_SERVER['QA_TEST_PASSWORD']);
         app()->detectEnvironment(static fn () => 'production');
         Storage::fake('public');
 
@@ -90,6 +98,77 @@ class QaTestDataSeederTest extends TestCase
                 'status' => 'active',
             ]);
         } finally {
+            putenv($previousProcessValue === false ? 'QA_TEST_PASSWORD' : 'QA_TEST_PASSWORD='.$previousProcessValue);
+
+            if ($hadEnvValue) {
+                $_ENV['QA_TEST_PASSWORD'] = $previousEnvValue;
+            } else {
+                unset($_ENV['QA_TEST_PASSWORD']);
+            }
+
+            if ($hadServerValue) {
+                $_SERVER['QA_TEST_PASSWORD'] = $previousServerValue;
+            } else {
+                unset($_SERVER['QA_TEST_PASSWORD']);
+            }
+
+            app()->detectEnvironment(static fn () => $previousEnvironment);
+        }
+    }
+
+    public function test_production_seeds_login_ready_demo_accounts_when_password_secret_is_configured(): void
+    {
+        $previousEnvironment = app()->environment();
+        $hadEnvValue = array_key_exists('QA_TEST_PASSWORD', $_ENV);
+        $previousEnvValue = $_ENV['QA_TEST_PASSWORD'] ?? null;
+        $hadServerValue = array_key_exists('QA_TEST_PASSWORD', $_SERVER);
+        $previousServerValue = $_SERVER['QA_TEST_PASSWORD'] ?? null;
+        $previousProcessValue = getenv('QA_TEST_PASSWORD');
+        $password = 'qa-only-production-test-password';
+        putenv('QA_TEST_PASSWORD='.$password);
+        $_ENV['QA_TEST_PASSWORD'] = $password;
+        $_SERVER['QA_TEST_PASSWORD'] = $password;
+        app()->detectEnvironment(static fn () => 'production');
+        Storage::fake('local');
+        Storage::fake('public');
+
+        try {
+            $this->artisan('db:seed', [
+                '--force' => true,
+                '--no-interaction' => true,
+            ]);
+
+            $qaEmails = [
+                'admin@gosika.com.np',
+                'staff@gosika.com.np',
+                'sellerA@gosika.com.np',
+                'sellerB@gosika.com.np',
+                'sellerC@gosika.com.np',
+                'delivery1@gosika.com.np',
+                'delivery2@gosika.com.np',
+                'customerA@gosika.com.np',
+                'customerB@gosika.com.np',
+            ];
+            $this->assertSame(9, DB::table('users')->whereIn('email', $qaEmails)->where('status', 'active')->count());
+            $this->assertTrue(Hash::check(
+                $password,
+                DB::table('users')->where('email', 'admin@gosika.com.np')->value('password')
+            ));
+        } finally {
+            putenv($previousProcessValue === false ? 'QA_TEST_PASSWORD' : 'QA_TEST_PASSWORD='.$previousProcessValue);
+
+            if ($hadEnvValue) {
+                $_ENV['QA_TEST_PASSWORD'] = $previousEnvValue;
+            } else {
+                unset($_ENV['QA_TEST_PASSWORD']);
+            }
+
+            if ($hadServerValue) {
+                $_SERVER['QA_TEST_PASSWORD'] = $previousServerValue;
+            } else {
+                unset($_SERVER['QA_TEST_PASSWORD']);
+            }
+
             app()->detectEnvironment(static fn () => $previousEnvironment);
         }
     }
