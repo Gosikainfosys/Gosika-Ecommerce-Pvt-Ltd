@@ -20,7 +20,14 @@ class DatabaseSeeder extends Seeder
             SettingsSeeder::class,
             CatalogSeeder::class,
             CategoryCommissionSeeder::class,
-            QaTestDataSeeder::class,
         ]);
+
+        if (blank(env('QA_TEST_PASSWORD'))) {
+            $this->command?->warn('QA test accounts and marketplace fixtures were skipped because QA_TEST_PASSWORD is not set.');
+
+            return;
+        }
+
+        $this->call(QaTestDataSeeder::class);
     }
 }

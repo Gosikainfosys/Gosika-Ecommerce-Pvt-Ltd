@@ -12,6 +12,40 @@ class QaTestDataSeederTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_default_seeder_skips_qa_fixtures_when_password_is_not_configured(): void
+    {
+        $hadEnvValue = array_key_exists('QA_TEST_PASSWORD', $_ENV);
+        $previousEnvValue = $_ENV['QA_TEST_PASSWORD'] ?? null;
+        $hadServerValue = array_key_exists('QA_TEST_PASSWORD', $_SERVER);
+        $previousServerValue = $_SERVER['QA_TEST_PASSWORD'] ?? null;
+        $previousProcessValue = getenv('QA_TEST_PASSWORD');
+
+        putenv('QA_TEST_PASSWORD');
+        unset($_ENV['QA_TEST_PASSWORD'], $_SERVER['QA_TEST_PASSWORD']);
+
+        try {
+            $this->seed(DatabaseSeeder::class);
+
+            $this->assertSame(0, DB::table('users')->count());
+            $this->assertSame(5, DB::table('categories')->count());
+            $this->assertSame(4, DB::table('brands')->count());
+        } finally {
+            putenv($previousProcessValue === false ? 'QA_TEST_PASSWORD' : 'QA_TEST_PASSWORD='.$previousProcessValue);
+
+            if ($hadEnvValue) {
+                $_ENV['QA_TEST_PASSWORD'] = $previousEnvValue;
+            } else {
+                unset($_ENV['QA_TEST_PASSWORD']);
+            }
+
+            if ($hadServerValue) {
+                $_SERVER['QA_TEST_PASSWORD'] = $previousServerValue;
+            } else {
+                unset($_SERVER['QA_TEST_PASSWORD']);
+            }
+        }
+    }
+
     public function test_default_seeder_creates_repeatable_qa_fixtures_in_testing(): void
     {
         $hadEnvValue = array_key_exists('QA_TEST_PASSWORD', $_ENV);

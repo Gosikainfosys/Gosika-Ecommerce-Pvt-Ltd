@@ -27,7 +27,7 @@ For each flow, record the result beside the flow heading. Capture screenshots or
 
 Run against a non-production environment with a disposable database and payment-provider sandbox credentials. Do not send live payments or use real personal information.
 
-Prepare the test-only password in the approved secrets store as `QA_TEST_PASSWORD` (at least 12 characters). The same secret is applied to the seeded accounts; it is deliberately not stored in this checklist or source control. Seed with `php artisan db:seed` in a local or testing environment. The seeder is repeatable and does not truncate tables. It refuses to run outside local/testing, and the default seeder skips production.
+Prepare the test-only password in the approved secrets store as `QA_TEST_PASSWORD` (at least 12 characters). The same secret is applied to the seeded accounts; it is deliberately not stored in this checklist or source control. Run `php artisan db:seed` in a local or testing environment to seed QA accounts and marketplace fixtures. Without the password, the default seeder skips those QA fixtures with a warning while still seeding roles, geography, settings, and catalog data. The seeders are repeatable and do not truncate tables; QA fixtures refuse to run outside local/testing, and the default seeder skips production.
 
 | Reference | Account / role | Login ID | Credential location |
 |---|---|---|---|
