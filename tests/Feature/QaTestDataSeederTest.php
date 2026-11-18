@@ -30,9 +30,15 @@ class QaTestDataSeederTest extends TestCase
         try {
             $this->seed(DatabaseSeeder::class);
 
-            $this->assertSame(0, DB::table('users')->count());
+            $this->assertSame(1, DB::table('users')->count());
             $this->assertSame(5, DB::table('categories')->count());
             $this->assertSame(4, DB::table('brands')->count());
+            $this->assertSame(8, DB::table('products')->where('sku', 'like', 'DEMO-%')->count());
+            $this->assertSame(0, DB::table('products')->where('sku', 'like', 'QA-%')->count());
+            $this->assertDatabaseHas('users', [
+                'email' => 'demo.catalog@gosika.com.np',
+                'status' => 'suspended',
+            ]);
             $this->assertTrue(
                 Role::query()->where('name', Roles::VENDOR_ADMIN)->firstOrFail()
                     ->hasPermissionTo(Permissions::ORDERS_MANAGE)
@@ -51,6 +57,40 @@ class QaTestDataSeederTest extends TestCase
             } else {
                 unset($_SERVER['QA_TEST_PASSWORD']);
             }
+        }
+    }
+
+    public function test_database_seeder_runs_safe_seeders_in_production_without_qa_accounts(): void
+    {
+        $previousEnvironment = app()->environment();
+        app()->detectEnvironment(static fn () => 'production');
+        Storage::fake('public');
+
+        try {
+            $this->artisan('db:seed', [
+                '--class' => DatabaseSeeder::class,
+                '--force' => true,
+                '--no-interaction' => true,
+            ]);
+
+            $this->assertSame(8, DB::table('products')->where('sku', 'like', 'DEMO-%')->count());
+            $this->assertSame(0, DB::table('users')->whereIn('email', [
+                'admin@gosika.com.np',
+                'staff@gosika.com.np',
+                'sellerA@gosika.com.np',
+                'sellerB@gosika.com.np',
+                'sellerC@gosika.com.np',
+                'delivery1@gosika.com.np',
+                'delivery2@gosika.com.np',
+                'customerA@gosika.com.np',
+                'customerB@gosika.com.np',
+            ])->count());
+            $this->assertDatabaseHas('stores', [
+                'slug' => 'gosika-demo-catalog',
+                'status' => 'active',
+            ]);
+        } finally {
+            app()->detectEnvironment(static fn () => $previousEnvironment);
         }
     }
 

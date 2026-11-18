@@ -23,17 +23,16 @@ composer run dev
 
 ## Demo catalog
 
-The production `DatabaseSeeder` intentionally does not seed QA accounts or
-catalog fixtures. To explicitly publish the clearly labeled demo products and
-their generated images after deployment, run:
+Run the standard seeder to apply the production-safe seeders and publish the
+clearly labeled demo products and their generated images:
 
 ```sh
-php artisan db:seed --class='Database\Seeders\DemoCatalogSeeder' --force
+php artisan db:seed --force
 ```
 
-The seeder is repeatable and uses a suspended owner account. QA test accounts
-remain local/testing-only and require `QA_TEST_PASSWORD` from an environment
-secret; no default password is committed.
+The seeding is repeatable and uses a suspended demo owner account. QA test
+accounts remain local/testing-only and require `QA_TEST_PASSWORD` from an
+environment secret; no default password is committed.
 
 ## About Laravel
 
