@@ -21,6 +21,20 @@ php artisan migrate
 composer run dev
 ```
 
+## Demo catalog
+
+The production `DatabaseSeeder` intentionally does not seed QA accounts or
+catalog fixtures. To explicitly publish the clearly labeled demo products and
+their generated images after deployment, run:
+
+```sh
+php artisan db:seed --class='Database\Seeders\DemoCatalogSeeder' --force
+```
+
+The seeder is repeatable and uses a suspended owner account. QA test accounts
+remain local/testing-only and require `QA_TEST_PASSWORD` from an environment
+secret; no default password is committed.
+
 ## About Laravel
 
 Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
