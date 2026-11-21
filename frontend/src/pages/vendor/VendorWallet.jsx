@@ -5,7 +5,7 @@ import { useList } from '../../hooks/useApi'
 import StatusBadge from '../../components/commerce/StatusBadge'
 import { Skeleton } from '../../components/ui/Skeleton'
 import Pagination from '../../components/ui/Pagination'
-import Input from '../../components/ui/Input'
+import Select from '../../components/ui/Select'
 import Modal from '../../components/ui/Modal'
 import Button from '../../components/ui/Button'
 import Spinner from '../../components/ui/Spinner'
@@ -17,7 +17,12 @@ import { exportReportFromRows, companyFromBranding, personLabel } from '../../ut
 import { useBranding } from '../../context/BrandingContext'
 import { useAuth } from '../../context/AuthContext'
 
-const MIN_PAYOUT = 1000
+const OPEN_PAYOUT_STATUSES = ['pending', 'approved', 'processing']
+
+const isRequestableSettlement = (settlement) =>
+  settlement.status === 'eligible' &&
+  Number(settlement.net_payable || 0) > 0 &&
+  !(settlement.payout_requests || []).some((payout) => OPEN_PAYOUT_STATUSES.includes(payout.status))
 
 export default function VendorWallet() {
   const toast = useToast()
@@ -33,7 +38,12 @@ export default function VendorWallet() {
   const [toDate, setToDate] = useState('')
   const [appliedDates, setAppliedDates] = useState({ from: '', to: '' })
   const [payoutOpen, setPayoutOpen] = useState(false)
-  const [payoutAmount, setPayoutAmount] = useState('')
+  const [settlements, setSettlements] = useState([])
+  const [bankAccounts, setBankAccounts] = useState([])
+  const [settlementId, setSettlementId] = useState('')
+  const [bankAccountId, setBankAccountId] = useState('')
+  const [payoutLoading, setPayoutLoading] = useState(false)
+  const [payoutError, setPayoutError] = useState('')
   const [requesting, setRequesting] = useState(false)
 
   const load = () => {
@@ -65,21 +75,43 @@ export default function VendorWallet() {
 
   const requestPayout = async (e) => {
     e.preventDefault()
-    const amount = Number(payoutAmount)
-    if (!amount || amount <= 0) return toast.error('Enter a valid amount')
-    if (amount < MIN_PAYOUT) return toast.error(`Minimum payout is ${money(MIN_PAYOUT)}`)
-    if (amount > Number(wallet?.available_balance || 0)) return toast.error('Amount exceeds available balance')
+    if (!settlementId) return toast.error('Select an eligible settlement')
+    if (!bankAccountId) return toast.error('Select a bank account')
     setRequesting(true)
     try {
-      await api.post('/vendor/wallet/payouts', { amount })
-      toast.success('Payout requested. We will process it shortly.')
+      await api.post('/vendor/wallet/payouts', {
+        settlement_id: settlementId,
+        bank_account_id: bankAccountId,
+      })
+      toast.success('Payout requested. Pending approval.')
       setPayoutOpen(false)
-      setPayoutAmount('')
+      setSettlementId('')
+      setBankAccountId('')
       load()
     } catch (err) {
       toast.error(errorMessage(err))
     } finally {
       setRequesting(false)
+    }
+  }
+
+  const openPayoutModal = async () => {
+    setPayoutOpen(true)
+    setSettlementId('')
+    setBankAccountId('')
+    setPayoutError('')
+    setPayoutLoading(true)
+    try {
+      const [settlementsResponse, bankAccountsResponse] = await Promise.all([
+        api.get('/vendor/wallet/settlements', { params: { status: 'eligible', per_page: 100 } }),
+        api.get('/vendor/bank-accounts'),
+      ])
+      setSettlements((settlementsResponse.data?.data || []).filter(isRequestableSettlement))
+      setBankAccounts(bankAccountsResponse.data?.data || [])
+    } catch (err) {
+      setPayoutError(errorMessage(err))
+    } finally {
+      setPayoutLoading(false)
     }
   }
 
@@ -154,7 +186,7 @@ export default function VendorWallet() {
 
   if (error) return <div className="alert alert-error">{error}</div>
 
-  const available = Number(wallet?.available_balance || 0)
+  const selectedSettlement = settlements.find((settlement) => settlement.id === settlementId)
 
   return (
     <div className="flex flex-col gap-4">
@@ -163,7 +195,7 @@ export default function VendorWallet() {
           <h1>Wallet</h1>
           <p>Your earnings, balances and payout requests</p>
         </div>
-        <Button variant="primary" icon={Banknote} onClick={() => setPayoutOpen(true)} disabled={available < MIN_PAYOUT}>
+        <Button variant="primary" icon={Banknote} onClick={openPayoutModal}>
           Withdraw funds
         </Button>
       </div>
@@ -277,25 +309,53 @@ export default function VendorWallet() {
 
       <div className="alert alert-info" style={{ marginBottom: 0 }}>
         <AlertCircle size={18} />
-        <span>Balances update automatically after successful deliveries. Minimum payout amount is {money(MIN_PAYOUT)}.</span>
+        <span>Balances update automatically after successful deliveries. Payout requests are made for eligible settlements.</span>
       </div>
 
       <Modal open={payoutOpen} onClose={() => setPayoutOpen(false)} title="Withdraw funds">
         <form onSubmit={requestPayout} className="flex flex-col gap-2">
-          <p className="muted text-sm" style={{ marginTop: 0 }}>Request a payout to your registered bank account. Transfers are processed within 2-3 business days.</p>
-          <Input
-            label="Amount (NPR)"
-            type="number"
-            min={MIN_PAYOUT}
-            max={available}
-            step="1"
-            required
-            value={payoutAmount}
-            onChange={(e) => setPayoutAmount(e.target.value)}
-            hint={`Available: ${money(available)}`}
-          />
-          <div className="muted text-xs">Minimum: {money(MIN_PAYOUT)}</div>
-          <Button type="submit" block disabled={requesting}>
+          <p className="muted text-sm" style={{ marginTop: 0 }}>Choose an eligible settlement and bank account. The payout amount is locked to the settlement net payable.</p>
+          {payoutLoading ? (
+            <div className="flex items-center justify-center" style={{ padding: 20 }}>
+              <Spinner size={20} />
+            </div>
+          ) : payoutError ? (
+            <div className="alert alert-error">{payoutError}</div>
+          ) : (
+            <>
+              {!settlements.length && (
+                <div className="alert alert-info">No eligible settlements are currently available for payout.</div>
+              )}
+              {settlements.length > 0 && (
+                <Select label="Eligible settlement" required value={settlementId} onChange={(e) => setSettlementId(e.target.value)}>
+                  <option value="">Select a settlement</option>
+                  {settlements.map((settlement) => (
+                    <option key={settlement.id} value={settlement.id}>
+                      {settlement.settlement_number} · {money(settlement.net_payable)}
+                    </option>
+                  ))}
+                </Select>
+              )}
+              {selectedSettlement && (
+                <div className="alert alert-info">
+                  Payout amount: <strong>{money(selectedSettlement.net_payable)}</strong>
+                </div>
+              )}
+              {bankAccounts.length > 0 ? (
+                <Select label="Bank account" required value={bankAccountId} onChange={(e) => setBankAccountId(e.target.value)}>
+                  <option value="">Select bank account</option>
+                  {bankAccounts.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.bank_name} ••••{account.account_number}
+                    </option>
+                  ))}
+                </Select>
+              ) : (
+                <div className="alert alert-warning">No bank accounts found. Add one to your vendor profile before requesting a payout.</div>
+              )}
+            </>
+          )}
+          <Button type="submit" block disabled={requesting || payoutLoading || !!payoutError || !settlementId || !bankAccountId}>
             {requesting ? <Spinner size={15} color="#fff" /> : 'Request payout'}
           </Button>
         </form>
