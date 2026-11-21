@@ -141,10 +141,11 @@ class QaTestDataSeederTest extends TestCase
         $hadServerValue = array_key_exists('QA_TEST_PASSWORD', $_SERVER);
         $previousServerValue = $_SERVER['QA_TEST_PASSWORD'] ?? null;
         $previousProcessValue = getenv('QA_TEST_PASSWORD');
+        $previousConfigPassword = config('app.qa_test_password');
         $password = 'qa-only-production-test-password';
-        putenv('QA_TEST_PASSWORD='.$password);
-        $_ENV['QA_TEST_PASSWORD'] = $password;
-        $_SERVER['QA_TEST_PASSWORD'] = $password;
+        putenv('QA_TEST_PASSWORD');
+        unset($_ENV['QA_TEST_PASSWORD'], $_SERVER['QA_TEST_PASSWORD']);
+        config(['app.qa_test_password' => $password]);
         app()->detectEnvironment(static fn () => 'production');
         Storage::fake('local');
         Storage::fake('public');
@@ -186,6 +187,7 @@ class QaTestDataSeederTest extends TestCase
                 unset($_SERVER['QA_TEST_PASSWORD']);
             }
 
+            config(['app.qa_test_password' => $previousConfigPassword]);
             app()->detectEnvironment(static fn () => $previousEnvironment);
         }
     }
