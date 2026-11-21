@@ -57,14 +57,7 @@ class QaTestDataSeeder extends Seeder
 
     public function run(): void
     {
-        $password = (string) env('QA_TEST_PASSWORD');
-        if ($password === '' && $this->canPromptForQaPassword()) {
-            $password = (string) $this->command->secret(
-                'Enter a strong password for QA accounts (hidden; leave blank to disable logins):',
-                false
-            );
-        }
-
+        $password = (string) (config('app.qa_test_password') ?? env('QA_TEST_PASSWORD'));
         $loginEnabled = $password !== '';
         $password = $loginEnabled ? $password : Str::random(64);
 
@@ -85,17 +78,8 @@ class QaTestDataSeeder extends Seeder
         if ($loginEnabled) {
             $this->command?->info('QA test accounts and marketplace fixtures are ready.');
         } else {
-            $this->command?->warn('QA fixtures were seeded with login access disabled. Set QA_TEST_PASSWORD or rerun interactively to enable QA accounts.');
+            $this->command?->warn('QA fixtures were seeded with login access disabled. Configure QA_TEST_PASSWORD to enable QA accounts.');
         }
-    }
-
-    private function canPromptForQaPassword(): bool
-    {
-        return $this->command !== null
-            && ! $this->command->option('no-interaction')
-            && defined('STDIN')
-            && function_exists('stream_isatty')
-            && stream_isatty(STDIN);
     }
 
     private function seedUsers(string $password, bool $loginEnabled): void

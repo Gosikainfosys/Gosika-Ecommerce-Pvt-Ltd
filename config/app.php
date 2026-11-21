@@ -28,6 +28,8 @@ return [
 
     'env' => env('APP_ENV', 'production'),
 
+    'qa_test_password' => env('QA_TEST_PASSWORD'),
+
     /*
     |--------------------------------------------------------------------------
     | Application Debug Mode
