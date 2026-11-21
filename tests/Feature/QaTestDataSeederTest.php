@@ -173,6 +173,52 @@ class QaTestDataSeederTest extends TestCase
         }
     }
 
+    public function test_qa_vendor_wallet_does_not_start_with_unledgered_money(): void
+    {
+        $hadEnvValue = array_key_exists('QA_TEST_PASSWORD', $_ENV);
+        $previousEnvValue = $_ENV['QA_TEST_PASSWORD'] ?? null;
+        $hadServerValue = array_key_exists('QA_TEST_PASSWORD', $_SERVER);
+        $previousServerValue = $_SERVER['QA_TEST_PASSWORD'] ?? null;
+        $previousProcessValue = getenv('QA_TEST_PASSWORD');
+        $password = 'qa-only-test-password';
+        putenv('QA_TEST_PASSWORD='.$password);
+        $_ENV['QA_TEST_PASSWORD'] = $password;
+        $_SERVER['QA_TEST_PASSWORD'] = $password;
+        Storage::fake('local');
+        Storage::fake('public');
+
+        try {
+            $this->seed(DatabaseSeeder::class);
+            $vendorId = DB::table('vendors')
+                ->where('company_name', 'QA Alpine Goods')
+                ->value('id');
+            $wallet = DB::table('vendor_wallets')->where('vendor_id', $vendorId)->first();
+
+            $this->assertNotNull($wallet);
+            $this->assertSame(0.0, (float) $wallet->balance);
+            $this->assertSame(0.0, (float) $wallet->available_balance);
+            $this->assertSame(0.0, (float) $wallet->pending_balance);
+            $this->assertSame(
+                0,
+                DB::table('wallet_transactions')->where('wallet_id', $wallet->id)->count()
+            );
+        } finally {
+            putenv($previousProcessValue === false ? 'QA_TEST_PASSWORD' : 'QA_TEST_PASSWORD='.$previousProcessValue);
+
+            if ($hadEnvValue) {
+                $_ENV['QA_TEST_PASSWORD'] = $previousEnvValue;
+            } else {
+                unset($_ENV['QA_TEST_PASSWORD']);
+            }
+
+            if ($hadServerValue) {
+                $_SERVER['QA_TEST_PASSWORD'] = $previousServerValue;
+            } else {
+                unset($_SERVER['QA_TEST_PASSWORD']);
+            }
+        }
+    }
+
     public function test_default_seeder_creates_repeatable_qa_fixtures_in_testing(): void
     {
         $hadEnvValue = array_key_exists('QA_TEST_PASSWORD', $_ENV);
@@ -189,6 +235,7 @@ class QaTestDataSeederTest extends TestCase
 
         try {
             $this->seed(DatabaseSeeder::class);
+
             $legacyProduct = Product::query()->where('sku', 'QA-P-01')->firstOrFail()->replicate();
             $legacyProduct->forceFill([
                 'uuid' => null,

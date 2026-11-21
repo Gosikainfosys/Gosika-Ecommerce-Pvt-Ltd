@@ -1,168 +1,258 @@
-import React, { useEffect, useState } from 'react'
-import {
-  Printer, FileText, X, MapPin, Building2
-} from 'lucide-react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { FileText, Printer, X } from 'lucide-react'
 import api from '../../api/client'
 import Button from '../../components/ui/Button'
-import Spinner from '../../components/ui/Spinner'
 import EmptyState from '../../components/ui/EmptyState'
-import { money, formatDate, errorMessage, apiImage, getProductImage, handleImgError } from '../../utils/format'
+import ErrorState from '../../components/ui/ErrorState'
+import FilterBar from '../../components/admin/FilterBar'
+import Pagination from '../../components/ui/Pagination'
+import StatusBadge from '../../components/commerce/StatusBadge'
+import { Skeleton } from '../../components/ui/Skeleton'
+import { useList } from '../../hooks/useApi'
+import { useToast } from '../../context/ToastContext'
+import { useBranding } from '../../context/BrandingContext'
+import { apiImage, errorMessage, formatDateTime, getProductImage, handleImgError, money } from '../../utils/format'
+import { buildPackingSlipsHtml } from '../../utils/packingSlip'
 
-function Barcode({ value }) {
-  const bars = []
-  let seed = 0
-  for (const ch of String(value || 'GOSIKA0')) seed = (seed * 31 + ch.charCodeAt(0)) % 997
-  for (let i = 0; i < 32; i += 1) {
-    seed = (seed * 97 + 17) % 997
-    const w = 1 + (seed % 3)
-    bars.push(<span key={i} style={{ width: w, background: '#0f172a', display: 'inline-block', marginRight: 2 }} />)
-  }
-  return (
-    <div className="flex items-end justify-center gap-0" style={{ height: 34 }}>{bars}</div>
-  )
-}
-
-function LabelSheet({ seller, store, order }) {
-  const addr = order.shipping_address || order.order?.shipping_address || {}
-  const name = addr?.name || addr?.full_name || 'Customer'
-  const street = addr?.street || addr?.address_line_1 || ''
-  const addressLine = [street, addr?.municipality || addr?.city, addr?.district, addr?.province].filter(Boolean).join(', ')
-  const sellerAddr = store
-    ? [store.street || store.municipality || store.city, store.district, store.province].filter(Boolean).join(', ')
-    : (seller?.business_email || '')
-  const items = order.items || []
-
-  return (
-    <div className="print-area card" style={{ width: '100%', maxWidth: 360, margin: '0 auto', padding: 18, fontSize: 12, color: '#0f172a' }}>
-      <div className="flex items-center justify-between" style={{ borderBottom: '2px solid #0f172a', paddingBottom: 10, marginBottom: 12 }}>
-        <div className="flex items-center gap-2">
-          <Building2 size={18} color="var(--primary)" />
-          <span style={{ fontWeight: 800, fontSize: 15 }}>Gosika Shipping Label</span>
-        </div>
-        <span className="font-mono" style={{ fontSize: 10, opacity: 0.7 }}>NPR</span>
-      </div>
-
-      <div style={{ marginBottom: 12 }}>
-        <div className="muted" style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>Ship To</div>
-        <div style={{ fontWeight: 700, fontSize: 13 }}>{name}</div>
-        <div>{addressLine || 'Address not specified'}</div>
-        {addr?.phone && <div>Tel: {addr.phone}</div>}
-      </div>
-
-      <div style={{ marginBottom: 12, borderTop: '1px dashed #cbd5e1', paddingTop: 10 }}>
-        <div className="muted" style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>Pickup From</div>
-        <div style={{ fontWeight: 700 }}>{store?.name || seller?.company_name || 'Seller Store'}</div>
-        <div>{sellerAddr || '—'}</div>
-        {store?.contact_phone && <div>Tel: {store.contact_phone}</div>}
-      </div>
-
-      <div style={{ borderTop: '2px solid #0f172a', paddingTop: 10 }}>
-        <div className="font-mono" style={{ fontWeight: 800, fontSize: 16 }}>Order #{order.order_number || order.vendor_order_number || order.id}</div>
-        <div className="flex items-center justify-between wrap">
-          <div>{items.length} item(s)</div>
-          <div>Total {money(order.grand_total)}</div>
-        </div>
-        <div className="muted" style={{ fontSize: 10 }}>Placed {formatDate(order.created_at)}</div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginTop: 8 }}>
-          {items.map(item => (
-            <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 10 }}>
-              <img
-                src={item.image ? apiImage(item.image) : getProductImage(null)}
-                alt={item.product_name || 'Product'}
-                onError={handleImgError}
-                style={{ width: 28, height: 28, borderRadius: 4, objectFit: 'cover', flexShrink: 0 }}
-              />
-              <span>{item.product_name} · Qty {item.quantity}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div style={{ marginTop: 12 }}>
-        <Barcode value={order.order_number || order.vendor_order_number || order.id} />
-        <div className="font-mono" style={{ fontSize: 9, textAlign: 'center', letterSpacing: '0.16em', marginTop: 4 }}>
-          {order.order_number || order.vendor_order_number || order.id}
-        </div>
-      </div>
-    </div>
-  )
-}
+const ORDER_STATUSES = [
+  { value: 'pending', label: 'Pending' },
+  { value: 'payment_pending', label: 'Payment Pending' },
+  { value: 'confirmed', label: 'Confirmed' },
+  { value: 'accepted', label: 'Accepted' },
+  { value: 'rejected', label: 'Rejected' },
+  { value: 'processing', label: 'Processing' },
+  { value: 'preparing', label: 'Preparing' },
+  { value: 'ready_for_pickup', label: 'Ready for Pickup' },
+  { value: 'picked_up', label: 'Picked Up' },
+  { value: 'out_for_delivery', label: 'Out for Delivery' },
+  { value: 'delivered', label: 'Delivered' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'cancelled', label: 'Cancelled' },
+  { value: 'returned', label: 'Returned' },
+  { value: 'refunded', label: 'Refunded' },
+  { value: 'failed', label: 'Failed' },
+]
 
 export default function VendorShippingLabels() {
-  const [orders, setOrders] = useState([])
-  const [profile, setProfile] = useState(null)
-  const [store, setStore] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [printTarget, setPrintTarget] = useState(null)
+  const toast = useToast()
+  const branding = useBranding()
+  const [search, setSearch] = useState('')
+  const [status, setStatus] = useState('')
+  const [selectedOrders, setSelectedOrders] = useState(() => new Map())
+  const [printing, setPrinting] = useState(false)
+  const selectAllRef = useRef(null)
 
-  const load = () => {
-    setLoading(true)
-    setError(null)
-    Promise.all([
-      api.get('/vendor/orders', { params: { page: 1, per_page: 12 } }),
-      api.get('/vendor/me'),
-      api.get('/vendor/stores'),
-    ])
-      .then(([o, m, s]) => {
-        const orderList = o.data?.data?.data ?? o.data?.data ?? o.data ?? []
-        setOrders(Array.isArray(orderList) ? orderList : [])
-        setProfile(m.data?.data || null)
-        const storeList = s.data?.data?.data ?? s.data?.data ?? []
-        setStore(Array.isArray(storeList) ? storeList[0] || null : null)
-      })
-      .catch((e) => setError(e))
-      .finally(() => setLoading(false))
+  const fetcher = useCallback((page, pageSize) => api.get('/vendor/orders', {
+    params: {
+      page,
+      per_page: pageSize,
+      search: search || undefined,
+      status: status || undefined,
+    },
+  }), [search, status])
+  const { items: orders, meta, page, setPage, loading, error, reload } = useList(fetcher, {
+    deps: [search, status],
+    pageSize: 12,
+  })
+
+  const selectedOnPage = orders.filter(order => selectedOrders.has(order.id)).length
+  const allOnPageSelected = orders.length > 0 && selectedOnPage === orders.length
+
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = selectedOnPage > 0 && !allOnPageSelected
+    }
+  }, [selectedOnPage, allOnPageSelected])
+
+  const toggleOrder = (order) => {
+    setSelectedOrders(previous => {
+      const next = new Map(previous)
+      if (next.has(order.id)) {
+        next.delete(order.id)
+      } else {
+        next.set(order.id, order)
+      }
+      return next
+    })
   }
-  useEffect(load, [])
 
-  const print = () => {
-    window.print()
+  const togglePageSelection = () => {
+    setSelectedOrders(previous => {
+      const next = new Map(previous)
+      if (allOnPageSelected) {
+        orders.forEach(order => next.delete(order.id))
+      } else {
+        orders.forEach(order => next.set(order.id, order))
+      }
+      return next
+    })
+  }
+
+  const printSlips = async (ordersToPrint) => {
+    const printWindow = window.open('', '_blank', 'width=860,height=1000')
+    if (!printWindow) {
+      toast.error('Popup blocked. Allow popups for this page to print.')
+      return
+    }
+
+    setPrinting(true)
+    try {
+      const html = await buildPackingSlipsHtml(ordersToPrint, {
+        brandName: branding.brand_name || 'GOSIKA',
+        logoUrl: branding.logo_dark || branding.logo_light || '',
+      })
+      printWindow.document.write(html)
+      printWindow.document.close()
+      printWindow.focus()
+      setTimeout(() => printWindow.print(), 300)
+    } catch (printError) {
+      printWindow.close()
+      toast.error(errorMessage(printError, 'Could not generate the packing slips.'))
+    } finally {
+      setPrinting(false)
+    }
+  }
+
+  const resetFilters = () => {
+    setPage(1)
+    setSearch('')
+    setStatus('')
+  }
+
+  if (loading) {
+    return (
+      <div className="flex flex-col gap-3">
+        <Skeleton height={80} />
+        <Skeleton height={64} />
+        <Skeleton height={300} />
+      </div>
+    )
+  }
+
+  if (error) {
+    return <ErrorState message={errorMessage(error)} onRetry={reload} />
   }
 
   return (
-    <div>
+    <div style={{ paddingBottom: 40 }}>
       <div className="page-header">
         <div className="page-header-left">
-          <h1 style={{ fontSize: 22, fontWeight: 800 }}>Shipping Labels</h1>
+          <h1 style={{ fontSize: 22, fontWeight: 800 }}>Packing Slips</h1>
           <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 4 }}>
-            Generate and print shipping labels for your recent orders.
+            Search and filter orders, then print the original full-size packing slip for one or multiple orders.
           </p>
         </div>
       </div>
 
-      {loading ? (
-        <div className="card" style={{ padding: 50, textAlign: 'center' }}>
-          <Spinner size={24} color="var(--primary)" />
+      <FilterBar
+        search={search}
+        onSearchChange={value => {
+          setPage(1)
+          setSearch(value.trim())
+        }}
+        searchPlaceholder="Search order number, store, or item…"
+        debounceMs={350}
+        statusFilter={status || 'all'}
+        onStatusChange={value => {
+          setPage(1)
+          setStatus(value === 'all' ? '' : value)
+        }}
+        statusOptions={ORDER_STATUSES}
+        onReset={resetFilters}
+        hasActiveFilters={Boolean(search || status)}
+      />
+
+      <div className="card flex items-center justify-between wrap gap-2" style={{ padding: '12px 16px', marginBottom: 12 }}>
+        <div className="flex items-center gap-2">
+          <input
+            ref={selectAllRef}
+            type="checkbox"
+            checked={allOnPageSelected}
+            onChange={togglePageSelection}
+            aria-label="Select all orders on this page"
+            disabled={!orders.length || printing}
+          />
+          <span className="text-sm font-semibold">Select this page</span>
+          <span className="muted text-xs">
+            {selectedOrders.size} selected
+          </span>
         </div>
-      ) : error ? (
-        <EmptyState
-          icon={FileText}
-          title="Could not load orders"
-          message="Something went wrong while loading your orders for label printing."
-          action={<Button variant="outline" size="sm" onClick={load}>Try again</Button>}
-        />
-      ) : orders.length ? (
+        <div className="flex items-center gap-2">
+          {selectedOrders.size > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              icon={X}
+              disabled={printing}
+              onClick={() => setSelectedOrders(new Map())}
+            >
+              Clear selection
+            </Button>
+          )}
+          <Button
+            variant="primary"
+            size="sm"
+            icon={Printer}
+            disabled={!selectedOrders.size || printing}
+            onClick={() => printSlips(Array.from(selectedOrders.values()))}
+          >
+            {printing ? 'Preparing…' : `Print selected (${selectedOrders.size})`}
+          </Button>
+        </div>
+      </div>
+
+      {orders.length ? (
         <div className="flex flex-col gap-3">
-          {orders.map((o) => {
-            const addr = o.shipping_address || o.order?.shipping_address || {}
+          {orders.map(order => {
+            const address = order.shipping_address || order.order?.shipping_address || {}
+            const orderNumber = order.order_number || order.vendor_order_number || order.id
+            const selected = selectedOrders.has(order.id)
+
             return (
-              <div key={o.id} className="card" style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+              <div
+                key={order.id}
+                className="card flex items-center justify-between gap-3 wrap"
+                style={{ padding: '14px 18px', borderColor: selected ? 'var(--primary)' : undefined }}
+              >
                 <div className="flex items-center gap-3" style={{ minWidth: 0 }}>
+                  <input
+                    type="checkbox"
+                    checked={selected}
+                    onChange={() => toggleOrder(order)}
+                    aria-label={`Select packing slip for order ${orderNumber}`}
+                    disabled={printing}
+                  />
                   <img
-                    src={o.items?.[0]?.image ? apiImage(o.items[0].image) : getProductImage(null)}
-                    alt={o.items?.[0]?.product_name || 'Product'}
+                    src={order.items?.[0]?.image ? apiImage(order.items[0].image) : getProductImage(null)}
+                    alt={order.items?.[0]?.product_name || 'Product'}
                     onError={handleImgError}
-                    style={{ width: 42, height: 42, borderRadius: 8, objectFit: 'cover', flexShrink: 0 }}
+                    style={{ width: 44, height: 44, borderRadius: 8, objectFit: 'cover', flexShrink: 0 }}
                   />
                   <div style={{ minWidth: 0 }}>
-                    <div className="font-mono font-bold text-sm" style={{ color: 'var(--primary)' }}>#{o.order_number || o.vendor_order_number || o.id}</div>
-                    <div className="muted text-xs mt-0.5 line-clamp-1">{addr?.name || 'Customer'} · {o.items?.length || 1} item({o.items?.length === 1 ? '' : 's'}) · {money(o.grand_total)}</div>
-                    <div className="muted text-xs line-clamp-1 flex items-center gap-1"><MapPin size={11} /> {[addr?.municipality || addr?.city, addr?.district, addr?.province].filter(Boolean).join(', ') || 'Address not set'}</div>
+                    <div className="flex items-center gap-2 wrap">
+                      <span className="font-mono font-bold text-sm" style={{ color: 'var(--primary)' }}>
+                        #{orderNumber}
+                      </span>
+                      <StatusBadge status={order.status} />
+                    </div>
+                    <div className="muted text-xs mt-0.5">
+                      {address.name || address.full_name || order.customer_name || 'Customer'}
+                      {' · '}{order.items?.length || 0} item(s)
+                      {' · '}{money(order.grand_total)}
+                    </div>
+                    <div className="muted text-xs mt-0.5">
+                      {order.store_name || 'Store'} · {formatDateTime(order.created_at)}
+                    </div>
                   </div>
                 </div>
-                <Button variant="primary" size="sm" icon={Printer} onClick={() => setPrintTarget(o)}>
-                  Print Label
+                <Button
+                  variant="outline"
+                  size="sm"
+                  icon={Printer}
+                  disabled={printing}
+                  onClick={() => printSlips([order])}
+                >
+                  Print Slip
                 </Button>
               </div>
             )
@@ -171,46 +261,20 @@ export default function VendorShippingLabels() {
       ) : (
         <EmptyState
           icon={FileText}
-          title="No orders to label"
-          message="When orders are placed, you'll be able to print shipping labels right here."
+          title={search || status ? 'No matching packing slips' : 'No orders to print'}
+          message={search || status
+            ? 'Try another search or clear the selected filters.'
+            : 'When orders are placed, their packing slips will appear here.'}
         />
       )}
 
-      {printTarget && (
-        <>
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.55)', zIndex: 999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-            <div className="card" style={{ padding: 18, maxHeight: '92vh', overflow: 'auto', position: 'relative' }}>
-              <button
-                className="icon-btn icon-btn-sm"
-                style={{ position: 'absolute', top: 10, right: 10, border: 'none', zIndex: 5 }}
-                onClick={() => setPrintTarget(null)}
-                aria-label="Close"
-              >
-                <X size={16} />
-              </button>
-              <div className="muted text-xs mb-3">Label preview — click Print to produce a physical copy.</div>
-              <LabelSheet seller={profile} store={store} order={printTarget} />
-              <div className="flex items-center justify-center gap-2 mt-4">
-                <Button variant="outline" size="sm" onClick={() => setPrintTarget(null)}>Cancel</Button>
-                <Button variant="primary" size="sm" icon={Printer} onClick={print}>Print</Button>
-              </div>
-            </div>
-          </div>
-
-          <div className="print-only">
-            <LabelSheet seller={profile} store={store} order={printTarget} />
-          </div>
-
-          <style>{`
-            @media print {
-              body * { visibility: hidden !important; }
-              .print-only, .print-only * { visibility: visible !important; }
-              .print-only { position: absolute; left: 0; top: 0; width: 100%; }
-              .print-only .print-area { max-width: 90mm; border: 0; box-shadow: none; padding: 0; margin: 0 auto; }
-            }
-          `}</style>
-        </>
-      )}
+      <Pagination
+        page={page}
+        lastPage={meta.last_page}
+        total={meta.total}
+        perPage={meta.per_page}
+        onChange={setPage}
+      />
     </div>
   )
 }

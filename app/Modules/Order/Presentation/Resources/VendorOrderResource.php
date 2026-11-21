@@ -106,8 +106,12 @@ class VendorOrderResource extends JsonResource
 
         return [
             'id' => $this->uuid,
+            'ledger_reference_id' => (int) $this->getKey(),
             'order_id' => $this->order?->uuid,
             'order_number' => $this->order?->order_number,
+            'customer_name' => $this->order?->user?->name ?? $this->order?->user?->full_name ?? $shipping['name'] ?? null,
+            'payment_method' => $this->order?->payment_method,
+            'payment_status' => $this->order?->payment_status?->value,
             'vendor_order_number' => $this->vendor_order_number,
             'vendor_id' => $this->vendor?->uuid,
             'vendor_name' => $this->vendor?->company_name,

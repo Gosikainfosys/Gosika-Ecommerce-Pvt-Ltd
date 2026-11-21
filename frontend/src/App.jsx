@@ -57,9 +57,7 @@ import VendorOrders from './pages/vendor/VendorOrders'
 import VendorOrderDetail from './pages/vendor/VendorOrderDetail'
 import VendorProducts from './pages/vendor/VendorProducts'
 import VendorProductForm from './pages/vendor/VendorProductForm'
-import VendorWallet from './pages/vendor/VendorWallet'
-import VendorPayouts from './pages/vendor/VendorPayouts'
-import VendorSettlements from './pages/vendor/VendorSettlements'
+import VendorFinance from './pages/vendor/VendorFinance'
 import VendorStores from './pages/vendor/VendorStores'
 import VendorStoreEdit from './pages/vendor/VendorStoreEdit'
 import VendorBankAccounts from './pages/vendor/VendorBankAccounts'
@@ -73,9 +71,6 @@ import VendorPromotions from './pages/vendor/Promotions'
 import VendorAnalytics from './pages/vendor/Analytics'
 import VendorStoreSettings from './pages/vendor/StoreSettings'
 import VendorReturns from './pages/vendor/Returns'
-import VendorEarnings from './pages/vendor/Earnings'
-import VendorCommission from './pages/vendor/Commission'
-import VendorTransactions from './pages/vendor/Transactions'
 import VendorCoupons from './pages/vendor/Coupons'
 import VendorNotifications from './pages/vendor/Notifications'
 import VendorSupport from './pages/vendor/Support'
@@ -357,10 +352,13 @@ export default function App() {
         <Route path="coupons" element={<VendorCoupons />} />
         <Route path="promotions" element={<VendorPromotions />} />
         <Route path="analytics" element={<VendorAnalytics />} />
-        <Route path="wallet" element={<VendorWallet />} />
-        <Route path="earnings" element={<VendorEarnings />} />
-        <Route path="commission" element={<VendorCommission />} />
-        <Route path="transactions" element={<VendorTransactions />} />
+        <Route path="finance" element={<Navigate to="/vendor/finance/wallet" replace />} />
+        <Route path="finance/wallet" element={<VendorFinance />} />
+        <Route path="finance/analytics" element={<VendorFinance />} />
+        <Route path="wallet" element={<Navigate to="/vendor/finance/wallet" replace />} />
+        <Route path="earnings" element={<Navigate to="/vendor/finance/analytics" replace />} />
+        <Route path="commission" element={<Navigate to="/vendor/finance/analytics" replace />} />
+        <Route path="transactions" element={<Navigate to="/vendor/finance/wallet" replace />} />
         <Route path="returns" element={<VendorReturns />} />
         <Route path="store-settings" element={<VendorStoreSettings />} />
         <Route path="notifications" element={<VendorNotifications />} />
@@ -368,8 +366,8 @@ export default function App() {
         <Route path="support" element={<VendorSupport />} />
         <Route path="support/new" element={<VendorNewTicket />} />
         <Route path="security" element={<VendorSecurity />} />
-        <Route path="payouts" element={<VendorPayouts />} />
-        <Route path="settlements" element={<VendorSettlements />} />
+        <Route path="payouts" element={<Navigate to="/vendor/finance/wallet" replace />} />
+        <Route path="settlements" element={<Navigate to="/vendor/finance/wallet" replace />} />
         <Route path="shipping" element={<VendorShipping />} />
         <Route path="shipping/labels" element={<VendorShippingLabels />} />
         <Route path="verification" element={<VendorVerification />} />

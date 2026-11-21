@@ -8,7 +8,7 @@ use Illuminate\Console\Command;
 class ProcessOrderConfirmationsCommand extends Command
 {
     protected $signature = 'orders:process-confirmations';
-    protected $description = 'Process automatic order confirmations and auto-cancel orders past the vendor confirmation deadline.';
+    protected $description = 'Process order lifecycle and release matured vendor earnings.';
 
     public function handle(OrderConfirmationSchedulerService $scheduler): int
     {
@@ -16,7 +16,7 @@ class ProcessOrderConfirmationsCommand extends Command
 
         $results = $scheduler->run();
 
-        $this->info("Completed: {$results['auto_confirmed']} order(s) auto-confirmed, {$results['expired_cancelled']} expired order(s) cancelled.");
+        $this->info("Completed: {$results['auto_confirmed']} order(s) auto-confirmed, {$results['expired_cancelled']} expired order(s) cancelled, {$results['completed']} return-window order(s) completed, {$results['earnings_released']} matured order earning(s) released.");
 
         return Command::SUCCESS;
     }

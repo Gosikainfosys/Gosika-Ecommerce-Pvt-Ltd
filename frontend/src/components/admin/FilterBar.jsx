@@ -209,7 +209,16 @@ export default function FilterBar({
         )}
 
         {extraFilters && (
-          <div style={{ flex: '1 1 170px', minWidth: 150, maxWidth: 220, width: '100%' }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              flex: '1 1 170px',
+              flexWrap: 'wrap',
+              gap: 8,
+              minWidth: 150,
+            }}
+          >
             {extraFilters}
           </div>
         )}

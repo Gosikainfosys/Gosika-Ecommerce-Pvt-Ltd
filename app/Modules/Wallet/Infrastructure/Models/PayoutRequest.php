@@ -11,10 +11,15 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class PayoutRequest extends BaseModel
 {
+    public const FUNDING_SOURCE_SETTLEMENT = 'settlement';
+
+    public const FUNDING_SOURCE_AVAILABLE_BALANCE = 'available_balance';
+
     protected $fillable = [
         'payout_number',
         'vendor_id',
         'settlement_id',
+        'funding_source',
         'wallet_id',
         'bank_account_id',
         'amount',

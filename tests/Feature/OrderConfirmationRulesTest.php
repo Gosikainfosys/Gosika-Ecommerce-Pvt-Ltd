@@ -29,6 +29,7 @@ use App\Modules\Shared\Domain\Enums\OrderStatus;
 use App\Modules\Shared\Domain\Enums\PaymentMethod;
 use App\Modules\Shared\Domain\Enums\PaymentStatus;
 use App\Modules\Shared\Domain\Enums\RefundStatus;
+use App\Modules\Shared\Domain\Enums\SettlementStatus;
 use App\Modules\Shared\Domain\Enums\ReturnStatus;
 use App\Modules\Shared\Domain\Enums\StoreStatus;
 use App\Modules\Shared\Domain\Enums\UserStatus;
@@ -40,6 +41,7 @@ use App\Modules\Shipping\Infrastructure\Models\DeliveryPartner;
 use App\Modules\Vendor\Infrastructure\Models\Store;
 use App\Modules\Vendor\Infrastructure\Models\Vendor;
 use App\Modules\Wallet\Application\Services\WalletService;
+use App\Modules\Wallet\Infrastructure\Models\Settlement;
 use App\Modules\Wallet\Infrastructure\Models\VendorWallet;
 use App\Modules\Wallet\Infrastructure\Models\WalletTransaction;
 use Carbon\Carbon;
@@ -1209,10 +1211,12 @@ class OrderConfirmationRulesTest extends TestCase
     public function test_completed_refunds_reduce_vendor_settlement_and_pending_wallet_balance(): void
     {
         Setting::set('return.window_days', 7, 'return', 'integer', true);
+        $this->vendor->update(['meta' => ['settlement_cycle_days' => 7]]);
         [$order, $vendorOrder, $customer] = $this->createOrder(OrderStatus::DELIVERED, isCod: false);
         $order->update(['completed_at' => now()->subDays(10)]);
         $vendorOrder->update([
             'status' => OrderStatus::DELIVERED,
+            'delivery_status' => DeliveryStatus::DELIVERED,
             'grand_total' => 2500,
             'commission_rate' => 8,
             'commission_amount' => 200,
@@ -1260,6 +1264,128 @@ class OrderConfirmationRulesTest extends TestCase
             'balance_before' => 2300,
             'balance_after' => 2200,
         ]);
+    }
+
+    public function test_matured_paid_delivered_order_earnings_become_available_once_after_both_waits(): void
+    {
+        Setting::set('return.window_days', 7, 'return', 'integer', true);
+        $this->vendor->update(['meta' => ['settlement_cycle_days' => 14]]);
+        [$order, $vendorOrder] = $this->createOrder(OrderStatus::COMPLETED, isCod: false);
+        $order->update(['completed_at' => now()->subDays(13)]);
+        $vendorOrder->update([
+            'status' => OrderStatus::COMPLETED,
+            'delivery_status' => DeliveryStatus::DELIVERED,
+            'grand_total' => 980,
+            'commission_rate' => 10,
+            'commission_amount' => 90,
+            'vendor_payable' => 810,
+        ]);
+        $scheduler = app(OrderConfirmationSchedulerService::class);
+
+        $this->assertSame(0, $scheduler->run()['earnings_released']);
+
+        $order->update(['completed_at' => now()->subDays(15)]);
+        $this->assertSame(1, $scheduler->run()['earnings_released']);
+
+        $walletService = app(WalletService::class);
+        $wallet = $walletService->walletForVendor($this->vendor);
+        $settlement = Settlement::query()->firstOrFail();
+        $this->assertSame('810.00', $wallet->balance);
+        $this->assertSame('810.00', $wallet->available_balance);
+        $this->assertSame('0.00', $wallet->pending_balance);
+        $this->assertSame('810.00', $settlement->net_payable);
+        $this->assertSame(SettlementStatus::PAID, $settlement->status);
+
+        $this->assertSame(0, $scheduler->run()['earnings_released']);
+        $this->assertSame(1, WalletTransaction::query()
+            ->where('wallet_id', $wallet->id)
+            ->where('transaction_type', 'credit_earnings')
+            ->where('reference_type', 'vendor_order')
+            ->where('reference_id', $vendorOrder->id)
+            ->count());
+        $this->assertSame(1, WalletTransaction::query()
+            ->where('wallet_id', $wallet->id)
+            ->where('transaction_type', 'credit_settlement')
+            ->where('reference_id', $settlement->id)
+            ->count());
+    }
+
+    public function test_return_window_remains_a_minimum_when_vendor_cycle_is_shorter(): void
+    {
+        Setting::set('return.window_days', 21, 'return', 'integer', true);
+        $this->vendor->update(['meta' => ['settlement_cycle_days' => 14]]);
+        [$order, $vendorOrder] = $this->createOrder(OrderStatus::COMPLETED, isCod: false);
+        $order->update(['completed_at' => now()->subDays(20)]);
+        $vendorOrder->update([
+            'status' => OrderStatus::COMPLETED,
+            'delivery_status' => DeliveryStatus::DELIVERED,
+            'vendor_payable' => 2300,
+            'grand_total' => 2500,
+            'commission_rate' => 8,
+            'commission_amount' => 200,
+        ]);
+        $walletService = app(WalletService::class);
+
+        $this->assertSame(0, $walletService->releaseMaturedVendorEarnings());
+
+        $order->update(['completed_at' => now()->subDays(22)]);
+        $this->assertSame(1, $walletService->releaseMaturedVendorEarnings());
+        $this->assertSame('2300.00', $walletService->walletForVendor($this->vendor)->available_balance);
+    }
+
+    public function test_matured_earnings_require_paid_and_delivered_order_status(): void
+    {
+        Setting::set('return.window_days', 7, 'return', 'integer', true);
+        $this->vendor->update(['meta' => ['settlement_cycle_days' => 7]]);
+        [$order, $vendorOrder] = $this->createOrder(OrderStatus::COMPLETED, isCod: true);
+        $order->update(['completed_at' => now()->subDays(20)]);
+        $vendorOrder->update([
+            'status' => OrderStatus::COMPLETED,
+            'delivery_status' => DeliveryStatus::PENDING,
+            'vendor_payable' => 810,
+            'commission_rate' => 10,
+            'commission_amount' => 90,
+        ]);
+        $walletService = app(WalletService::class);
+
+        $this->assertSame(0, $walletService->releaseMaturedVendorEarnings());
+
+        $order->update(['payment_status' => OrderPaymentStatus::PAID]);
+        $this->assertSame(0, $walletService->releaseMaturedVendorEarnings());
+
+        $vendorOrder->update(['delivery_status' => DeliveryStatus::DELIVERED]);
+        $this->assertSame(1, $walletService->releaseMaturedVendorEarnings());
+        $this->assertSame('810.00', $walletService->walletForVendor($this->vendor)->available_balance);
+    }
+
+    public function test_matured_existing_settlement_is_distributed_to_available_balance(): void
+    {
+        Setting::set('return.window_days', 7, 'return', 'integer', true);
+        $this->vendor->update(['meta' => ['settlement_cycle_days' => 14]]);
+        [$order, $vendorOrder] = $this->createOrder(OrderStatus::COMPLETED, isCod: false);
+        $order->update(['completed_at' => now()->subDays(15)]);
+        $vendorOrder->update([
+            'status' => OrderStatus::COMPLETED,
+            'delivery_status' => DeliveryStatus::DELIVERED,
+            'grand_total' => 980,
+            'commission_rate' => 10,
+            'commission_amount' => 90,
+            'vendor_payable' => 810,
+        ]);
+        $walletService = app(WalletService::class);
+        $settlement = $walletService->settleVendor(
+            $this->vendor,
+            now()->subDays(15)->startOfDay(),
+            now()->subDays(15)->endOfDay()
+        );
+        $this->assertSame('810.00', $walletService->walletForVendor($this->vendor)->pending_balance);
+
+        $results = app(OrderConfirmationSchedulerService::class)->run();
+
+        $this->assertSame(1, $results['earnings_released']);
+        $this->assertSame(SettlementStatus::PAID, $settlement->fresh()->status);
+        $this->assertSame('810.00', $walletService->walletForVendor($this->vendor)->available_balance);
+        $this->assertSame('0.00', $walletService->walletForVendor($this->vendor)->pending_balance);
     }
 
     public function test_completed_refund_is_deducted_once_from_pending_then_available_wallet_balance(): void

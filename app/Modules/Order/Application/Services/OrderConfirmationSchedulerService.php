@@ -15,6 +15,7 @@ use App\Modules\Shared\Domain\Enums\OrderStatus;
 use App\Modules\Shared\Domain\Enums\PaymentMethod;
 use App\Modules\Shared\Domain\Enums\PaymentStatus;
 use App\Modules\Shipping\Application\Services\DeliveryService;
+use App\Modules\Wallet\Application\Services\WalletService;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -24,6 +25,7 @@ class OrderConfirmationSchedulerService
     public function __construct(
         protected NotificationDispatcher $dispatcher,
         protected DeliveryService $deliveryService,
+        protected WalletService $walletService,
         protected ?RefundService $refundService = null,
     ) {
         if (! $this->refundService && class_exists(RefundService::class)) {
@@ -42,11 +44,13 @@ class OrderConfirmationSchedulerService
         $expiredCount = $this->processExpiredVendorConfirmations();
         $autoConfirmedCount = $this->processAutoConfirmations();
         $completedCount = $this->processExpiredReturnWindows();
+        $releasedEarningsCount = $this->walletService->releaseMaturedVendorEarnings();
 
         return [
             'expired_cancelled' => $expiredCount,
             'auto_confirmed' => $autoConfirmedCount,
             'completed' => $completedCount,
+            'earnings_released' => $releasedEarningsCount,
         ];
     }
 

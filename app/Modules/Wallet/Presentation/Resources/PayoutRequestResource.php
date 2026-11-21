@@ -11,10 +11,12 @@ class PayoutRequestResource extends JsonResource
     {
         return [
             'id' => $this->uuid,
+            'ledger_reference_id' => (int) $this->getKey(),
             'payout_number' => $this->payout_number,
             'vendor_id' => $this->vendor?->uuid,
             'vendor_name' => $this->whenLoaded('vendor', fn () => $this->vendor?->company_name),
             'settlement_id' => $this->settlement?->uuid,
+            'funding_source' => $this->funding_source,
             'settlement' => $this->whenLoaded('settlement', fn () => $this->settlement ? [
                 'id' => $this->settlement->uuid,
                 'settlement_number' => $this->settlement->settlement_number,

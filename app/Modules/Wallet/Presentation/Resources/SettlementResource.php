@@ -11,6 +11,7 @@ class SettlementResource extends JsonResource
     {
         return [
             'id' => $this->uuid,
+            'ledger_reference_id' => (int) $this->getKey(),
             'settlement_number' => $this->settlement_number,
             'vendor_id' => $this->vendor?->uuid,
             'vendor_name' => $this->whenLoaded('vendor', fn () => $this->vendor?->company_name),

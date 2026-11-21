@@ -125,24 +125,33 @@ class VendorWalletController extends Controller
     {
         $vendor = $this->vendorFor($request);
 
-        $settlement = Settlement::query()
-            ->where('uuid', $request->input('settlement_id'))
-            ->where('vendor_id', $vendor->id)
-            ->first();
-
-        if (! $settlement) {
-            throw new DomainException('Settlement not found for this vendor.', 422);
-        }
-
         $bankAccount = $request->input('bank_account_id')
             ? $this->bankAccountId($vendor, $request->input('bank_account_id'))
             : null;
 
-        $payout = $this->service->requestPayout(
-            $settlement,
-            $bankAccount,
-            $request->user()
-        );
+        if ($request->filled('amount')) {
+            $payout = $this->service->requestAvailableBalancePayout(
+                $vendor,
+                (float) $request->input('amount'),
+                $bankAccount,
+                $request->user()
+            );
+        } else {
+            $settlement = Settlement::query()
+                ->where('uuid', $request->input('settlement_id'))
+                ->where('vendor_id', $vendor->id)
+                ->first();
+
+            if (! $settlement) {
+                throw new DomainException('Settlement not found for this vendor.', 422);
+            }
+
+            $payout = $this->service->requestPayout(
+                $settlement,
+                $bankAccount,
+                $request->user()
+            );
+        }
 
         return Response::created(new PayoutRequestResource($payout), 'Payout requested.');
     }

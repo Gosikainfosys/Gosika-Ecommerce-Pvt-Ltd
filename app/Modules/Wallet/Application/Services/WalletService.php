@@ -3,11 +3,12 @@
 namespace App\Modules\Wallet\Application\Services;
 
 use App\Modules\Identity\Infrastructure\Models\User;
-use App\Modules\Order\Infrastructure\Models\Order;
+use App\Modules\Order\Application\Services\OrderReturnWindow;
 use App\Modules\Order\Infrastructure\Models\VendorOrder;
 use App\Modules\Payment\Infrastructure\Models\Refund;
 use App\Modules\Platform\Infrastructure\Models\Setting;
 use App\Modules\Shared\Domain\Enums\CommissionStatus;
+use App\Modules\Shared\Domain\Enums\DeliveryStatus;
 use App\Modules\Shared\Domain\Enums\OrderPaymentStatus;
 use App\Modules\Shared\Domain\Enums\OrderStatus;
 use App\Modules\Shared\Domain\Enums\PayoutStatus;
@@ -75,10 +76,10 @@ class WalletService
         return $commission;
     }
 
-    public function creditEarnings(VendorOrder $vendorOrder): Commission
+    public function creditEarnings(VendorOrder $vendorOrder, ?Vendor $vendor = null): Commission
     {
-        if (! $this->isEligibleForEarnings($vendorOrder)) {
-            throw new DomainException('Order is not yet eligible for earnings credit.', 422);
+        if (! $this->isEligibleForEarnings($vendorOrder, $vendor)) {
+            throw new DomainException('Order has not completed its return and settlement waiting periods.', 422);
         }
 
         return DB::transaction(function () use ($vendorOrder) {
@@ -110,6 +111,7 @@ class WalletService
     public function settleVendor(Vendor $vendor, Carbon $periodStart, Carbon $periodEnd): Settlement
     {
         return DB::transaction(function () use ($vendor, $periodStart, $periodEnd) {
+            $vendor = Vendor::query()->whereKey($vendor->id)->lockForUpdate()->firstOrFail();
             $eligible = $this->eligibleVendorOrders($vendor, $periodStart, $periodEnd);
 
             if ($eligible->isEmpty()) {
@@ -117,7 +119,7 @@ class WalletService
             }
 
             foreach ($eligible as $vendorOrder) {
-                $this->creditEarnings($vendorOrder);
+                $this->creditEarnings($vendorOrder, $vendor);
             }
 
             $grossSales = round($eligible->sum('grand_total'), 2);
@@ -153,7 +155,12 @@ class WalletService
                 ]);
             }
             $adjustmentsTotal = 0.0;
-            $netPayable = max(0, round($grossSales - $commissionTotal - $refundsTotal, 2));
+            $netPayable = max(0, round(
+                (float) $eligible->sum(fn (VendorOrder $vendorOrder) => (float) $vendorOrder->vendor_payable)
+                - $refundsTotal
+                + $adjustmentsTotal,
+                2
+            ));
 
             $settlement = new Settlement();
             $settlement->settlement_number = ReferenceNumber::unique('SET');
@@ -177,6 +184,106 @@ class WalletService
 
             return $settlement->fresh();
         });
+    }
+
+    public function releaseMaturedVendorEarnings(): int
+    {
+        $vendorIds = VendorOrder::query()
+            ->whereIn('status', [OrderStatus::DELIVERED, OrderStatus::COMPLETED])
+            ->where('delivery_status', DeliveryStatus::DELIVERED)
+            ->whereHas('order', fn ($query) => $query->whereIn('payment_status', [
+                OrderPaymentStatus::PAID,
+                OrderPaymentStatus::PARTIALLY_REFUNDED,
+            ]))
+            ->distinct()
+            ->pluck('vendor_id');
+
+        $releasedOrderCount = 0;
+
+        foreach ($vendorIds as $vendorId) {
+            $releasedOrderCount += DB::transaction(function () use ($vendorId): int {
+                $vendor = Vendor::query()->whereKey($vendorId)->lockForUpdate()->firstOrFail();
+                $releasedCount = $this->distributeMaturedEligibleSettlements($vendor);
+                $maturedOrders = $this->eligibleVendorOrders(
+                    $vendor,
+                    Carbon::create(1900, 1, 1),
+                    now()->endOfDay()
+                );
+
+                if ($maturedOrders->isEmpty()) {
+                    return $releasedCount;
+                }
+
+                $deliveredAt = $maturedOrders
+                    ->map(fn (VendorOrder $vendorOrder) => OrderReturnWindow::deliveredAt($vendorOrder->order))
+                    ->filter();
+
+                if ($deliveredAt->isEmpty()) {
+                    return $releasedCount;
+                }
+
+                $settlement = $this->settleVendor(
+                    $vendor,
+                    $deliveredAt->min()->copy()->startOfDay(),
+                    $deliveredAt->max()->copy()->endOfDay()
+                );
+                $this->distributeSettlement($settlement);
+
+                return $releasedCount + $maturedOrders->count();
+            });
+        }
+
+        return $releasedOrderCount;
+    }
+
+    protected function distributeMaturedEligibleSettlements(Vendor $vendor): int
+    {
+        $releasedOrderCount = 0;
+        $settlements = Settlement::query()
+            ->where('vendor_id', $vendor->id)
+            ->where('status', SettlementStatus::ELIGIBLE->value)
+            ->lockForUpdate()
+            ->get();
+
+        foreach ($settlements as $settlement) {
+            $orderIds = collect($settlement->meta['vendor_order_ids'] ?? [])
+                ->map(fn ($id) => (int) $id)
+                ->filter()
+                ->unique()
+                ->values();
+
+            if ($orderIds->isEmpty()) {
+                continue;
+            }
+
+            $orders = VendorOrder::query()
+                ->where('vendor_id', $vendor->id)
+                ->whereIn('id', $orderIds)
+                ->with(['order.vendorOrders.assignments', 'vendor'])
+                ->get();
+
+            if ($orders->count() !== $orderIds->count()
+                || $orders->contains(fn (VendorOrder $order) => ! $this->isEligibleForEarnings($order, $vendor))) {
+                continue;
+            }
+
+            $hasOpenPayout = $settlement->payoutRequests()
+                ->whereIn('status', [
+                    PayoutStatus::PENDING->value,
+                    PayoutStatus::APPROVED->value,
+                    PayoutStatus::PROCESSING->value,
+                ])
+                ->exists();
+
+            if ($hasOpenPayout) {
+                continue;
+            }
+
+            $this->distributeSettlement($settlement);
+            $releasedOrderCount += $orders->count();
+        }
+
+        return $releasedOrderCount;
     }
 
     public function holdSettlement(Settlement $settlement, User $user, string $reason): Settlement
@@ -223,15 +330,18 @@ class WalletService
         });
     }
 
-    public function distributeSettlement(Settlement $settlement, User $user): Settlement
+    public function distributeSettlement(Settlement $settlement, ?User $user = null): Settlement
     {
-        if (! in_array($settlement->status->value, [SettlementStatus::ELIGIBLE->value, SettlementStatus::PROCESSING->value], true)) {
-            throw new DomainException('Only eligible or processing settlements can be distributed.', 422);
-        }
-
         return DB::transaction(function () use ($settlement, $user) {
-            $settlement = $settlement->fresh();
+            $settlement = Settlement::query()
+                ->whereKey($settlement->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
             $status = $settlement->status->value;
+
+            if (! in_array($status, [SettlementStatus::ELIGIBLE->value, SettlementStatus::PROCESSING->value], true)) {
+                throw new DomainException('Only eligible or processing settlements can be distributed.', 422);
+            }
 
             if ($status === SettlementStatus::ELIGIBLE->value) {
                 $hasOpenPayout = $settlement->payoutRequests()
@@ -270,6 +380,10 @@ class WalletService
                     ->first();
 
                 if ($payout) {
+                    if (! $user) {
+                        throw new DomainException('A user is required to distribute a settlement with an active payout.', 422);
+                    }
+
                     $record = new PayoutRecord();
                     $record->payout_request_id = $payout->id;
                     $record->provider_reference = null;
@@ -290,7 +404,7 @@ class WalletService
 
             $settlement->status = SettlementStatus::PAID;
             $settlement->paid_at = now();
-            $settlement->updated_by = $user->id;
+            $settlement->updated_by = $user?->id;
             $settlement->save();
 
             $this->dispatcher->settlementNotice($settlement, 'distributed');
@@ -346,6 +460,7 @@ class WalletService
             $payout->payout_number = ReferenceNumber::unique('PO');
             $payout->vendor_id = $settlement->vendor_id;
             $payout->settlement_id = $settlement->id;
+            $payout->funding_source = PayoutRequest::FUNDING_SOURCE_SETTLEMENT;
             $payout->wallet_id = $wallet->id;
             $payout->bank_account_id = $bankAccountId;
             $payout->amount = $amount;
@@ -363,6 +478,65 @@ class WalletService
                 'reference_type' => 'payout_request',
                 'reference_id' => $payout->id,
                 'description' => 'Payout requested '.$payout->payout_number.' (reserved from settlement '.$settlement->settlement_number.')',
+                'status' => 'held',
+            ]);
+
+            $this->dispatcher->payoutRequested($payout);
+
+            return $payout->fresh(['bankAccount', 'settlement']);
+        });
+    }
+
+    public function requestAvailableBalancePayout(
+        Vendor $vendor,
+        float $requestedAmount,
+        ?int $bankAccountId,
+        User $user
+    ): PayoutRequest {
+        $amount = round($requestedAmount, 2);
+        $minimumAmount = (float) Setting::get('settlement.min_payout_amount', 1000);
+
+        if ($amount < $minimumAmount) {
+            throw new DomainException('Payout amount is below the minimum allowed amount.', 422);
+        }
+
+        return DB::transaction(function () use ($vendor, $amount, $bankAccountId, $user) {
+            $wallet = $this->lockWallet($vendor->id);
+
+            if ($amount > (float) $wallet->available_balance) {
+                throw new DomainException('Payout amount exceeds the available wallet balance.', 422);
+            }
+
+            if ($bankAccountId && ! BankAccount::query()
+                ->where('vendor_id', $vendor->id)
+                ->whereKey($bankAccountId)
+                ->lockForUpdate()
+                ->exists()) {
+                throw new DomainException('Selected bank account does not belong to this vendor.', 422);
+            }
+
+            $payout = new PayoutRequest();
+            $payout->payout_number = ReferenceNumber::unique('PO');
+            $payout->vendor_id = $vendor->id;
+            $payout->settlement_id = null;
+            $payout->funding_source = PayoutRequest::FUNDING_SOURCE_AVAILABLE_BALANCE;
+            $payout->wallet_id = $wallet->id;
+            $payout->bank_account_id = $bankAccountId;
+            $payout->amount = $amount;
+            $payout->status = PayoutStatus::PENDING;
+            $payout->requested_at = now();
+            $payout->created_by = $user->id;
+            $payout->save();
+
+            $this->mutate($wallet, function (VendorWallet $wallet) use ($amount) {
+                $wallet->available_balance = round((float) $wallet->available_balance - $amount, 2);
+                $wallet->balance = round((float) $wallet->balance - $amount, 2);
+            });
+
+            $this->ledger($wallet, WalletTransactionType::DEBIT_WITHDRAWAL, $amount, [
+                'reference_type' => 'payout_request',
+                'reference_id' => $payout->id,
+                'description' => 'Payout requested '.$payout->payout_number.' (reserved from available balance)',
                 'status' => 'held',
             ]);
 
@@ -408,9 +582,7 @@ class WalletService
             $payout->save();
 
             $this->mutate($wallet, function (VendorWallet $wallet) use ($payout) {
-                $amount = (float) $payout->amount;
-                $wallet->pending_balance = round((float) $wallet->pending_balance + $amount, 2);
-                $wallet->balance = round((float) $wallet->balance + $amount, 2);
+                $this->restorePayoutFunds($wallet, $payout);
             });
 
             $this->ledger($wallet, WalletTransactionType::CREDIT_ADJUSTMENT, (float) $payout->amount, [
@@ -471,9 +643,7 @@ class WalletService
             $payout->save();
 
             $this->mutate($wallet, function (VendorWallet $wallet) use ($payout) {
-                $amount = (float) $payout->amount;
-                $wallet->pending_balance = round((float) $wallet->pending_balance + $amount, 2);
-                $wallet->balance = round((float) $wallet->balance + $amount, 2);
+                $this->restorePayoutFunds($wallet, $payout);
             });
 
             $this->ledger($wallet, WalletTransactionType::CREDIT_ADJUSTMENT, (float) $payout->amount, [
@@ -551,7 +721,7 @@ class WalletService
             ->get();
     }
 
-    protected function isEligibleForEarnings(VendorOrder $vendorOrder): bool
+    protected function isEligibleForEarnings(VendorOrder $vendorOrder, ?Vendor $vendor = null): bool
     {
         $order = $vendorOrder->order;
 
@@ -570,15 +740,27 @@ class WalletService
             return false;
         }
 
-        return $this->returnWindowElapsed($order);
-    }
+        if ($vendorOrder->delivery_status !== DeliveryStatus::DELIVERED) {
+            return false;
+        }
 
-    protected function returnWindowElapsed(Order $order): bool
-    {
-        $days = (int) Setting::get('return.window_days', 7);
-        $completedAt = $order->completed_at ?? $order->updated_at ?? now();
+        $vendor ??= $vendorOrder->relationLoaded('vendor')
+            ? $vendorOrder->vendor
+            : $vendorOrder->vendor()->first();
+        if (! $vendor) {
+            return false;
+        }
 
-        return $completedAt->copy()->addDays($days)->lte(now());
+        $deliveredAt = OrderReturnWindow::deliveredAt($order);
+        if (! $deliveredAt) {
+            return false;
+        }
+
+        $returnWindowDays = max(1, (int) Setting::get('return.window_days', 7));
+        $settlementCycleDays = max(1, (int) ($vendor->meta['settlement_cycle_days'] ?? 14));
+        $maturityAt = $deliveredAt->copy()->addDays(max($returnWindowDays, $settlementCycleDays));
+
+        return $maturityAt->lte(now());
     }
 
     protected function eligibleVendorOrders(Vendor $vendor, Carbon $periodStart, Carbon $periodEnd): Collection
@@ -592,19 +774,25 @@ class WalletService
 
         return VendorOrder::query()
             ->where('vendor_id', $vendor->id)
+            ->whereIn('status', [OrderStatus::DELIVERED, OrderStatus::COMPLETED])
+            ->where('delivery_status', DeliveryStatus::DELIVERED)
+            ->whereHas('order', fn ($query) => $query->whereIn('payment_status', [
+                OrderPaymentStatus::PAID,
+                OrderPaymentStatus::PARTIALLY_REFUNDED,
+            ]))
             ->whereNotIn('id', $settledOrderIds)
-            ->with(['order'])
+            ->with(['order.vendorOrders.assignments', 'vendor'])
             ->get()
-            ->filter(function (VendorOrder $vendorOrder) use ($periodStart, $periodEnd) {
+            ->filter(function (VendorOrder $vendorOrder) use ($periodStart, $periodEnd, $vendor) {
                 $order = $vendorOrder->order;
 
-                if (! $this->isEligibleForEarnings($vendorOrder)) {
+                if (! $this->isEligibleForEarnings($vendorOrder, $vendor)) {
                     return false;
                 }
 
-                $completedAt = $order?->completed_at ?? $order?->updated_at;
+                $deliveredAt = $order ? OrderReturnWindow::deliveredAt($order) : null;
 
-                return $completedAt && $completedAt->between($periodStart, $periodEnd);
+                return $deliveredAt && $deliveredAt->between($periodStart, $periodEnd);
             });
     }
 
@@ -663,6 +851,19 @@ class WalletService
         $wallet->balance = round((float) $wallet->balance - $amount, 2);
         $wallet->pending_balance = round($pending - $pendingDeduction - $unfundedDeduction, 2);
         $wallet->available_balance = round($available - $availableDeduction, 2);
+    }
+
+    protected function restorePayoutFunds(VendorWallet $wallet, PayoutRequest $payout): void
+    {
+        $amount = (float) $payout->amount;
+
+        if ($payout->funding_source === PayoutRequest::FUNDING_SOURCE_AVAILABLE_BALANCE) {
+            $wallet->available_balance = round((float) $wallet->available_balance + $amount, 2);
+        } else {
+            $wallet->pending_balance = round((float) $wallet->pending_balance + $amount, 2);
+        }
+
+        $wallet->balance = round((float) $wallet->balance + $amount, 2);
     }
 
     protected function lockWallet(int $vendorId): VendorWallet

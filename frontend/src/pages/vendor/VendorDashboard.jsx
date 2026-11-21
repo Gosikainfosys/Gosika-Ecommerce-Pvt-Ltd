@@ -333,7 +333,7 @@ export default function VendorDashboard() {
           Icon={Wallet}
           iconBg="#fff0e6"
           iconColor="#ff5500"
-          to="/vendor/earnings"
+          to="/vendor/finance/analytics"
         />
         <KpiCard
           label="Wallet Balance"
@@ -342,7 +342,7 @@ export default function VendorDashboard() {
           Icon={Wallet}
           iconBg="#e6f7ec"
           iconColor="#16a34a"
-          to="/vendor/wallet"
+          to="/vendor/finance/wallet"
         />
         <KpiCard
           label="Ready to Ship"

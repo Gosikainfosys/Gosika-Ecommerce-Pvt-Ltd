@@ -383,12 +383,11 @@ class QaTestDataSeeder extends Seeder
     private function seedWallets(): void
     {
         foreach ($this->vendors as $reference => $vendor) {
-            $balance = $reference === 'SEL-A' ? 5000 : 0;
-            VendorWallet::query()->updateOrCreate(
+            VendorWallet::query()->firstOrCreate(
                 ['vendor_id' => $vendor->id],
                 [
-                    'balance' => $balance,
-                    'available_balance' => $balance,
+                    'balance' => 0,
+                    'available_balance' => 0,
                     'pending_balance' => 0,
                     'currency' => 'NPR',
                     'version' => 1,

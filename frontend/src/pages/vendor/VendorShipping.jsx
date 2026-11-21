@@ -93,7 +93,7 @@ export default function VendorShipping() {
                 <div className="flex items-center gap-2 wrap">
                   {s.status === 'active' && (
                     <Link to="/vendor/shipping/labels" className="btn btn-outline btn-sm">
-                      <PackageCheck size={13} /> Print Labels
+                      <PackageCheck size={13} /> Packing Slips
                     </Link>
                   )}
                   <Link to={`/vendor/store/edit`} className="btn btn-primary btn-sm">

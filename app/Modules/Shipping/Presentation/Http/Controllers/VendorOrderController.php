@@ -40,7 +40,7 @@ class VendorOrderController extends Controller
         $query = VendorOrder::query()
             ->where('vendor_id', $vendor->id)
             ->withSum(['refunds as refunded_amount' => fn ($query) => $query->where('status', 'refunded')], 'amount')
-            ->with(['items.product.primaryImage', 'store', 'order', 'returnRequests'])
+            ->with(['items.product.primaryImage', 'store', 'order.user', 'returnRequests'])
             ->when($filters['status'] ?? null, fn ($query, $status) => $query->where('status', $status))
             ->when($filters['delivery_status'] ?? null, fn ($query, $status) => $query->where('delivery_status', $status))
             ->when($filters['search'] ?? null, function ($query, $search) {

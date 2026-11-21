@@ -160,13 +160,12 @@ export const VENDOR_NAV = [
   { to: '/vendor/coupons', label: 'Vouchers', icon: 'Ticket' },
 
   { section: 'FINANCE' },
-  { to: '/vendor/wallet', label: 'Wallet', icon: 'Wallet' },
-  { to: '/vendor/payouts', label: 'Payouts', icon: 'Banknote' },
-  { to: '/vendor/settlements', label: 'Settlements', icon: 'FileSpreadsheet' },
+  { to: '/vendor/finance/wallet', label: 'Wallet', icon: 'Wallet' },
+  { to: '/vendor/finance/analytics', label: 'Analytics', icon: 'BarChart3' },
 
   { section: 'SHIPPING' },
   { to: '/vendor/shipping', label: 'Pickup Locations', icon: 'Warehouse' },
-  { to: '/vendor/shipping/labels', label: 'Shipping Labels', icon: 'FileText' },
+  { to: '/vendor/shipping/labels', label: 'Packing Slips', icon: 'FileText' },
 
   { section: 'ACCOUNT' },
   { to: '/vendor/profile', label: 'Profile', icon: 'User' },
@@ -255,7 +254,8 @@ export const VENDOR_MOBILE_NAV = [
   { to: '/vendor/orders', label: 'Orders', icon: 'ShoppingBag' },
   { to: '/vendor/products', label: 'Products', icon: 'Package' },
   { to: '/vendor/messages', label: 'Messages', icon: 'MessageCircle' },
-  { to: '/vendor/wallet', label: 'Wallet', icon: 'Wallet' },
+  { to: '/vendor/finance/wallet', label: 'Wallet', icon: 'Wallet' },
+  { to: '/vendor/finance/analytics', label: 'Analytics', icon: 'BarChart3' },
   { to: '/vendor/profile', label: 'Profile', icon: 'UserCircle' },
 ]
 
