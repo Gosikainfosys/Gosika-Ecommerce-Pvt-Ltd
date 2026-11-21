@@ -18,7 +18,7 @@ class QaTestDataSeederTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_default_seeder_skips_qa_fixtures_when_password_is_not_configured(): void
+    public function test_default_seeder_creates_qa_fixtures_without_login_access_when_password_is_not_configured(): void
     {
         $hadEnvValue = array_key_exists('QA_TEST_PASSWORD', $_ENV);
         $previousEnvValue = $_ENV['QA_TEST_PASSWORD'] ?? null;
@@ -28,15 +28,29 @@ class QaTestDataSeederTest extends TestCase
 
         putenv('QA_TEST_PASSWORD');
         unset($_ENV['QA_TEST_PASSWORD'], $_SERVER['QA_TEST_PASSWORD']);
+        Storage::fake('local');
+        Storage::fake('public');
 
         try {
             $this->seed(DatabaseSeeder::class);
 
-            $this->assertSame(1, DB::table('users')->count());
+            $this->assertSame(10, DB::table('users')->count());
             $this->assertSame(5, DB::table('categories')->count());
             $this->assertSame(4, DB::table('brands')->count());
             $this->assertSame(8, DB::table('products')->where('sku', 'like', 'DEMO-%')->count());
-            $this->assertSame(0, DB::table('products')->where('sku', 'like', 'QA-%')->count());
+            $this->assertSame(4, DB::table('products')->where('sku', 'like', 'QA-%')->count());
+            $qaEmails = [
+                'admin@gosika.com.np',
+                'staff@gosika.com.np',
+                'sellerA@gosika.com.np',
+                'sellerB@gosika.com.np',
+                'sellerC@gosika.com.np',
+                'delivery1@gosika.com.np',
+                'delivery2@gosika.com.np',
+                'customerA@gosika.com.np',
+                'customerB@gosika.com.np',
+            ];
+            $this->assertSame(9, DB::table('users')->whereIn('email', $qaEmails)->where('status', 'suspended')->count());
             $this->assertDatabaseHas('users', [
                 'email' => 'demo.catalog@gosika.com.np',
                 'status' => 'suspended',
@@ -62,7 +76,7 @@ class QaTestDataSeederTest extends TestCase
         }
     }
 
-    public function test_database_seeder_runs_safe_seeders_in_production_without_qa_accounts(): void
+    public function test_database_seeder_creates_qa_fixtures_in_production_with_login_access_disabled(): void
     {
         $previousEnvironment = app()->environment();
         $hadEnvValue = array_key_exists('QA_TEST_PASSWORD', $_ENV);
@@ -73,6 +87,7 @@ class QaTestDataSeederTest extends TestCase
         putenv('QA_TEST_PASSWORD');
         unset($_ENV['QA_TEST_PASSWORD'], $_SERVER['QA_TEST_PASSWORD']);
         app()->detectEnvironment(static fn () => 'production');
+        Storage::fake('local');
         Storage::fake('public');
 
         try {
@@ -83,7 +98,7 @@ class QaTestDataSeederTest extends TestCase
             ]);
 
             $this->assertSame(8, DB::table('products')->where('sku', 'like', 'DEMO-%')->count());
-            $this->assertSame(0, DB::table('users')->whereIn('email', [
+            $this->assertSame(9, DB::table('users')->whereIn('email', [
                 'admin@gosika.com.np',
                 'staff@gosika.com.np',
                 'sellerA@gosika.com.np',
@@ -93,7 +108,8 @@ class QaTestDataSeederTest extends TestCase
                 'delivery2@gosika.com.np',
                 'customerA@gosika.com.np',
                 'customerB@gosika.com.np',
-            ])->count());
+            ])->where('status', 'suspended')->count());
+            $this->assertSame(4, DB::table('products')->where('sku', 'like', 'QA-%')->count());
             $this->assertDatabaseHas('stores', [
                 'slug' => 'gosika-demo-catalog',
                 'status' => 'active',

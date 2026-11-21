@@ -58,14 +58,11 @@ class QaTestDataSeeder extends Seeder
     public function run(): void
     {
         $password = (string) env('QA_TEST_PASSWORD');
-        if ($password === '') {
-            $this->command?->warn('QA test fixtures skipped because QA_TEST_PASSWORD is not configured.');
+        $loginEnabled = $password !== '';
+        $password = $loginEnabled ? $password : Str::random(64);
 
-            return;
-        }
-
-        DB::transaction(function () use ($password): void {
-            $this->seedUsers($password);
+        DB::transaction(function () use ($password, $loginEnabled): void {
+            $this->seedUsers($password, $loginEnabled);
             $this->seedVendors();
             $this->seedDeliveryPartners();
             $this->seedCustomerProfilesAndAddresses();
@@ -78,10 +75,14 @@ class QaTestDataSeeder extends Seeder
 
         $this->seedKycUploadFixtures();
         $this->seedProductImageFixtures();
-        $this->command?->info('QA test accounts and marketplace fixtures are ready.');
+        if ($loginEnabled) {
+            $this->command?->info('QA test accounts and marketplace fixtures are ready.');
+        } else {
+            $this->command?->warn('QA fixtures were seeded with login access disabled. Configure QA_TEST_PASSWORD to enable QA accounts.');
+        }
     }
 
-    private function seedUsers(string $password): void
+    private function seedUsers(string $password, bool $loginEnabled): void
     {
         $accounts = [
             'ADM-01' => ['admin@gosika.com.np', '9801000001', 'QA', 'Super Admin', Roles::SUPER_ADMIN],
@@ -105,7 +106,7 @@ class QaTestDataSeeder extends Seeder
                     'password' => Hash::make($password),
                     'email_verified_at' => now(),
                     'phone_verified_at' => now(),
-                    'status' => UserStatus::ACTIVE,
+                    'status' => $loginEnabled ? UserStatus::ACTIVE : UserStatus::SUSPENDED,
                     'meta' => ['qa_reference' => $reference],
                 ]
             );
