@@ -51,7 +51,7 @@ class DemoCatalogSeeder extends Seeder
             'first_name' => 'GOSIKA',
             'last_name' => 'Demo Catalog',
             'phone' => null,
-            'status' => UserStatus::ACTIVE,
+            'status' => UserStatus::SUSPENDED,
             'email_verified_at' => now(),
             'meta' => ['seed_reference' => self::SEED_REFERENCE],
         ])->save();

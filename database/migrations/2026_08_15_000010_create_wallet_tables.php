@@ -96,6 +96,7 @@ return new class extends Migration
             $table->string('payout_number', 40)->unique();
             $table->foreignId('vendor_id')->constrained()->cascadeOnDelete();
             $table->foreignId('settlement_id')->nullable()->constrained()->nullOnDelete();
+            $table->string('funding_source', 32)->default('settlement');
             $table->foreignId('wallet_id')->constrained('vendor_wallets')->cascadeOnDelete();
             $table->foreignId('bank_account_id')->nullable()->constrained()->nullOnDelete();
             $table->decimal('amount', 12, 2)->default(0);

@@ -6,6 +6,7 @@ use App\Modules\Catalog\Infrastructure\Models\Product;
 use App\Modules\Identity\Domain\Permissions;
 use App\Modules\Identity\Domain\Roles;
 use Database\Seeders\DatabaseSeeder;
+use Database\Seeders\QaTestDataSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -195,6 +196,22 @@ class QaTestDataSeederTest extends TestCase
             $wallet = DB::table('vendor_wallets')->where('vendor_id', $vendorId)->first();
 
             $this->assertNotNull($wallet);
+            $this->assertSame(0.0, (float) $wallet->balance);
+            $this->assertSame(0.0, (float) $wallet->available_balance);
+            $this->assertSame(0.0, (float) $wallet->pending_balance);
+            $this->assertSame(
+                0,
+                DB::table('wallet_transactions')->where('wallet_id', $wallet->id)->count()
+            );
+
+            DB::table('vendor_wallets')->where('id', $wallet->id)->update([
+                'balance' => 5000,
+                'available_balance' => 5000,
+                'pending_balance' => 0,
+            ]);
+            $this->seed(QaTestDataSeeder::class);
+            $wallet = DB::table('vendor_wallets')->where('id', $wallet->id)->first();
+
             $this->assertSame(0.0, (float) $wallet->balance);
             $this->assertSame(0.0, (float) $wallet->available_balance);
             $this->assertSame(0.0, (float) $wallet->pending_balance);

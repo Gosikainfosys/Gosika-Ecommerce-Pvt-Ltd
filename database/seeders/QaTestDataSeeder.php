@@ -57,7 +57,12 @@ class QaTestDataSeeder extends Seeder
 
     public function run(): void
     {
-        $password = (string) (env('QA_TEST_PASSWORD') ?: 'password');
+        $password = (string) env('QA_TEST_PASSWORD');
+        if ($password === '') {
+            $this->command?->warn('QA test fixtures skipped because QA_TEST_PASSWORD is not configured.');
+
+            return;
+        }
 
         DB::transaction(function () use ($password): void {
             $this->seedUsers($password);
@@ -72,7 +77,8 @@ class QaTestDataSeeder extends Seeder
         });
 
         $this->seedKycUploadFixtures();
-        $this->command?->info('QA test accounts and marketplace fixtures are ready with password: '.$password);
+        $this->seedProductImageFixtures();
+        $this->command?->info('QA test accounts and marketplace fixtures are ready.');
     }
 
     private function seedUsers(string $password): void
@@ -383,7 +389,7 @@ class QaTestDataSeeder extends Seeder
     private function seedWallets(): void
     {
         foreach ($this->vendors as $reference => $vendor) {
-            VendorWallet::query()->firstOrCreate(
+            $wallet = VendorWallet::query()->firstOrCreate(
                 ['vendor_id' => $vendor->id],
                 [
                     'balance' => 0,
@@ -393,6 +399,18 @@ class QaTestDataSeeder extends Seeder
                     'version' => 1,
                 ]
             );
+
+            if ($reference === 'SEL-A'
+                && (float) $wallet->balance === 5000.0
+                && (float) $wallet->available_balance === 5000.0
+                && (float) $wallet->pending_balance === 0.0
+                && ! $wallet->transactions()->exists()
+                && ! $wallet->payoutRequests()->exists()) {
+                $wallet->balance = 0;
+                $wallet->available_balance = 0;
+                $wallet->pending_balance = 0;
+                $wallet->save();
+            }
         }
 
         foreach (['CUS-A', 'CUS-B'] as $reference) {
@@ -575,6 +593,15 @@ class QaTestDataSeeder extends Seeder
             }
             $this->putFile('local', 'qa-test-data/KYC-DUMMY/'.$name, $contents);
         }
+    }
+
+    private function seedProductImageFixtures(): void
+    {
+        $this->putFile(
+            'public',
+            'qa-test-data/P-01.svg',
+            '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480"><rect width="640" height="480" fill="#f1f5f9"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-family="sans-serif" font-size="32" fill="#475569">QA Product P-01</text></svg>'
+        );
     }
 
     private function putFile(string $disk, string $path, string $contents): void

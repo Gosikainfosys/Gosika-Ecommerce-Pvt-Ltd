@@ -38,6 +38,9 @@ export default function VendorShippingLabels() {
   const branding = useBranding()
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+  const [appliedDateRange, setAppliedDateRange] = useState({ from: '', to: '' })
   const [selectedOrders, setSelectedOrders] = useState(() => new Map())
   const [printing, setPrinting] = useState(false)
   const selectAllRef = useRef(null)
@@ -48,10 +51,12 @@ export default function VendorShippingLabels() {
       per_page: pageSize,
       search: search || undefined,
       status: status || undefined,
+      date_from: appliedDateRange.from || undefined,
+      date_to: appliedDateRange.to || undefined,
     },
-  }), [search, status])
+  }), [search, status, appliedDateRange])
   const { items: orders, meta, page, setPage, loading, error, reload } = useList(fetcher, {
-    deps: [search, status],
+    deps: [search, status, appliedDateRange],
     pageSize: 12,
   })
 
@@ -117,6 +122,9 @@ export default function VendorShippingLabels() {
     setPage(1)
     setSearch('')
     setStatus('')
+    setDateFrom('')
+    setDateTo('')
+    setAppliedDateRange({ from: '', to: '' })
   }
 
   if (loading) {
@@ -158,8 +166,16 @@ export default function VendorShippingLabels() {
           setStatus(value === 'all' ? '' : value)
         }}
         statusOptions={ORDER_STATUSES}
+        fromDate={dateFrom}
+        toDate={dateTo}
+        onFromDateChange={setDateFrom}
+        onToDateChange={setDateTo}
+        onApplyFilters={() => {
+          setPage(1)
+          setAppliedDateRange({ from: dateFrom, to: dateTo })
+        }}
         onReset={resetFilters}
-        hasActiveFilters={Boolean(search || status)}
+        hasActiveFilters={Boolean(search || status || dateFrom || dateTo)}
       />
 
       <div className="card flex items-center justify-between wrap gap-2" style={{ padding: '12px 16px', marginBottom: 12 }}>
