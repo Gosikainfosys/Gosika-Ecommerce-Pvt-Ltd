@@ -58,6 +58,10 @@ class QaTestDataSeeder extends Seeder
     public function run(): void
     {
         $password = (string) (config('app.qa_test_password') ?? env('QA_TEST_PASSWORD'));
+        if ($password === '' && $this->canPromptForQaPassword()) {
+            $password = $this->promptForQaPassword();
+        }
+
         $loginEnabled = $password !== '';
         $password = $loginEnabled ? $password : Str::random(64);
 
@@ -80,6 +84,29 @@ class QaTestDataSeeder extends Seeder
         } else {
             $this->command?->warn('QA fixtures were seeded with login access disabled. Configure QA_TEST_PASSWORD to enable QA accounts.');
         }
+    }
+
+    private function canPromptForQaPassword(): bool
+    {
+        return $this->command !== null && ! $this->command->option('no-interaction');
+    }
+
+    private function promptForQaPassword(): string
+    {
+        $password = (string) $this->command->secret(
+            'Enter a shared password for QA accounts (minimum 12 characters):',
+            false
+        );
+        if (strlen($password) < 12) {
+            throw new RuntimeException('The shared QA account password must be at least 12 characters.');
+        }
+
+        $confirmation = (string) $this->command->secret('Confirm the shared QA account password:', false);
+        if (! hash_equals($password, $confirmation)) {
+            throw new RuntimeException('The shared QA account passwords did not match.');
+        }
+
+        return $password;
     }
 
     private function seedUsers(string $password, bool $loginEnabled): void

@@ -192,6 +192,71 @@ class QaTestDataSeederTest extends TestCase
         }
     }
 
+    public function test_interactive_seeding_uses_one_confirmed_password_without_environment_configuration(): void
+    {
+        $hadEnvValue = array_key_exists('QA_TEST_PASSWORD', $_ENV);
+        $previousEnvValue = $_ENV['QA_TEST_PASSWORD'] ?? null;
+        $hadServerValue = array_key_exists('QA_TEST_PASSWORD', $_SERVER);
+        $previousServerValue = $_SERVER['QA_TEST_PASSWORD'] ?? null;
+        $previousProcessValue = getenv('QA_TEST_PASSWORD');
+        $previousConfigPassword = config('app.qa_test_password');
+        $password = 'qa-only-interactive-password';
+
+        putenv('QA_TEST_PASSWORD');
+        unset($_ENV['QA_TEST_PASSWORD'], $_SERVER['QA_TEST_PASSWORD']);
+        config(['app.qa_test_password' => null]);
+        Storage::fake('local');
+        Storage::fake('public');
+
+        try {
+            $this->artisan('db:seed', [
+                '--class' => DatabaseSeeder::class,
+                '--force' => true,
+            ])
+                ->expectsQuestion('Enter a shared password for QA accounts (minimum 12 characters):', $password)
+                ->expectsQuestion('Confirm the shared QA account password:', $password)
+                ->assertExitCode(0);
+
+            $this->assertSame(
+                9,
+                DB::table('users')
+                    ->whereIn('email', [
+                        'admin@gosika.com.np',
+                        'staff@gosika.com.np',
+                        'sellerA@gosika.com.np',
+                        'sellerB@gosika.com.np',
+                        'sellerC@gosika.com.np',
+                        'delivery1@gosika.com.np',
+                        'delivery2@gosika.com.np',
+                        'customerA@gosika.com.np',
+                        'customerB@gosika.com.np',
+                    ])
+                    ->where('status', 'active')
+                    ->count()
+            );
+            $this->assertTrue(Hash::check(
+                $password,
+                DB::table('users')->where('email', 'admin@gosika.com.np')->value('password')
+            ));
+        } finally {
+            putenv($previousProcessValue === false ? 'QA_TEST_PASSWORD' : 'QA_TEST_PASSWORD='.$previousProcessValue);
+
+            if ($hadEnvValue) {
+                $_ENV['QA_TEST_PASSWORD'] = $previousEnvValue;
+            } else {
+                unset($_ENV['QA_TEST_PASSWORD']);
+            }
+
+            if ($hadServerValue) {
+                $_SERVER['QA_TEST_PASSWORD'] = $previousServerValue;
+            } else {
+                unset($_SERVER['QA_TEST_PASSWORD']);
+            }
+
+            config(['app.qa_test_password' => $previousConfigPassword]);
+        }
+    }
+
     public function test_qa_vendor_wallet_does_not_start_with_unledgered_money(): void
     {
         $hadEnvValue = array_key_exists('QA_TEST_PASSWORD', $_ENV);
