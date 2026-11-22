@@ -213,6 +213,8 @@ class QaTestDataSeederTest extends TestCase
                 '--class' => DatabaseSeeder::class,
                 '--force' => true,
             ])
+                ->expectsQuestion('Enter a shared password for QA accounts (minimum 12 characters):', '')
+                ->expectsOutputToContain('The shared QA account password must be at least 12 characters. Please try again.')
                 ->expectsQuestion('Enter a shared password for QA accounts (minimum 12 characters):', $password)
                 ->expectsQuestion('Confirm the shared QA account password:', $password)
                 ->assertExitCode(0);

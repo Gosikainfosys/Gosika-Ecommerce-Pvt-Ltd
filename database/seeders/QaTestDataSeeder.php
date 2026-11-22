@@ -93,20 +93,24 @@ class QaTestDataSeeder extends Seeder
 
     private function promptForQaPassword(): string
     {
-        $password = (string) $this->command->secret(
-            'Enter a shared password for QA accounts (minimum 12 characters):',
-            false
-        );
-        if (strlen($password) < 12) {
-            throw new RuntimeException('The shared QA account password must be at least 12 characters.');
-        }
+        while (true) {
+            $password = (string) $this->command->secret(
+                'Enter a shared password for QA accounts (minimum 12 characters):',
+                false
+            );
+            if (strlen($password) < 12) {
+                $this->command->error('The shared QA account password must be at least 12 characters. Please try again.');
+                continue;
+            }
 
-        $confirmation = (string) $this->command->secret('Confirm the shared QA account password:', false);
-        if (! hash_equals($password, $confirmation)) {
-            throw new RuntimeException('The shared QA account passwords did not match.');
-        }
+            $confirmation = (string) $this->command->secret('Confirm the shared QA account password:', false);
+            if (! hash_equals($password, $confirmation)) {
+                $this->command->error('The shared QA account passwords did not match. Please try again.');
+                continue;
+            }
 
-        return $password;
+            return $password;
+        }
     }
 
     private function seedUsers(string $password, bool $loginEnabled): void
