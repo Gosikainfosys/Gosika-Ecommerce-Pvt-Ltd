@@ -72,7 +72,7 @@ class CartService
         $existing = CartItem::query()
             ->where('cart_id', $cart->id)
             ->where('product_id', $product->id)
-            ->where('variant_id', $variantId)
+            ->where('variant_id', $variant?->id)
             ->first();
 
         $newQuantity = ($existing?->quantity ?? 0) + $quantity;
@@ -94,7 +94,7 @@ class CartService
         return CartItem::query()->create([
             'cart_id' => $cart->id,
             'product_id' => $product->id,
-            'variant_id' => $variantId,
+            'variant_id' => $variant?->id,
             'quantity' => $quantity,
             'unit_price' => $unitPrice,
             'total_price' => $unitPrice * $quantity,
