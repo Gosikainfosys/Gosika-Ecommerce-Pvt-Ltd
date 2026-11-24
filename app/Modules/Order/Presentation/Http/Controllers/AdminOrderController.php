@@ -398,6 +398,191 @@ class AdminOrderController extends Controller
         }
     }
 
+    // ─── Admin: Delete (soft) an order ───────────────────────────────────────
+
+    public function destroy(Request $request, string $orderId): JsonResponse
+    {
+        abort_unless($request->user()->hasPermissionTo(Permissions::ORDERS_MANAGE), 403, 'Insufficient permissions.');
+
+        $order = Order::where('uuid', $orderId)->firstOrFail();
+
+        if (in_array($order->status->value, [
+            OrderStatus::OUT_FOR_DELIVERY->value,
+            OrderStatus::DELIVERED->value,
+            OrderStatus::COMPLETED->value,
+        ], true)) {
+            return Response::error(
+                'Orders that are out for delivery, delivered, or completed cannot be deleted.',
+                [],
+                422
+            );
+        }
+
+        $order->forceFill(['deleted_by' => $request->user()->id])->save();
+        $order->delete(); // soft delete
+
+        app(AuditLogService::class)->record(
+            $request->user(),
+            'order.deleted',
+            'order',
+            $order->uuid,
+            ['status' => $order->status->value],
+            ['deleted' => true]
+        );
+
+        return Response::noContent('Order deleted.');
+    }
+
+    // ─── Admin: Create manual order ───────────────────────────────────────────
+
+    public function manualCreate(Request $request): JsonResponse
+    {
+        abort_unless($request->user()->hasPermissionTo(Permissions::ORDERS_MANAGE), 403, 'Insufficient permissions.');
+
+        $data = $request->validate([
+            'customer_id'         => ['required', 'string', 'exists:users,uuid'],
+            'payment_method'      => ['required', Rule::in(['cod', 'khalti', 'esewa'])],
+            'payment_status'      => ['required', Rule::enum(OrderPaymentStatus::class)],
+            'customer_notes'      => ['nullable', 'string', 'max:1000'],
+            'shipping_address'    => ['required', 'array'],
+            'shipping_address.full_name'    => ['required', 'string', 'max:180'],
+            'shipping_address.phone'        => ['required', 'string', 'max:20'],
+            'shipping_address.address_line_1' => ['required', 'string', 'max:255'],
+            'shipping_address.address_line_2' => ['nullable', 'string', 'max:255'],
+            'shipping_address.district'     => ['nullable', 'string', 'max:100'],
+            'shipping_address.province'     => ['nullable', 'string', 'max:100'],
+            'shipping_address.municipality' => ['nullable', 'string', 'max:100'],
+            'shipping_address.postal_code'  => ['nullable', 'string', 'max:20'],
+            'shipping_address.landmark'     => ['nullable', 'string', 'max:255'],
+            'items'               => ['required', 'array', 'min:1'],
+            'items.*.product_id'  => ['required', 'string', 'exists:products,uuid'],
+            'items.*.variant_id'  => ['nullable', 'string', 'exists:product_variants,uuid'],
+            'items.*.quantity'    => ['required', 'integer', 'min:1'],
+            'items.*.unit_price'  => ['required', 'numeric', 'min:0'],
+            'delivery_charge'     => ['nullable', 'numeric', 'min:0'],
+            'discount'            => ['nullable', 'numeric', 'min:0'],
+            'tax'                 => ['nullable', 'numeric', 'min:0'],
+        ]);
+
+        $customer = \App\Modules\Identity\Infrastructure\Models\User::where('uuid', $data['customer_id'])->firstOrFail();
+
+        $order = \Illuminate\Support\Facades\DB::transaction(function () use ($data, $customer, $request) {
+            $subtotal = collect($data['items'])->sum(fn ($i) => $i['unit_price'] * $i['quantity']);
+            $discount = (float) ($data['discount'] ?? 0);
+            $deliveryCharge = (float) ($data['delivery_charge'] ?? 0);
+            $tax = (float) ($data['tax'] ?? 0);
+            $grandTotal = round($subtotal - $discount + $deliveryCharge + $tax, 2);
+
+            $order = new Order();
+            $order->order_number = \App\Modules\Shared\Infrastructure\Services\ReferenceNumber::unique('ORD');
+            $order->user_id = $customer->id;
+            $order->payment_method = $data['payment_method'];
+            $order->payment_status = OrderPaymentStatus::from($data['payment_status']);
+            $order->status = OrderStatus::CONFIRMED;
+            $order->subtotal = $subtotal;
+            $order->discount = $discount;
+            $order->delivery_charge = $deliveryCharge;
+            $order->tax = $tax;
+            $order->grand_total = $grandTotal;
+            $order->currency = 'NPR';
+            $order->customer_notes = $data['customer_notes'] ?? null;
+            $order->shipping_address_snapshot = json_encode($data['shipping_address'], JSON_UNESCAPED_UNICODE);
+            $order->placed_at = now();
+            $order->confirmed_at = now();
+
+            $meta = [];
+            if ($data['payment_method'] === 'cod') {
+                $meta['delivery_otp'] = sprintf('%06d', random_int(100000, 999999));
+            }
+            $meta['manual_order'] = true;
+            $meta['created_by'] = $request->user()->uuid;
+            $order->meta = $meta;
+            $order->save();
+
+            // Group items by vendor
+            $vendorGroups = [];
+            foreach ($data['items'] as $item) {
+                $product = \App\Modules\Catalog\Infrastructure\Models\Product::where('uuid', $item['product_id'])->firstOrFail();
+                $variant = isset($item['variant_id'])
+                    ? \App\Modules\Catalog\Infrastructure\Models\ProductVariant::where('uuid', $item['variant_id'])->first()
+                    : null;
+
+                $vendorId = $product->vendor_id;
+                $vendorGroups[$vendorId][] = compact('product', 'variant', 'item');
+            }
+
+            foreach ($vendorGroups as $vendorId => $group) {
+                $vendor = \App\Modules\Vendor\Infrastructure\Models\Vendor::findOrFail($vendorId);
+                $groupSubtotal = collect($group)->sum(fn ($g) => $g['item']['unit_price'] * $g['item']['quantity']);
+                $commissionRate = (float) \App\Modules\Platform\Infrastructure\Models\Setting::get('commission.default_rate', 10);
+                $commissionAmount = round($groupSubtotal * $commissionRate / 100, 2);
+
+                $vendorOrder = new \App\Modules\Order\Infrastructure\Models\VendorOrder();
+                $vendorOrder->vendor_order_number = \App\Modules\Shared\Infrastructure\Services\ReferenceNumber::unique('VO');
+                $vendorOrder->order_id = $order->id;
+                $vendorOrder->vendor_id = $vendor->id;
+                $vendorOrder->store_id = $vendor->stores()->first()?->id;
+                $vendorOrder->status = OrderStatus::CONFIRMED;
+                $vendorOrder->delivery_status = 'pending';
+                $vendorOrder->items_subtotal = $groupSubtotal;
+                $vendorOrder->discount = 0;
+                $vendorOrder->delivery_charge = 0;
+                $vendorOrder->tax = 0;
+                $vendorOrder->grand_total = $groupSubtotal;
+                $vendorOrder->commission_rate = $commissionRate;
+                $vendorOrder->commission_amount = $commissionAmount;
+                $vendorOrder->vendor_payable = round($groupSubtotal - $commissionAmount, 2);
+                if (! empty($meta['delivery_otp'])) {
+                    $vendorOrder->meta = ['delivery_otp' => $meta['delivery_otp']];
+                }
+                $vendorOrder->save();
+
+                foreach ($group as $g) {
+                    $orderItem = new \App\Modules\Order\Infrastructure\Models\OrderItem();
+                    $orderItem->order_id = $order->id;
+                    $orderItem->vendor_order_id = $vendorOrder->id;
+                    $orderItem->vendor_id = $vendor->id;
+                    $orderItem->product_id = $g['product']->id;
+                    $orderItem->variant_id = $g['variant']?->id;
+                    $orderItem->product_name = $g['product']->name;
+                    $orderItem->sku = $g['variant']?->sku ?? $g['product']->sku;
+                    $orderItem->variant_name = $g['variant']?->name;
+                    $orderItem->image = $g['product']->primaryImage?->file_path;
+                    $orderItem->quantity = $g['item']['quantity'];
+                    $orderItem->unit_price = $g['item']['unit_price'];
+                    $orderItem->unit_discount = 0;
+                    $orderItem->line_total = $g['item']['unit_price'] * $g['item']['quantity'];
+                    $orderItem->delivery_status = 'pending';
+                    $orderItem->save();
+                }
+            }
+
+            \App\Modules\Order\Infrastructure\Models\OrderStatusHistory::create([
+                'trackable_type' => Order::class,
+                'trackable_id'   => $order->id,
+                'from_status'    => null,
+                'to_status'      => OrderStatus::CONFIRMED->value,
+                'reason'         => 'Manual order created by admin: '.$request->user()->full_name,
+                'actor_user_id'  => $request->user()->id,
+            ]);
+
+            app(\App\Modules\Marketing\Application\Services\NotificationDispatcher::class)->orderPlaced($order);
+
+            return $order->fresh(['user', 'items.product.primaryImage', 'vendorOrders']);
+        });
+
+        app(AuditLogService::class)->record(
+            $request->user(),
+            'order.manual_created',
+            'order',
+            $order->uuid,
+            [],
+            ['order_number' => $order->order_number, 'customer' => $customer->email]
+        );
+
+        return Response::created(new AdminOrderResource($order), 'Manual order created.');
+    }
+
     public function cancel(Request $request, string $orderId): JsonResponse
     {
         $order = Order::where('uuid', $orderId)->firstOrFail();

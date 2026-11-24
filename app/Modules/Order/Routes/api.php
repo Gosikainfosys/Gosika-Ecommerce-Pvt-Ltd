@@ -3,6 +3,7 @@
 use App\Modules\Order\Presentation\Http\Controllers\AdminOrderController;
 use App\Modules\Order\Presentation\Http\Controllers\CustomerReturnController;
 use App\Modules\Order\Presentation\Http\Controllers\OrderController;
+use App\Modules\Order\Presentation\Http\Controllers\VendorManualOrderController;
 use App\Modules\Order\Presentation\Http\Controllers\VendorReturnController;
 use Illuminate\Support\Facades\Route;
 
@@ -27,11 +28,17 @@ Route::prefix('v1/admin/orders')->middleware(['auth:sanctum', 'ensure:admin'])->
 
     // Orders
     Route::get('/', [AdminOrderController::class, 'index']);
+    Route::post('/', [AdminOrderController::class, 'manualCreate']);
     Route::get('/{order}', [AdminOrderController::class, 'show']);
     Route::post('/{order}/cancel', [AdminOrderController::class, 'cancel']);
+    Route::delete('/{order}', [AdminOrderController::class, 'destroy']);
 });
 
 // ─── Vendor Returns ───────────────────────────────────────────────────────────
+Route::prefix('v1/vendor')->middleware(['auth:sanctum', 'ensure:vendor'])->group(function () {
+    Route::post('orders', [VendorManualOrderController::class, 'store']);
+});
+
 Route::prefix('v1/vendor/returns')->middleware(['auth:sanctum', 'ensure:vendor'])->group(function () {
     Route::get('/', [VendorReturnController::class, 'index']);
     Route::get('/{return}', [VendorReturnController::class, 'show']);
