@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import {
   ShoppingBag, Search, Eye, Download, Clock,
   RefreshCw, CheckCircle2, XCircle, Truck, Store,
-  CreditCard, ArrowRight
+  CreditCard, ArrowRight, Trash2
 } from 'lucide-react'
 import api from '../../api/client'
 import PageHeader from '../../components/admin/PageHeader'
@@ -35,6 +35,12 @@ export default function AdminOrders() {
   const [appliedDateRange, setAppliedDateRange] = useState({ from: '', to: '' })
 
   const [dialogState, setDialogState] = useState({
+    isOpen: false,
+    order: null,
+    loading: false
+  })
+
+  const [deleteDialogState, setDeleteDialogState] = useState({
     isOpen: false,
     order: null,
     loading: false
@@ -99,6 +105,24 @@ export default function AdminOrders() {
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to cancel order.')
       setDialogState(prev => ({ ...prev, loading: false }))
+    }
+  }
+
+  const handleConfirmDelete = async () => {
+    const { order } = deleteDialogState
+    if (!order) return
+
+    setDeleteDialogState(prev => ({ ...prev, loading: true }))
+    const targetId = order.uuid || order.id
+
+    try {
+      await api.delete(`/admin/orders/${targetId}`)
+      toast.success(`Order #${order.order_number || order.id} has been deleted.`)
+      setDeleteDialogState({ isOpen: false, order: null, loading: false })
+      loadOrders()
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to delete order.')
+      setDeleteDialogState(prev => ({ ...prev, loading: false }))
     }
   }
 
@@ -256,11 +280,11 @@ export default function AdminOrders() {
             <Eye size={12} /> View
           </Link>
 
-          {item.status !== 'cancelled' && item.status !== 'delivered' && (
+          {item.status !== 'cancelled' && item.status !== 'delivered' && item.status !== 'completed' && (
             <button
               type="button"
               className="btn btn-ghost btn-xs"
-              style={{ color: '#dc2626' }}
+              style={{ color: '#f97316' }}
               onClick={e => {
                 e.stopPropagation()
                 setDialogState({ isOpen: true, order: item, loading: false })
@@ -268,6 +292,21 @@ export default function AdminOrders() {
               title="Cancel Order"
             >
               <XCircle size={13} />
+            </button>
+          )}
+
+          {item.status !== 'out_for_delivery' && item.status !== 'delivered' && item.status !== 'completed' && (
+            <button
+              type="button"
+              className="btn btn-ghost btn-xs"
+              style={{ color: '#dc2626' }}
+              onClick={e => {
+                e.stopPropagation()
+                setDeleteDialogState({ isOpen: true, order: item, loading: false })
+              }}
+              title="Delete Order"
+            >
+              <Trash2 size={13} />
             </button>
           )}
         </div>
@@ -377,6 +416,19 @@ export default function AdminOrders() {
         confirmText="Cancel Order"
         requireReason={true}
         reasonPlaceholder="Provide the administrative explanation for cancelling this order..."
+      />
+
+      {/* Delete Order Dialog */}
+      <ConfirmDialog
+        isOpen={deleteDialogState.isOpen}
+        onClose={() => setDeleteDialogState({ isOpen: false, order: null, loading: false })}
+        onConfirm={handleConfirmDelete}
+        loading={deleteDialogState.loading}
+        title={`Delete Order #${deleteDialogState.order?.order_number || deleteDialogState.order?.id}?`}
+        message="This will permanently remove the order from the system. This action cannot be undone. Orders that are out for delivery, delivered, or completed cannot be deleted."
+        variant="danger"
+        confirmText="Delete Order"
+        requireReason={false}
       />
     </div>
   )
