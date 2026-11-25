@@ -543,6 +543,71 @@ class OrderConfirmationRulesTest extends TestCase
             ->assertJsonPath('data.0.vendor_id', $this->vendor->uuid);
     }
 
+    public function test_admin_settlement_summaries_include_all_vendors_stores_and_earned_balances(): void
+    {
+        Setting::set('settlement.waiting_days', 0, 'settlement', 'integer', true);
+        [$order, $vendorOrder] = $this->createOrder(OrderStatus::DELIVERED, false);
+        $order->update(['completed_at' => now()->subDay()]);
+        $vendorOrder->update([
+            'status' => OrderStatus::DELIVERED,
+            'delivery_status' => DeliveryStatus::DELIVERED,
+            'grand_total' => 2500,
+            'commission_rate' => 10,
+            'commission_amount' => 250,
+            'vendor_payable' => 2250,
+        ]);
+        Store::create([
+            'uuid' => (string) Str::uuid(),
+            'vendor_id' => $this->vendor->id,
+            'name' => 'Himalayan Outlet',
+            'slug' => 'himalayan-outlet-'.Str::random(6),
+            'status' => StoreStatus::ACTIVE,
+        ]);
+
+        $secondVendorUser = User::create([
+            'uuid' => (string) Str::uuid(),
+            'first_name' => 'Second',
+            'last_name' => 'Vendor',
+            'email' => 'second_vendor_'.Str::random(8).'@gosika.com',
+            'password' => bcrypt('password'),
+            'status' => UserStatus::ACTIVE,
+        ]);
+        $secondVendorUser->assignRole(Roles::VENDOR_ADMIN);
+        $secondVendor = Vendor::create([
+            'uuid' => (string) Str::uuid(),
+            'user_id' => $secondVendorUser->id,
+            'company_name' => 'Unsettled Vendor',
+            'business_email' => 'second_'.Str::random(8).'@gosika.com',
+            'business_phone' => '9800000020',
+            'status' => VendorStatus::APPROVED,
+        ]);
+        Store::create([
+            'uuid' => (string) Str::uuid(),
+            'vendor_id' => $secondVendor->id,
+            'name' => 'New Vendor Shop',
+            'slug' => 'new-vendor-shop-'.Str::random(6),
+            'status' => StoreStatus::ACTIVE,
+        ]);
+
+        $this->actingAs($this->adminUser)
+            ->getJson('/api/v1/admin/wallet/settlements?group_by_vendor=1')
+            ->assertOk()
+            ->assertJsonCount(2, 'data')
+            ->assertJsonPath('data.0.vendor_id', $this->vendor->uuid)
+            ->assertJsonPath('data.0.stores.0.name', 'Himalayan Outlet')
+            ->assertJsonPath('data.0.stores.1.name', 'Himalayan Store')
+            ->assertJsonPath('data.0.gross_sales', '2500.00')
+            ->assertJsonPath('data.0.commission_total', '250.00')
+            ->assertJsonPath('data.0.earned_total', '2250.00')
+            ->assertJsonPath('data.0.net_payable', '2250.00')
+            ->assertJsonPath('data.0.available_balance', '2250.00')
+            ->assertJsonPath('data.0.pending_balance', '0.00')
+            ->assertJsonPath('data.1.vendor_id', $secondVendor->uuid)
+            ->assertJsonPath('data.1.stores.0.name', 'New Vendor Shop')
+            ->assertJsonPath('data.1.settlements_count', 0)
+            ->assertJsonPath('data.1.earned_total', '0.00');
+    }
+
     // ── 6. Customer cancellation blocked once order is confirmed ────────
 
     public function test_customer_cancellation_blocked_after_order_is_confirmed(): void
@@ -2001,6 +2066,12 @@ class OrderConfirmationRulesTest extends TestCase
             ->assertJsonPath('data.0.wallet.available_balance', '187.16')
             ->assertJsonPath('data.0.wallet.pending_balance', '0.00')
             ->assertJsonPath('data.0.earnings_maturity_days', 0);
+
+        $this->actingAs($this->adminUser)
+            ->getJson('/api/v1/admin/wallet/settlements?group_by_vendor=1')
+            ->assertOk()
+            ->assertJsonPath('data.0.earned_total', '187.16')
+            ->assertJsonPath('data.0.net_payable', '187.16');
     }
 
     public function test_refund_debit_records_the_exact_refund_above_vendor_payable(): void

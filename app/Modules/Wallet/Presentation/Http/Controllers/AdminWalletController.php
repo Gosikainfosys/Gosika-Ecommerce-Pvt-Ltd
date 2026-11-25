@@ -7,12 +7,16 @@ use App\Modules\Identity\Domain\Permissions;
 use App\Modules\Order\Infrastructure\Models\VendorOrder;
 use App\Modules\Payment\Infrastructure\Models\Refund;
 use App\Modules\Platform\Infrastructure\Models\Setting;
+use App\Modules\Shared\Domain\Enums\DeliveryStatus;
+use App\Modules\Shared\Domain\Enums\OrderPaymentStatus;
+use App\Modules\Shared\Domain\Enums\OrderStatus;
 use App\Modules\Shared\Domain\Enums\PayoutStatus;
 use App\Modules\Shared\Domain\Enums\SettlementStatus;
 use App\Modules\Shared\Domain\Exceptions\DomainException;
 use App\Modules\Shared\Presentation\Http\Filters\ListingDateRange;
 use App\Modules\Shared\Presentation\Http\Response;
 use App\Modules\Vendor\Infrastructure\Models\BankAccount;
+use App\Modules\Vendor\Infrastructure\Models\Store;
 use App\Modules\Vendor\Infrastructure\Models\Vendor;
 use App\Modules\Vendor\Presentation\Resources\BankAccountResource;
 use App\Modules\Wallet\Application\Services\WalletService;
@@ -264,54 +268,122 @@ class AdminWalletController extends Controller
 
     public function allSettlements(Request $request): JsonResponse
     {
+        $search = trim((string) $request->input('search', ''));
         $query = Settlement::query()
             ->with('vendor')
-            ->when($request->input('search'), function ($q, $s) {
-                $q->where('settlement_number', 'like', "%{$s}%")
-                    ->orWhereHas('vendor', fn ($v) => $v->where('company_name', 'like', "%{$s}%"));
+            ->when($search !== '', function ($q) use ($search) {
+                $q->where(function ($inner) use ($search) {
+                    $inner->where('settlement_number', 'like', "%{$search}%")
+                        ->orWhereHas('vendor', function ($vendor) use ($search) {
+                            $vendor->where('company_name', 'like', "%{$search}%")
+                                ->orWhereHas('stores', fn ($stores) => $stores->where('name', 'like', "%{$search}%"));
+                        });
+                });
             });
 
         if ($request->boolean('group_by_vendor')) {
-            $settlements = $query->latest()->get();
+            $this->service->releaseMaturedVendorEarnings();
+
+            $vendors = Vendor::query()
+                ->with([
+                    'wallet',
+                    'stores' => fn ($stores) => $stores->orderBy('name'),
+                ])
+                ->when($search !== '', function ($vendors) use ($search) {
+                    $vendors->where(function ($inner) use ($search) {
+                        $inner->where('company_name', 'like', "%{$search}%")
+                            ->orWhereHas('stores', fn ($stores) => $stores->where('name', 'like', "%{$search}%"))
+                            ->orWhereIn('id', Settlement::query()
+                                ->select('vendor_id')
+                                ->where('settlement_number', 'like', "%{$search}%"));
+                    });
+                })
+                ->orderBy('company_name')
+                ->get();
+
+            $settlementsByVendor = Settlement::query()
+                ->whereIn('vendor_id', $vendors->modelKeys())
+                ->latest()
+                ->get()
+                ->groupBy('vendor_id');
+
+            $earningOrderStatuses = [
+                OrderStatus::DELIVERED->value,
+                OrderStatus::COMPLETED->value,
+                OrderStatus::RETURNED->value,
+            ];
+            $earningPaymentStatuses = [
+                OrderPaymentStatus::PAID->value,
+                OrderPaymentStatus::PARTIALLY_REFUNDED->value,
+                OrderPaymentStatus::REFUNDED->value,
+            ];
+            $earningsByVendor = VendorOrder::query()
+                ->selectRaw('vendor_id, COUNT(*) as earning_orders_count, COALESCE(SUM(grand_total), 0) as gross_sales, COALESCE(SUM(commission_amount), 0) as commission_total, COALESCE(SUM(vendor_payable), 0) as payable_total')
+                ->whereIn('status', $earningOrderStatuses)
+                ->where('delivery_status', DeliveryStatus::DELIVERED->value)
+                ->whereHas('order', fn ($orders) => $orders->whereIn('payment_status', $earningPaymentStatuses))
+                ->groupBy('vendor_id')
+                ->get()
+                ->keyBy('vendor_id');
+            $refundsByVendor = Refund::query()
+                ->join('vendor_orders', 'vendor_orders.id', '=', 'refunds.vendor_order_id')
+                ->join('orders', 'orders.id', '=', 'vendor_orders.order_id')
+                ->where('refunds.status', 'refunded')
+                ->whereIn('vendor_orders.status', $earningOrderStatuses)
+                ->where('vendor_orders.delivery_status', DeliveryStatus::DELIVERED->value)
+                ->whereIn('orders.payment_status', $earningPaymentStatuses)
+                ->selectRaw('vendor_orders.vendor_id, COALESCE(SUM(refunds.amount), 0) as refunded_total')
+                ->groupBy('vendor_orders.vendor_id')
+                ->get()
+                ->mapWithKeys(fn ($row) => [(int) $row->vendor_id => (float) $row->refunded_total]);
 
             $statusPriority = [
                 SettlementStatus::PROCESSING->value => 0,
                 SettlementStatus::HOLD->value => 1,
                 SettlementStatus::ELIGIBLE->value => 2,
                 SettlementStatus::PAID->value => 3,
+                'not_generated' => 4,
             ];
 
-            $grouped = $settlements
-                ->groupBy('vendor_id')
-                ->map(function ($rows) use ($statusPriority) {
-                    $vendor = $rows->first()->vendor;
+            $grouped = $vendors->map(function (Vendor $vendor) use ($statusPriority, $settlementsByVendor, $earningsByVendor, $refundsByVendor) {
+                $rows = $settlementsByVendor->get($vendor->id, collect());
+                $earnings = $earningsByVendor->get($vendor->id);
+                $statuses = $rows->pluck('status')->map->value;
+                $bestStatus = $statuses->sortBy(fn ($status) => $statusPriority[$status] ?? 99)->first();
+                $open = $rows->reject(fn ($row) => $row->status->value === SettlementStatus::PAID->value);
+                $wallet = $vendor->wallet;
+                $earnedTotal = max(
+                    0,
+                    round((float) ($earnings?->payable_total ?? 0) - (float) $refundsByVendor->get($vendor->id, 0), 2)
+                );
 
-                    $statuses = $rows->pluck('status')->map->value;
-                    $bestStatus = $statuses
-                        ->sortBy(fn ($s) => $statusPriority[$s] ?? 99)
-                        ->first();
-
-                    $open = $rows->reject(fn ($r) => $r->status->value === SettlementStatus::PAID->value);
-
-                    return [
-                        'vendor_id' => $vendor?->uuid,
-                        'vendor_name' => $vendor?->company_name,
-                        'settlement_cycle_days' => $vendor ? $this->settlementCycleDays($vendor) : 14,
-                        'period_start' => $rows->min('period_start')?->toDateString(),
-                        'period_end' => $rows->max('period_end')?->toDateString(),
-                        'gross_sales' => number_format((float) $rows->sum(fn ($r) => (float) $r->gross_sales), 2, '.', ''),
-                        'commission_total' => number_format((float) $rows->sum(fn ($r) => (float) $r->commission_total), 2, '.', ''),
-                        'net_payable' => number_format((float) $open->sum(fn ($r) => (float) $r->net_payable), 2, '.', ''),
-                        'settled_amount' => number_format((float) $rows->filter(fn ($r) => $r->status->value === SettlementStatus::PAID->value)->sum(fn ($r) => (float) $r->net_payable), 2, '.', ''),
-                        'status' => $bestStatus,
-                        'settlements_count' => $rows->count(),
-                        'open_count' => $open->count(),
-                    ];
-                })
-                ->sortBy(fn ($v) => $statusPriority[$v['status']] ?? 99)
+                return [
+                    'vendor_id' => $vendor->uuid,
+                    'vendor_name' => $vendor->company_name,
+                    'stores' => $vendor->stores->map(fn (Store $store) => [
+                        'id' => $store->uuid,
+                        'name' => $store->name,
+                        'status' => $store->status?->value,
+                    ])->values(),
+                    'settlement_cycle_days' => $this->settlementCycleDays($vendor),
+                    'period_start' => $rows->min('period_start')?->toDateString(),
+                    'period_end' => $rows->max('period_end')?->toDateString(),
+                    'gross_sales' => number_format((float) ($earnings?->gross_sales ?? 0), 2, '.', ''),
+                    'commission_total' => number_format((float) ($earnings?->commission_total ?? 0), 2, '.', ''),
+                    'earned_total' => number_format((float) $earnedTotal, 2, '.', ''),
+                    'net_payable' => number_format((float) ($wallet?->balance ?? 0), 2, '.', ''),
+                    'available_balance' => number_format((float) ($wallet?->available_balance ?? 0), 2, '.', ''),
+                    'pending_balance' => number_format((float) ($wallet?->pending_balance ?? 0), 2, '.', ''),
+                    'status' => $bestStatus ?? 'not_generated',
+                    'earning_orders_count' => (int) ($earnings?->earning_orders_count ?? 0),
+                    'settlements_count' => $rows->count(),
+                    'open_count' => $open->count(),
+                ];
+            })
+                ->sortBy(fn ($vendor) => $statusPriority[$vendor['status']] ?? 99)
                 ->values();
 
-            return Response::success($grouped, 'Vendor settlement summaries retrieved.');
+            return Response::success($grouped, 'Vendor settlement and earnings summaries retrieved.');
         }
 
         $settlements = $query

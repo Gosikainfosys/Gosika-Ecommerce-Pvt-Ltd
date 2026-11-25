@@ -120,24 +120,32 @@ export default function AdminSettlements() {
     exportReportFromRows({
       columns: [
         { label: 'Store / Vendor' },
+        { label: 'Stores' },
         { label: 'Statement Period Start' },
         { label: 'Statement Period End' },
         { label: 'Gross Sales', align: 'right' },
         { label: 'Platform Commission', align: 'right' },
-        { label: 'Net Payable', align: 'right' },
+        { label: 'Net Earned', align: 'right' },
+        { label: 'Wallet Balance', align: 'right' },
+        { label: 'Available Balance', align: 'right' },
+        { label: 'Pending Balance', align: 'right' },
         { label: 'Status' },
       ],
       rows: summary.map(s => [
         s.vendor_name || '',
+        (s.stores || []).map(store => store.name).join(', '),
         s.period_start || '',
         s.period_end || '',
         s.gross_sales || 0,
         s.commission_total || 0,
+        s.earned_total || 0,
         s.net_payable || 0,
+        s.available_balance || 0,
+        s.pending_balance || 0,
         s.status || '',
       ]),
       title: 'Vendor Settlement Summaries',
-      subtitle: 'Aggregated settlement balances per store with gross sales, platform commission and net payables.',
+      subtitle: 'Vendor-level settlement history, store listings, delivered-order earnings, and wallet balances.',
       sectionLabel: 'Settlement Ledger',
       fileName: `gosika_settlements_${new Date().toISOString().slice(0, 10)}`,
       preparedBy: personLabel(user),
@@ -150,7 +158,7 @@ export default function AdminSettlements() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <PageHeader
         title="Settlements & Vendor Wallets"
-        description="One row per store showing gross sales, platform commission and net payable still open — track settlement cycles, and hold or release settlements from this page. Payouts are requested by the vendor and approved here."
+        description="One row per vendor with all stores, delivered-order earnings, current wallet balances, and settlement history. Vendor withdrawals are reviewed on the Payouts page."
         exportInfo="Export includes only the settlement rows currently shown after applied filters."
         breadcrumbs={[
           { label: 'Finance', to: '/admin/finance/payments' },
@@ -197,7 +205,7 @@ export default function AdminSettlements() {
           onChange={e => setSearch(e.target.value)}
         />
         <span style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 600 }}>
-          {summary.length} store{summary.length === 1 ? '' : 's'}
+          {summary.length} vendor{summary.length === 1 ? '' : 's'}
         </span>
       </div>
 
@@ -219,7 +227,7 @@ export default function AdminSettlements() {
                   Platform Commission
                 </th>
                 <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: 11.5, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>
-                  Net Payable (Left)
+                  Net Earned / Wallet
                 </th>
                 <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 11.5, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>
                   Status
@@ -240,10 +248,9 @@ export default function AdminSettlements() {
               ) : summary.length === 0 ? (
                 <tr>
                   <td colSpan={8} style={{ padding: 40, textAlign: 'center', color: 'var(--muted)' }}>
-                    <div style={{ fontWeight: 700, color: 'var(--ink)' }}>No settlement summaries found.</div>
+                    <div style={{ fontWeight: 700, color: 'var(--ink)' }}>No vendor profiles found.</div>
                     <div style={{ maxWidth: 620, margin: '6px auto 0', fontSize: 12 }}>
-                      Paid, delivered orders appear after the return window and vendor settlement cycle have elapsed.
-                      The scheduled order processor must be running to generate matured settlements automatically.
+                      Vendors and their stores appear here even before they have a settlement or earned orders.
                     </div>
                   </td>
                 </tr>
@@ -264,8 +271,13 @@ export default function AdminSettlements() {
                         <div style={{ fontWeight: 800, color: 'var(--ink)', fontSize: 13 }}>
                           {s.vendor_name}
                         </div>
+                        {(s.stores || []).map(store => (
+                          <div key={store.id} style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
+                            {store.name} · {store.status}
+                          </div>
+                        ))}
                         <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-                          {s.settlements_count} settlement period(s)
+                          {s.earning_orders_count} earning order(s) · {s.settlements_count} settlement period(s)
                         </div>
                       </div>
                     </div>
@@ -280,10 +292,18 @@ export default function AdminSettlements() {
                     - {money(s.commission_total || 0)}
                   </td>
                   <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 900, color: '#16a34a', fontSize: 14 }}>
-                    {money(s.net_payable || 0)}
+                    <div>{money(s.earned_total || 0)}</div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>
+                      Wallet: {money(s.net_payable || 0)}
+                    </div>
+                    <div style={{ fontSize: 10.5, color: 'var(--muted)', fontWeight: 500 }}>
+                      Available {money(s.available_balance || 0)} · Pending {money(s.pending_balance || 0)}
+                    </div>
                   </td>
                   <td style={{ padding: '12px 16px' }}>
-                    <StatusBadge status={s.status} />
+                    {s.settlements_count > 0
+                      ? <StatusBadge status={s.status} />
+                      : <span style={{ fontSize: 11, color: 'var(--muted)' }}>Not generated</span>}
                   </td>
                   <td style={{ padding: '12px 16px', textAlign: 'center', whiteSpace: 'nowrap' }}>
                     <input
