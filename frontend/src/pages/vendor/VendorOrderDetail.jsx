@@ -105,6 +105,7 @@ export default function VendorOrderDetail() {
   }
 
   const addr = order.shipping_address || order.order?.shipping_address || {}
+  const paidOnline = order.payment_status === 'paid' && order.payment_method !== 'cod'
 
   const printInvoice = () => {
     const today = new Date().toLocaleDateString('en-GB', { year: 'numeric', month: 'short', day: 'numeric' })
@@ -231,7 +232,7 @@ export default function VendorOrderDetail() {
         </div>
       )}
 
-      {order.status === 'pending' && cancellationCountdown === 0 && deadlineCountdown > 0 && (
+      {order.status === 'pending' && !paidOnline && cancellationCountdown === 0 && deadlineCountdown > 0 && (
         <div className="card" style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', padding: '12px 18px' }}>
           <div className="flex items-center justify-between wrap gap-2">
             <div className="flex items-center gap-2">

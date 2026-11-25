@@ -64,7 +64,10 @@ class VendorOrderResource extends JsonResource
 
         $now = now();
         $isPending = $this->status === \App\Modules\Shared\Domain\Enums\OrderStatus::PENDING;
-        $inCancellationWindow = $isPending && $now->lessThan($cancellationEndsAt);
+        $paidOnline = $this->order
+            && $this->order->payment_status === \App\Modules\Shared\Domain\Enums\OrderPaymentStatus::PAID
+            && $this->order->payment_method !== \App\Modules\Shared\Domain\Enums\PaymentMethod::COD->value;
+        $inCancellationWindow = $isPending && ! $paidOnline && $now->lessThan($cancellationEndsAt);
         $isPastDeadline = $isPending && $now->greaterThanOrEqualTo($deadline);
         $canConfirm = $isPending && ! $inCancellationWindow && ! $isPastDeadline;
 

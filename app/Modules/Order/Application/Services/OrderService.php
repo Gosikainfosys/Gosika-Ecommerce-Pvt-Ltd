@@ -222,6 +222,69 @@ class OrderService
         });
     }
 
+    public function updateAdminStatus(Order $order, User $actor, OrderStatus $status, ?string $reason = null): Order
+    {
+        if (in_array($status, [OrderStatus::CANCELLED, OrderStatus::PAYMENT_PENDING, OrderStatus::FAILED, OrderStatus::RETURNED, OrderStatus::REFUNDED], true)) {
+            throw new DomainException('Use the dedicated order or payment workflow for this status.', 422);
+        }
+
+        return DB::transaction(function () use ($order, $actor, $status, $reason) {
+            $order = Order::query()->whereKey($order->getKey())->lockForUpdate()->firstOrFail();
+            if ($order->status === $status) {
+                return $order;
+            }
+            if (in_array($order->status, [OrderStatus::CANCELLED, OrderStatus::FAILED, OrderStatus::RETURNED, OrderStatus::REFUNDED], true)) {
+                throw new DomainException('Terminal orders cannot be reopened through a status update.', 422);
+            }
+
+            $from = $order->status->value;
+            $updates = ['status' => $status];
+            if (in_array($status, [
+                OrderStatus::CONFIRMED,
+                OrderStatus::ACCEPTED,
+                OrderStatus::PROCESSING,
+                OrderStatus::PREPARING,
+                OrderStatus::READY_FOR_PICKUP,
+                OrderStatus::PICKED_UP,
+                OrderStatus::OUT_FOR_DELIVERY,
+                OrderStatus::DELIVERED,
+                OrderStatus::COMPLETED,
+            ], true)) {
+                $updates['confirmed_at'] = $order->confirmed_at ?? now();
+            }
+            if (in_array($status, [OrderStatus::DELIVERED, OrderStatus::COMPLETED], true)) {
+                $updates['completed_at'] = $order->completed_at ?? now();
+            }
+            $order->update($updates);
+
+            foreach ($order->vendorOrders()->lockForUpdate()->get() as $vendorOrder) {
+                $vendorFrom = $vendorOrder->status->value;
+                if ($vendorOrder->status !== $status) {
+                    $vendorOrder->update(['status' => $status]);
+                    OrderStatusHistory::create([
+                        'trackable_type' => VendorOrder::class,
+                        'trackable_id' => $vendorOrder->id,
+                        'from_status' => $vendorFrom,
+                        'to_status' => $status->value,
+                        'reason' => $reason,
+                        'actor_user_id' => $actor->id,
+                    ]);
+                }
+            }
+
+            OrderStatusHistory::create([
+                'trackable_type' => Order::class,
+                'trackable_id' => $order->id,
+                'from_status' => $from,
+                'to_status' => $status->value,
+                'reason' => $reason,
+                'actor_user_id' => $actor->id,
+            ]);
+
+            return $order->fresh(['user', 'items', 'vendorOrders.items', 'payments', 'shippingAddress']);
+        });
+    }
+
     public function cancelForPaymentFailure(Order $order, string $reason): Order
     {
         return DB::transaction(function () use ($order, $reason) {

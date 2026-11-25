@@ -19,6 +19,20 @@ import { useToast } from '../../context/ToastContext'
 const esc = (v) =>
   String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
+const ORDER_STATUS_OPTIONS = [
+  ['pending', 'Pending'],
+  ['confirmed', 'Confirmed'],
+  ['accepted', 'Accepted'],
+  ['processing', 'Processing'],
+  ['preparing', 'Preparing'],
+  ['ready_for_pickup', 'Ready for pickup'],
+  ['picked_up', 'Picked up'],
+  ['out_for_delivery', 'Out for delivery'],
+  ['delivered', 'Delivered'],
+  ['completed', 'Completed'],
+  ['rejected', 'Rejected'],
+]
+
 const buildDocHtml = ({ docTitle, docLines, metaRows, billTo, addrHtml, groupsHtml, totalsHtml, footer, qrHtml = '' }) => {
   const meta = metaRows
     .map(([l, v]) => `<div><b>${esc(l)}</b><span>${esc(v)}</span></div>`)
@@ -123,6 +137,9 @@ export default function AdminOrderDetail() {
   const [order, setOrder] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [statusDraft, setStatusDraft] = useState('')
+  const [statusReason, setStatusReason] = useState('')
+  const [statusSaving, setStatusSaving] = useState(false)
 
   const [dialogState, setDialogState] = useState({
     isOpen: false,
@@ -269,7 +286,9 @@ export default function AdminOrderDetail() {
     setError(null)
     try {
       const res = await api.get(`/admin/orders/${id}`)
-      setOrder(res.data?.data || null)
+      const loadedOrder = res.data?.data || null
+      setOrder(loadedOrder)
+      setStatusDraft(loadedOrder?.status || '')
     } catch (err) {
       setError('Order record could not be retrieved.')
     } finally {
@@ -290,6 +309,29 @@ export default function AdminOrderDetail() {
       if (action === 'cancel') {
         await api.post(`/admin/orders/${targetId}/cancel`, { reason })
         toast.success(`Order #${order.order_number || order.id} has been cancelled.`)
+      }
+
+      const handleStatusUpdate = async (event) => {
+        event.preventDefault()
+        if (statusDraft === 'rejected' && !statusReason.trim()) {
+          toast.error('Please provide a reason for rejecting this order.')
+          return
+        }
+
+        setStatusSaving(true)
+        try {
+          await api.patch(`/admin/orders/${order.uuid || order.id}/status`, {
+            status: statusDraft,
+            reason: statusReason.trim() || undefined,
+          })
+          toast.success('Order status updated.')
+          setStatusReason('')
+          await loadOrder()
+        } catch (err) {
+          toast.error(err.response?.data?.message || 'Failed to update order status.')
+        } finally {
+          setStatusSaving(false)
+        }
       }
 
       setDialogState({ isOpen: false, action: null, loading: false })
@@ -330,6 +372,13 @@ export default function AdminOrderDetail() {
   const vendorOrders = Array.isArray(order.vendor_orders) ? order.vendor_orders : []
   const payments = Array.isArray(order.payments) ? order.payments : []
   const isCancellable = order.status !== 'cancelled' && order.status !== 'delivered' && order.status !== 'completed'
+  const canChangeStatus = !['cancelled', 'failed', 'returned', 'refunded'].includes(order.status)
+  const isStatusEditable = ORDER_STATUS_OPTIONS.some(([status]) => status === statusDraft)
+  const overviewPackage = vendorOrders[0]
+  const overviewAssignments = vendorOrders.flatMap(vo => vo.assignments || [])
+  const overviewAssignment = overviewAssignments.find(a => !['delivered', 'failed', 'returned_to_vendor', 'cancelled'].includes(a.status))
+    || overviewAssignments[0]
+    || overviewPackage?.assignment
 
   const addressLines = [
     address.full_name || address.recipient_name || address.name || '',
@@ -591,6 +640,76 @@ export default function AdminOrderDetail() {
           )}
           <div style={{ fontSize: 24, fontWeight: 900, color: Number(order.refunded_amount) > 0 ? '#15803d' : '#16a34a' }}>
             {money(order.net_total ?? order.grand_total ?? order.total ?? 0)}
+          </div>
+        </div>
+      </div>
+
+      <form className="card" onSubmit={handleStatusUpdate} style={{ display: 'flex', alignItems: 'end', flexWrap: 'wrap', gap: 12, padding: '14px 18px' }}>
+        <div style={{ minWidth: 190, flex: '0 1 220px' }}>
+          <label htmlFor="admin-order-status" style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 5 }}>Update order status</label>
+          <select
+            id="admin-order-status"
+            className="input"
+            value={statusDraft}
+            onChange={event => setStatusDraft(event.target.value)}
+            disabled={!canChangeStatus || statusSaving}
+          >
+            {!isStatusEditable && (
+              <option value={order.status} disabled>
+                {String(order.status || 'unknown').replace(/_/g, ' ')}
+              </option>
+            )}
+            {ORDER_STATUS_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select>
+        </div>
+        <div style={{ minWidth: 220, flex: '1 1 280px' }}>
+          <label htmlFor="admin-order-status-reason" style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 5 }}>
+            Admin note {statusDraft === 'rejected' ? '(required)' : '(optional)'}
+          </label>
+          <input
+            id="admin-order-status-reason"
+            className="input"
+            value={statusReason}
+            onChange={event => setStatusReason(event.target.value)}
+            maxLength={500}
+            required={statusDraft === 'rejected'}
+            placeholder={statusDraft === 'rejected' ? 'Reason for rejection' : 'Add context to the status history'}
+          />
+        </div>
+        <button type="submit" className="btn btn-primary btn-sm" disabled={statusSaving || !canChangeStatus || !isStatusEditable || statusDraft === order.status}>
+          {statusSaving ? 'Updating…' : 'Update Status'}
+        </button>
+      </form>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 16 }}>
+        <div className="card" style={{ padding: 18, borderRadius: 14 }}>
+          <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--muted)', textTransform: 'uppercase', marginBottom: 8 }}>Customer</div>
+          <div style={{ fontSize: 14, fontWeight: 800 }}>{customerName}</div>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 3 }}>{customerEmail}</div>
+          <div style={{ fontSize: 12, color: 'var(--muted)' }}>{customerPhone}</div>
+        </div>
+        <div className="card" style={{ padding: 18, borderRadius: 14 }}>
+          <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--muted)', textTransform: 'uppercase', marginBottom: 8 }}>Order & Payment</div>
+          <div style={{ fontSize: 14, fontWeight: 800 }}>{formatDateTime(order.created_at || order.placed_at)}</div>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 3 }}>
+            {(order.payment_method || 'COD').toUpperCase()} · {(order.payment_status || 'pending').toUpperCase()}
+          </div>
+          <div style={{ fontSize: 14, fontWeight: 800, color: '#16a34a', marginTop: 5 }}>{money(order.grand_total || order.total || 0)}</div>
+        </div>
+        <div className="card" style={{ padding: 18, borderRadius: 14 }}>
+          <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--muted)', textTransform: 'uppercase', marginBottom: 8 }}>Delivery</div>
+          <div style={{ fontSize: 14, fontWeight: 800 }}>
+            {overviewAssignment?.delivery_partner?.name || overviewAssignment?.delivery_partner?.user?.name || 'Not assigned'}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 5 }}>
+            Status: {overviewAssignment?.status || overviewPackage?.delivery_status || 'Pending'}
+          </div>
+        </div>
+        <div className="card" style={{ padding: 18, borderRadius: 14 }}>
+          <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--muted)', textTransform: 'uppercase', marginBottom: 8 }}>Store</div>
+          <div style={{ fontSize: 14, fontWeight: 800 }}>{overviewPackage?.store?.name || overviewPackage?.vendor_name || 'Marketplace order'}</div>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 5 }}>
+            {vendorOrders.length} fulfillment {vendorOrders.length === 1 ? 'package' : 'packages'}
           </div>
         </div>
       </div>

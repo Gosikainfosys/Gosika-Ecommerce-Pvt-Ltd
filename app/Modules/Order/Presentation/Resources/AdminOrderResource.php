@@ -47,6 +47,12 @@ class AdminOrderResource extends JsonResource
             'items' => OrderItemResource::collection($this->whenLoaded('items')),
             'vendor_orders' => VendorOrderResource::collection($this->whenLoaded('vendorOrders')),
             'payments' => PaymentResource::collection($this->whenLoaded('payments')),
+            'status_history' => $this->whenLoaded('statusHistory', fn () => $this->statusHistory->map(fn ($history) => [
+                'from_status' => $history->from_status,
+                'to_status' => $history->to_status,
+                'reason' => $history->reason,
+                'created_at' => $history->created_at?->toISOString(),
+            ])->values()),
             'item_count' => $this->items->sum('quantity'),
             'placed_at' => $this->placed_at?->toISOString(),
             'created_at' => $this->created_at?->toISOString(),

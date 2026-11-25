@@ -447,6 +447,23 @@ class OrderConfirmationRulesTest extends TestCase
         $this->assertEquals(OrderStatus::PENDING->value, $vendorOrder->fresh()->status->value);
     }
 
+    public function test_paid_online_order_can_be_confirmed_during_cancellation_window(): void
+    {
+        [$order, $vendorOrder] = $this->createOrder(OrderStatus::PENDING, false);
+
+        $this->actingAs($this->vendorUser)
+            ->getJson("/api/v1/vendor/orders/{$vendorOrder->uuid}")
+            ->assertOk()
+            ->assertJsonPath('data.can_confirm', true)
+            ->assertJsonPath('data.cancellation_window_seconds_remaining', 0);
+
+        $res = $this->postJson("/api/v1/vendor/orders/{$vendorOrder->uuid}/accept");
+
+        $res->assertOk();
+        $this->assertSame(OrderStatus::ACCEPTED, $vendorOrder->fresh()->status);
+        $this->assertSame(OrderStatus::CONFIRMED, $order->fresh()->status);
+    }
+
     // ── 5. Manual confirmation succeeds after window & before deadline ──
 
     public function test_manual_confirmation_succeeds_after_window_and_before_deadline(): void
@@ -462,6 +479,28 @@ class OrderConfirmationRulesTest extends TestCase
         $this->assertEquals(OrderStatus::ACCEPTED->value, $vendorOrder->fresh()->status->value);
         $this->assertEquals(OrderStatus::CONFIRMED->value, $order->fresh()->status->value);
         $this->assertEquals('manual', $vendorOrder->fresh()->meta['confirmation_method']);
+    }
+
+    public function test_admin_can_update_order_status_and_vendor_package_status_with_history(): void
+    {
+        [$order, $vendorOrder] = $this->createOrder();
+
+        $this->actingAs($this->adminUser)
+            ->patchJson("/api/v1/admin/orders/{$order->uuid}/status", [
+                'status' => OrderStatus::REJECTED->value,
+            ])
+            ->assertUnprocessable();
+
+        $res = $this->actingAs($this->adminUser)->patchJson("/api/v1/admin/orders/{$order->uuid}/status", [
+            'status' => OrderStatus::OUT_FOR_DELIVERY->value,
+            'reason' => 'Handed to delivery partner.',
+        ]);
+
+        $res->assertOk()
+            ->assertJsonPath('data.status', OrderStatus::OUT_FOR_DELIVERY->value)
+            ->assertJsonPath('data.status_history.0.to_status', OrderStatus::OUT_FOR_DELIVERY->value);
+        $this->assertSame(OrderStatus::OUT_FOR_DELIVERY, $order->fresh()->status);
+        $this->assertSame(OrderStatus::OUT_FOR_DELIVERY, $vendorOrder->fresh()->status);
     }
 
     // ── 6. Customer cancellation blocked once order is confirmed ────────

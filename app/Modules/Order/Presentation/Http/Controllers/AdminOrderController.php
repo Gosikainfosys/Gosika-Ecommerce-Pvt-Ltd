@@ -103,6 +103,7 @@ class AdminOrderController extends Controller
                     ->with(['items.product.primaryImage', 'store', 'assignments.deliveryPartner', 'returnRequests']),
                 'payments',
                 'shippingAddress',
+                'statusHistory',
             ])
             ->where(function ($q) use ($orderId) {
                 $q->where('uuid', $orderId)
@@ -642,6 +643,57 @@ class AdminOrderController extends Controller
             );
 
             return Response::success(new AdminOrderResource($order), 'Order cancelled.');
+        } catch (DomainException $e) {
+            return Response::error($e->getMessage(), $e->getErrors(), $e->getStatusCode());
+        }
+    }
+
+    public function updateStatus(Request $request, string $orderId): JsonResponse
+    {
+        $validated = $request->validate([
+            'status' => ['required', Rule::in([
+                OrderStatus::PENDING->value,
+                OrderStatus::CONFIRMED->value,
+                OrderStatus::ACCEPTED->value,
+                OrderStatus::REJECTED->value,
+                OrderStatus::PROCESSING->value,
+                OrderStatus::PREPARING->value,
+                OrderStatus::READY_FOR_PICKUP->value,
+                OrderStatus::PICKED_UP->value,
+                OrderStatus::OUT_FOR_DELIVERY->value,
+                OrderStatus::DELIVERED->value,
+                OrderStatus::COMPLETED->value,
+            ])],
+            'reason' => ['nullable', 'required_if:status,rejected', 'string', 'max:500'],
+        ]);
+
+        $order = Order::query()
+            ->where(function ($query) use ($orderId) {
+                $query->where('uuid', $orderId)->orWhere('order_number', $orderId);
+                if (ctype_digit($orderId)) {
+                    $query->orWhere('id', (int) $orderId);
+                }
+            })
+            ->firstOrFail();
+        $oldStatus = $order->status->value;
+
+        try {
+            $order = $this->orderService->updateAdminStatus(
+                $order,
+                $request->user(),
+                OrderStatus::from($validated['status']),
+                $validated['reason'] ?? null,
+            );
+            app(AuditLogService::class)->record(
+                $request->user(),
+                'order.status_updated',
+                'order',
+                $order->getKey(),
+                ['status' => $oldStatus],
+                ['status' => $validated['status'], 'reason' => $validated['reason'] ?? null],
+            );
+
+            return Response::success(new AdminOrderResource($order->load('statusHistory')), 'Order status updated.');
         } catch (DomainException $e) {
             return Response::error($e->getMessage(), $e->getErrors(), $e->getStatusCode());
         }

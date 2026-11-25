@@ -1076,12 +1076,15 @@ class DeliveryService
 
             $order = $vendorOrder->order()->lockForUpdate()->first();
             $placedAt = \Illuminate\Support\Carbon::parse($order?->placed_at ?? $order?->created_at ?? $vendorOrder->created_at);
+            $paidOnline = $order
+                && $order->payment_status === OrderPaymentStatus::PAID
+                && $order->payment_method !== PaymentMethod::COD->value;
 
-            // 1. Cancellation Window Check: Vendor cannot confirm while customer cancellation window is active
+            // Paid online orders can be confirmed immediately; keep the cancellation window for unpaid orders.
             $cancellationWindowMins = (int) Setting::get('order.cancellation_window_minutes', 15);
             $cancellationWindowEndsAt = $placedAt->copy()->addMinutes($cancellationWindowMins);
 
-            if (now()->lessThan($cancellationWindowEndsAt)) {
+            if (! $paidOnline && now()->lessThan($cancellationWindowEndsAt)) {
                 $remainingSeconds = now()->diffInSeconds($cancellationWindowEndsAt);
                 $remainingMinutes = (int) ceil($remainingSeconds / 60);
                 throw new DomainException(
