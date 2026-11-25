@@ -42,6 +42,26 @@ Route::get('/payments/khalti/callback', function (Request $request) {
 // ── Homepage ─────────────────────────────────────────────────────────────
 Route::get('/', SpaController::class);
 
+// ── Secure deploy/cache-clear endpoint ───────────────────────────────────
+// Hit: GET /deploy-clear?token=<DEPLOY_SECRET>
+Route::get('/deploy-clear', function (Request $request) {
+    $secret = config('app.deploy_secret', env('DEPLOY_SECRET', ''));
+    if ($secret === '' || $request->query('token') !== $secret) {
+        abort(403, 'Forbidden');
+    }
+
+    \Illuminate\Support\Facades\Artisan::call('route:clear');
+    \Illuminate\Support\Facades\Artisan::call('config:clear');
+    \Illuminate\Support\Facades\Artisan::call('cache:clear');
+    \Illuminate\Support\Facades\Artisan::call('view:clear');
+
+    return response()->json([
+        'status' => 'ok',
+        'cleared' => ['routes', 'config', 'cache', 'views'],
+        'timestamp' => now()->toISOString(),
+    ]);
+});
+
 // ── SPA fallback for all other public GET requests ───────────────────────
 Route::fallback(function (Request $request) {
     if ($request->is('api/*') || $request->is('storage/*') || $request->is('up')) {
