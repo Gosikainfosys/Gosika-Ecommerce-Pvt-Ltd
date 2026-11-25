@@ -30,6 +30,7 @@ Route::prefix('v1/admin/orders')->middleware(['auth:sanctum', 'ensure:admin'])->
     // Orders
     Route::get('/', [AdminOrderController::class, 'index']);
     Route::post('/', [AdminOrderController::class, 'manualCreate']);
+    Route::post('/{order}/returns', [AdminOrderController::class, 'createReturnRequest']);
     Route::get('/{order}', [AdminOrderController::class, 'show']);
     Route::patch('/{order}/status', [AdminOrderController::class, 'updateStatus']);
     Route::post('/{order}/cancel', [AdminOrderController::class, 'cancel']);

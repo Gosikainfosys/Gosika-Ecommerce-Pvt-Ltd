@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import {
   ShoppingBag, Store, Truck, CreditCard,
   User, MapPin, Phone, Mail, Clock,
@@ -18,6 +18,17 @@ import { useToast } from '../../context/ToastContext'
 
 const esc = (v) =>
   String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+
+const getOrderReturnItems = (order) => {
+  const packageItems = (order?.vendor_orders || []).flatMap(vendorOrder =>
+    (vendorOrder.items || []).map(item => ({
+      ...item,
+      storeName: vendorOrder.store?.name || vendorOrder.vendor_name || 'Store',
+    })),
+  )
+
+  return packageItems.length > 0 ? packageItems : (order?.items || [])
+}
 
 const ORDER_STATUS_OPTIONS = [
   ['pending', 'Pending'],
@@ -132,6 +143,7 @@ const buildDocHtml = ({ docTitle, docLines, metaRows, billTo, addrHtml, groupsHt
 
 export default function AdminOrderDetail() {
   const { id } = useParams()
+  const navigate = useNavigate()
   const toast = useToast()
 
   const [order, setOrder] = useState(null)
@@ -140,6 +152,15 @@ export default function AdminOrderDetail() {
   const [statusDraft, setStatusDraft] = useState('')
   const [statusReason, setStatusReason] = useState('')
   const [statusSaving, setStatusSaving] = useState(false)
+  const [returnModalOpen, setReturnModalOpen] = useState(false)
+  const [returnSaving, setReturnSaving] = useState(false)
+  const [returnForm, setReturnForm] = useState({
+    orderItemId: '',
+    requestType: 'return_refund',
+    reasonType: 'other',
+    reason: '',
+    quantity: '1',
+  })
 
   const [dialogState, setDialogState] = useState({
     isOpen: false,
@@ -305,6 +326,55 @@ export default function AdminOrderDetail() {
     if (statusDraft === 'rejected' && !statusReason.trim()) {
       toast.error('Please provide a reason for rejecting this order.')
       return
+    }
+
+    const handleOpenReturnModal = () => {
+      const returnItems = getOrderReturnItems(order)
+
+      if (returnItems.length === 0) {
+        toast.error('This order has no items available for an exchange or refund.')
+        return
+      }
+
+      setReturnForm({
+        orderItemId: String(returnItems[0].id || returnItems[0].uuid || ''),
+        requestType: 'return_refund',
+        reasonType: 'other',
+        reason: '',
+        quantity: '1',
+      })
+      setReturnModalOpen(true)
+    }
+
+    const handleCreateReturn = async (event) => {
+      event.preventDefault()
+      if (!returnForm.orderItemId || !returnForm.reason.trim()) {
+        toast.error('Select an item and enter a reason.')
+        return
+      }
+
+      setReturnSaving(true)
+      try {
+        const res = await api.post(`/admin/orders/${order.uuid || order.id}/returns`, {
+          order_item_id: returnForm.orderItemId,
+          request_type: returnForm.requestType,
+          reason_type: returnForm.reasonType,
+          reason: returnForm.reason.trim(),
+          quantity: Number(returnForm.quantity),
+        })
+        const created = res.data?.data
+        setReturnModalOpen(false)
+        toast.success(`${returnForm.requestType === 'exchange' ? 'Exchange' : 'Refund'} request created and approved.`)
+        if (created?.uuid) {
+          navigate(`/admin/orders/returns/${created.uuid}`)
+        } else {
+          await loadOrder()
+        }
+      } catch (err) {
+        toast.error(err.response?.data?.message || 'Failed to create the exchange or refund request.')
+      } finally {
+        setReturnSaving(false)
+      }
     }
 
     setStatusSaving(true)
@@ -564,6 +634,17 @@ export default function AdminOrderDetail() {
             >
               <Printer size={14} /> Print Invoice
             </button>
+
+            {order.status === 'delivered' && (
+              <button
+                type="button"
+                className="btn btn-outline btn-sm"
+                onClick={handleOpenReturnModal}
+                style={{ display: 'flex', alignItems: 'center', gap: 6, borderRadius: 8, color: 'var(--primary)', borderColor: 'var(--primary)' }}
+              >
+                <RefreshCw size={14} /> Exchange / Refund
+              </button>
+            )}
 
             {isCancellable && (
               <button
@@ -1052,6 +1133,115 @@ export default function AdminOrderDetail() {
       </div>
 
       {/* Cancellation Dialog */}
+      {returnModalOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1000,
+            background: 'rgba(15, 23, 42, 0.6)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+          }}
+          onClick={event => {
+            if (event.target === event.currentTarget && !returnSaving) setReturnModalOpen(false)
+          }}
+        >
+          <div className="card" style={{ width: '100%', maxWidth: 560, padding: 22, borderRadius: 14, background: '#fff' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800 }}>Process Exchange / Refund</h3>
+              <button type="button" className="btn btn-ghost btn-xs" onClick={() => setReturnModalOpen(false)} disabled={returnSaving}>✕</button>
+            </div>
+            <p style={{ margin: '0 0 16px', color: 'var(--muted)', fontSize: 12, lineHeight: 1.5 }}>
+              This creates and approves a return request for the customer. Refund amount and final exchange processing are handled in the return record.
+            </p>
+            <form onSubmit={handleCreateReturn} style={{ display: 'grid', gap: 13 }}>
+              <div>
+                <label className="label" style={{ display: 'block', marginBottom: 5 }}>Order item *</label>
+                <select
+                  className="input"
+                  value={returnForm.orderItemId}
+                  onChange={event => setReturnForm(prev => ({ ...prev, orderItemId: event.target.value, quantity: '1' }))}
+                  required
+                >
+                  {getOrderReturnItems(order).map(item => (
+                    <option key={item.id || item.uuid} value={item.id || item.uuid}>
+                      {item.product_name || item.name} · Qty {item.quantity} · {item.storeName || 'Order item'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label className="label" style={{ display: 'block', marginBottom: 5 }}>Resolution *</label>
+                  <select
+                    className="input"
+                    value={returnForm.requestType}
+                    onChange={event => setReturnForm(prev => ({ ...prev, requestType: event.target.value }))}
+                  >
+                    <option value="return_refund">Return &amp; Refund</option>
+                    <option value="exchange">Exchange</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="label" style={{ display: 'block', marginBottom: 5 }}>Reason category *</label>
+                  <select
+                    className="input"
+                    value={returnForm.reasonType}
+                    onChange={event => setReturnForm(prev => ({ ...prev, reasonType: event.target.value }))}
+                  >
+                    <option value="damaged">Damaged</option>
+                    <option value="wrong_item">Wrong item</option>
+                    <option value="not_as_described">Not as described</option>
+                    <option value="quality_issue">Quality issue</option>
+                    <option value="size_fit">Size / fit</option>
+                    <option value="changed_mind">Changed mind</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="label" style={{ display: 'block', marginBottom: 5 }}>Quantity *</label>
+                <input
+                  className="input"
+                  type="number"
+                  min="1"
+                  max={(() => {
+                    const item = getOrderReturnItems(order)
+                      .find(candidate => String(candidate.id || candidate.uuid) === returnForm.orderItemId)
+                    return Math.max(1, Number(item?.quantity || 1))
+                  })()}
+                  step="1"
+                  value={returnForm.quantity}
+                  onChange={event => setReturnForm(prev => ({ ...prev, quantity: event.target.value }))}
+                  required
+                />
+              </div>
+              <div>
+                <label className="label" style={{ display: 'block', marginBottom: 5 }}>Reason / customer explanation *</label>
+                <textarea
+                  className="input"
+                  rows={3}
+                  maxLength={2000}
+                  value={returnForm.reason}
+                  onChange={event => setReturnForm(prev => ({ ...prev, reason: event.target.value }))}
+                  placeholder="Add the customer's issue or reason for the exchange/refund"
+                  required
+                />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
+                <button type="button" className="btn btn-outline btn-sm" onClick={() => setReturnModalOpen(false)} disabled={returnSaving}>Cancel</button>
+                <button type="submit" className="btn btn-primary btn-sm" disabled={returnSaving || !returnForm.orderItemId || !returnForm.reason.trim()}>
+                  {returnSaving ? 'Creating…' : 'Create Request'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       <ConfirmDialog
         isOpen={dialogState.isOpen}
         onClose={() => setDialogState({ isOpen: false, action: null, loading: false })}

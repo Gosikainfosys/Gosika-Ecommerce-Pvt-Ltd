@@ -440,6 +440,7 @@ export default function AdminReturnDetail() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [confirmDialog, setConfirmDialog] = useState({ open: false, action: null, loading: false })
+  const [dispatchingExchange, setDispatchingExchange] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -472,6 +473,22 @@ export default function AdminReturnDetail() {
     } catch (err) {
       toast.error(err.response?.data?.message || 'Operation failed.')
       setConfirmDialog(d => ({ ...d, loading: false }))
+    }
+  }
+
+  const handleDispatchExchange = async () => {
+    if (!item) return
+    setDispatchingExchange(true)
+    try {
+      await api.post(`/admin/orders/returns/${item.uuid || item.id}/exchange/dispatch`, {
+        notes: 'Exchange product dispatched by admin.',
+      })
+      toast.success('Exchange marked as dispatched.')
+      await load()
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to dispatch the exchange.')
+    } finally {
+      setDispatchingExchange(false)
     }
   }
 
@@ -530,6 +547,17 @@ export default function AdminReturnDetail() {
                   <X size={14} /> Reject
                 </button>
               </>
+            )}
+            {item.request_type === 'exchange' && item.status === 'inspected' && (
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={handleDispatchExchange}
+                disabled={dispatchingExchange}
+                style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+              >
+                <Truck size={14} /> {dispatchingExchange ? 'Updating…' : 'Dispatch Exchange'}
+              </button>
             )}
           </div>
         }

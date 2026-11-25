@@ -1308,6 +1308,86 @@ class OrderConfirmationRulesTest extends TestCase
             ->assertJsonPath('data.full_refund_amount', '0.00');
     }
 
+    public function test_admin_can_start_an_approved_exchange_from_order_detail(): void
+    {
+        [$order, $vendorOrder, $customer] = $this->createOrder(OrderStatus::DELIVERED);
+        $deliveredAt = now()->subDay();
+        $order->update(['completed_at' => $deliveredAt]);
+        $vendorOrder->update(['status' => OrderStatus::DELIVERED]);
+        $item = $order->items()->firstOrFail();
+
+        $response = $this->actingAs($this->adminUser)
+            ->postJson("/api/v1/admin/orders/{$order->uuid}/returns", [
+                'order_item_id' => $item->uuid,
+                'request_type' => 'exchange',
+                'reason_type' => 'quality_issue',
+                'reason' => 'Customer reported a quality issue.',
+                'quantity' => 1,
+            ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('data.request_type', 'exchange')
+            ->assertJsonPath('data.status', 'approved');
+
+        $returnId = $response->json('data.uuid');
+        $this->assertIsString($response->json('data.return_number'));
+        $this->assertDatabaseHas('return_requests', [
+            'uuid' => $returnId,
+            'user_id' => $customer->id,
+            'created_by' => $this->adminUser->id,
+            'reviewed_by' => $this->adminUser->id,
+            'order_item_id' => $item->id,
+            'request_type' => 'exchange',
+            'status' => 'approved',
+        ]);
+
+        $this->actingAs($this->adminUser)
+            ->getJson("/api/v1/admin/orders/returns/{$returnId}")
+            ->assertOk()
+            ->assertJsonPath('data.request_type', 'exchange')
+            ->assertJsonPath('data.status', 'approved');
+    }
+
+    public function test_admin_can_create_a_full_refund_for_an_order_without_a_customer_return_request(): void
+    {
+        [$order, $vendorOrder, $customer] = $this->createOrder(OrderStatus::DELIVERED, isCod: true);
+        $deliveredAt = now()->subDay();
+        $order->update(['completed_at' => $deliveredAt]);
+        $vendorOrder->update(['status' => OrderStatus::DELIVERED]);
+        $item = $order->items()->firstOrFail();
+
+        $returnResponse = $this->actingAs($this->adminUser)
+            ->postJson("/api/v1/admin/orders/{$order->uuid}/returns", [
+                'order_item_id' => $item->uuid,
+                'request_type' => 'return_refund',
+                'reason_type' => 'damaged',
+                'reason' => 'Customer reported that the item arrived damaged.',
+                'quantity' => 1,
+            ]);
+
+        $returnResponse->assertCreated()
+            ->assertJsonPath('data.request_type', 'return_refund')
+            ->assertJsonPath('data.status', 'approved');
+
+        $returnId = $returnResponse->json('data.uuid');
+        $this->actingAs($this->adminUser)
+            ->postJson("/api/v1/admin/orders/returns/{$returnId}/refund", [
+                'method' => 'cod',
+                'refund_type' => 'full',
+                'notes' => 'Full order refund approved by admin.',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.amount', '2500.00')
+            ->assertJsonPath('data.refund_type', 'full');
+
+        $return = ReturnRequest::where('uuid', $returnId)->firstOrFail();
+        $this->assertDatabaseHas('refunds', [
+            'return_request_id' => $return->id,
+            'amount' => 2500.00,
+        ]);
+        $this->assertSame($customer->id, $return->user_id);
+    }
+
     public function test_esewa_refund_initiation_is_reported_as_unsupported(): void
     {
         [$order, $vendorOrder, $customer] = $this->createOrder(OrderStatus::DELIVERED, isCod: false);

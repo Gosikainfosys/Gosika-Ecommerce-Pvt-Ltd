@@ -16,6 +16,7 @@ class ReturnRequest extends BaseModel
 {
     protected $fillable = [
         'return_number',
+        'created_by',
         'user_id',
         'order_id',
         'vendor_order_id',

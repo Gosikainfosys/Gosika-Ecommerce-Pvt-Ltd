@@ -33,7 +33,7 @@ class ReturnService
     /**
      * Create a new return / exchange / replacement request.
      *
-     * @param  User   $customer
+     * @param  User   $actor
      * @param  array{
      *   order_id: string,
      *   order_item_id: string,
@@ -46,9 +46,14 @@ class ReturnService
      * } $data
      * @param  UploadedFile[] $mediaFiles
      */
-    public function createRequest(User $customer, array $data, array $mediaFiles = []): ReturnRequest
+    public function createRequest(
+        User $actor,
+        array $data,
+        array $mediaFiles = [],
+        bool $adminInitiated = false
+    ): ReturnRequest
     {
-        // ── Fetch & validate order ownership ──────────────────────────────
+        // ── Customer requests must belong to the caller ───────────────────
         $order = Order::query()
             ->where(function ($q) use ($data) {
                 $q->where('uuid', $data['order_id']);
@@ -56,7 +61,7 @@ class ReturnService
                     $q->orWhere('id', (int) $data['order_id']);
                 }
             })
-            ->where('user_id', $customer->id)
+            ->when(! $adminInitiated, fn ($query) => $query->where('user_id', $actor->id))
             ->first();
 
         if (! $order) {
@@ -118,13 +123,16 @@ class ReturnService
             );
         }
 
-        return DB::transaction(function () use ($customer, $data, $mediaFiles, $order, $orderItem, $vendorOrder, $windowExpiresAt) {
+        return DB::transaction(function () use ($actor, $data, $mediaFiles, $order, $orderItem, $vendorOrder, $windowExpiresAt, $adminInitiated) {
             $unitPrice = (float) $orderItem->line_total / max(1, (int) $orderItem->quantity);
             $qty = (int) $data['quantity'];
+            $initialStatus = $adminInitiated ? ReturnStatus::APPROVED : ReturnStatus::REQUESTED;
+            $reviewNote = $adminInitiated ? 'Return or exchange initiated and approved by admin.' : null;
 
             $return = ReturnRequest::create([
                 'return_number'        => ReferenceNumber::unique('RTN'),
-                'user_id'              => $customer->id,
+                'user_id'              => $order->user_id,
+                'created_by'           => $actor->id,
                 'order_id'             => $order->id,
                 'order_item_id'        => $orderItem->id,
                 'vendor_order_id'      => $orderItem->vendor_order_id,
@@ -137,23 +145,40 @@ class ReturnService
                 'refund_amount'        => round($unitPrice * $qty, 2),
                 'preferred_resolution' => $data['preferred_resolution'] ?? null,
                 'return_method'        => $data['return_method'] ?? null,
-                'status'               => ReturnStatus::REQUESTED,
+                'status'               => $initialStatus,
+                'reviewed_by'          => $adminInitiated ? $actor->id : null,
+                'reviewed_at'          => $adminInitiated ? now() : null,
+                'review_notes'         => $reviewNote,
                 'window_expires_at'    => $windowExpiresAt,
             ]);
 
             // Record initial status history
-            $this->recordHistory($return, null, ReturnStatus::REQUESTED, $customer, 'Request submitted by customer.');
+            $this->recordHistory(
+                $return,
+                null,
+                $initialStatus,
+                $actor,
+                $adminInitiated ? $reviewNote : 'Request submitted by customer.'
+            );
 
             // Upload media files (photos / videos)
             if (! empty($mediaFiles)) {
                 $this->attachMedia($return, $mediaFiles, $customer);
             }
 
-            // Notify customer + vendor/admin
-            $this->notifications->returnRequested($return);
+            if ($adminInitiated) {
+                $this->notifications->returnStatusChanged($return, $actor);
+            } else {
+                $this->notifications->returnRequested($return);
+            }
 
             return $return->load(['orderItem.product', 'order', 'media']);
         });
+    }
+
+    public function createAdminRequest(User $admin, array $data): ReturnRequest
+    {
+        return $this->createRequest($admin, $data, [], true);
     }
 
     // ═══════════════════════════════════════════════════════════════════════

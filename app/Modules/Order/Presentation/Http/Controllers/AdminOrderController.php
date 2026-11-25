@@ -117,6 +117,53 @@ class AdminOrderController extends Controller
         return Response::success(new AdminOrderResource($order), 'Order retrieved.');
     }
 
+    public function createReturnRequest(Request $request, string $orderId): JsonResponse
+    {
+        abort_unless($request->user()->hasPermissionTo(Permissions::ORDERS_MANAGE), 403, 'Insufficient permissions.');
+
+        $validated = $request->validate([
+            'order_item_id' => ['required', 'string', 'max:100'],
+            'request_type' => ['required', Rule::in(['return_refund', 'exchange'])],
+            'reason_type' => ['required', Rule::in([
+                'damaged',
+                'wrong_item',
+                'not_as_described',
+                'quality_issue',
+                'size_fit',
+                'changed_mind',
+                'other',
+            ])],
+            'reason' => ['required', 'string', 'max:2000'],
+            'quantity' => ['required', 'integer', 'min:1'],
+        ]);
+
+        $order = Order::query()
+            ->where(function ($query) use ($orderId) {
+                $query->where('uuid', $orderId)->orWhere('order_number', $orderId);
+                if (ctype_digit($orderId)) {
+                    $query->orWhere('id', (int) $orderId);
+                }
+            })
+            ->firstOrFail();
+
+        try {
+            $return = $this->returnService->createAdminRequest($request->user(), [
+                ...$validated,
+                'order_id' => $order->uuid,
+            ]);
+        } catch (DomainException $e) {
+            return Response::error($e->getMessage(), $e->getErrors(), $e->getStatusCode());
+        }
+
+        return Response::created([
+            'id' => $return->uuid,
+            'uuid' => $return->uuid,
+            'return_number' => $return->return_number,
+            'request_type' => $return->request_type->value,
+            'status' => $return->status->value,
+        ], 'Return or exchange request created and approved.');
+    }
+
     public function returns(Request $request): JsonResponse
     {
         $query = ReturnRequest::query()
