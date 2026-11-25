@@ -86,6 +86,12 @@ class PaymentService
         try {
             $data = $provider->refund($transactionUuid, $amount);
         } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('eSewa refund call failed', [
+                'payment_id'       => $payment->id,
+                'transaction_uuid' => $transactionUuid,
+                'amount'           => $amount,
+                'error'            => $e->getMessage(),
+            ]);
             return ['success' => false, 'message' => $e->getMessage()];
         }
 

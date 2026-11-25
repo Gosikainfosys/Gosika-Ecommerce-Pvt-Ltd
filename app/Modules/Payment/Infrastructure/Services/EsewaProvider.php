@@ -134,7 +134,18 @@ class EsewaProvider implements PaymentProviderContract
         $data = $response->json();
 
         if (! is_array($data)) {
-            throw new PaymentProviderException('eSewa refund returned an invalid response.', 502);
+            // Log the raw response to aid debugging
+            \Illuminate\Support\Facades\Log::error('eSewa refund non-JSON response', [
+                'transaction_uuid' => $transactionUuid,
+                'amount'           => $amount,
+                'refund_url'       => $refundUrl,
+                'http_status'      => $response->status(),
+                'body_preview'     => substr($response->body(), 0, 500),
+            ]);
+            throw new PaymentProviderException(
+                'eSewa refund returned an invalid response (HTTP '.$response->status().'). Check server logs for details.',
+                502
+            );
         }
 
         if (isset($data['error_message'])) {
@@ -153,15 +164,21 @@ class EsewaProvider implements PaymentProviderContract
 
     /**
      * Derive the refund URL from the status URL.
-     * Status URL:  https://rc.esewa.com.np/api/epay/transaction/status/
-     * Refund URL:  https://rc.esewa.com.np/api/epay/transaction/refund/
+     *
+     * UAT:  https://rc.esewa.com.np/api/epay/transaction/status/  → .../refund/
+     * Live: https://esewa.com.np/api/epay/transaction/status/      → .../refund/
      */
     protected function resolveRefundUrl(): string
     {
-        // Replace /status/ with /refund/ — works for both UAT and production base URLs.
-        $url = preg_replace('#/status/?$#', '/refund/', rtrim($this->statusUrl, '/'));
+        $base = rtrim($this->statusUrl, '/');
 
-        return $url ?? str_replace('/status/', '/refund/', $this->statusUrl);
+        // Replace trailing /status with /refund regardless of path depth
+        if (str_ends_with($base, '/status')) {
+            return substr($base, 0, -7) . '/refund/';
+        }
+
+        // Fallback: simple string replace
+        return str_replace('/status/', '/refund/', $this->statusUrl);
     }
 
     protected function formatAmount(float $val): string
