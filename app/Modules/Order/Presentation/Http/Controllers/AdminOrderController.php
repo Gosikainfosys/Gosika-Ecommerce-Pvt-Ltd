@@ -185,6 +185,44 @@ class AdminOrderController extends Controller
         );
     }
 
+    public function showReturn(string $returnId): JsonResponse
+    {
+        $return = ReturnRequest::query()
+            ->with([
+                'user',
+                'order.items.product.primaryImage',
+                'order.payments',
+                'order.shippingAddress.municipality',
+                'order.shippingAddress.district',
+                'order.shippingAddress.province',
+                'order.vendorOrders.store',
+                'order.vendorOrders.assignments.deliveryPartner.user',
+                'vendorOrder.store',
+                'vendorOrder.assignments.deliveryPartner.user',
+                'orderItem.product.primaryImage',
+                'store',
+                'refunds.payment',
+                'media',
+            ])
+            ->where('uuid', $returnId)
+            ->when(ctype_digit($returnId), fn ($q) => $q->orWhere('id', (int) $returnId))
+            ->firstOrFail();
+
+        $data = $return->toArray();
+        $data['media'] = $return->relationLoaded('media')
+            ? $return->media->map(fn ($media) => [
+                'id'            => $media->uuid,
+                'type'          => $media->type,
+                'url'           => $media->url,
+                'mime_type'     => $media->mime_type,
+                'original_name' => $media->original_name,
+                'size'          => $media->size,
+            ])->values()->all()
+            : [];
+
+        return Response::success($data, 'Return request retrieved.');
+    }
+
     public function approveReturn(Request $request, string $returnId): JsonResponse
     {
         $validated = $request->validate([

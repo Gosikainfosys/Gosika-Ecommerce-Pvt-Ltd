@@ -84,6 +84,7 @@ import AdminDashboard from './pages/admin/AdminDashboard'
 import AdminOrders from './pages/admin/AdminOrders'
 import AdminOrderDetail from './pages/admin/AdminOrderDetail'
 import AdminReturns from './pages/admin/AdminReturns'
+import AdminReturnDetail from './pages/admin/AdminReturnDetail'
 import AdminProducts from './pages/admin/AdminProducts'
 import AdminProductDetail from './pages/admin/AdminProductDetail'
 import AdminKyc from './pages/admin/AdminKyc'
@@ -411,6 +412,7 @@ export default function App() {
         <Route path="orders" element={<PermissionGuard path="/admin/orders"><AdminOrders /></PermissionGuard>} />
         <Route path="orders/:id" element={<PermissionGuard path="/admin/orders"><AdminOrderDetail /></PermissionGuard>} />
         <Route path="orders/returns" element={<PermissionGuard path="/admin/orders/returns"><AdminReturns /></PermissionGuard>} />
+        <Route path="orders/returns/:id" element={<PermissionGuard path="/admin/orders/returns"><AdminReturnDetail /></PermissionGuard>} />
 
         {/* Fulfillment */}
         <Route path="fulfillment/dashboard" element={<PermissionGuard path="/admin/fulfillment/dashboard"><AdminDeliveryDashboard /></PermissionGuard>} />

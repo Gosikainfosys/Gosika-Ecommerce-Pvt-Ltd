@@ -19,6 +19,7 @@ Route::prefix('v1/orders')->middleware(['auth:sanctum', 'ensure:customer', 'thro
 Route::prefix('v1/admin/orders')->middleware(['auth:sanctum', 'ensure:admin'])->group(function () {
     // Return management (Defined FIRST to avoid /{order} wildcard collision)
     Route::get('/returns', [AdminOrderController::class, 'returns']);
+    Route::get('/returns/{return}', [AdminOrderController::class, 'showReturn']);
     Route::post('/returns/{return}/approve', [AdminOrderController::class, 'approveReturn']);
     Route::post('/returns/{return}/reject', [AdminOrderController::class, 'rejectReturn']);
     Route::patch('/returns/{return}/status', [AdminOrderController::class, 'updateReturnStatus']);
