@@ -321,60 +321,60 @@ export default function AdminOrderDetail() {
     loadOrder()
   }, [id])
 
+  const handleOpenReturnModal = () => {
+    const returnItems = getOrderReturnItems(order)
+
+    if (returnItems.length === 0) {
+      toast.error('This order has no items available for an exchange or refund.')
+      return
+    }
+
+    setReturnForm({
+      orderItemId: String(returnItems[0].id || returnItems[0].uuid || ''),
+      requestType: 'return_refund',
+      reasonType: 'other',
+      reason: '',
+      quantity: '1',
+    })
+    setReturnModalOpen(true)
+  }
+
+  const handleCreateReturn = async (event) => {
+    event.preventDefault()
+    if (!returnForm.orderItemId || !returnForm.reason.trim()) {
+      toast.error('Select an item and enter a reason.')
+      return
+    }
+
+    setReturnSaving(true)
+    try {
+      const res = await api.post(`/admin/orders/${order.uuid || order.id}/returns`, {
+        order_item_id: returnForm.orderItemId,
+        request_type: returnForm.requestType,
+        reason_type: returnForm.reasonType,
+        reason: returnForm.reason.trim(),
+        quantity: Number(returnForm.quantity),
+      })
+      const created = res.data?.data
+      setReturnModalOpen(false)
+      toast.success(`${returnForm.requestType === 'exchange' ? 'Exchange' : 'Refund'} request created and approved.`)
+      if (created?.uuid) {
+        navigate(`/admin/orders/returns/${created.uuid}`)
+      } else {
+        await loadOrder()
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to create the exchange or refund request.')
+    } finally {
+      setReturnSaving(false)
+    }
+  }
+
   const handleStatusUpdate = async (event) => {
     event.preventDefault()
     if (statusDraft === 'rejected' && !statusReason.trim()) {
       toast.error('Please provide a reason for rejecting this order.')
       return
-    }
-
-    const handleOpenReturnModal = () => {
-      const returnItems = getOrderReturnItems(order)
-
-      if (returnItems.length === 0) {
-        toast.error('This order has no items available for an exchange or refund.')
-        return
-      }
-
-      setReturnForm({
-        orderItemId: String(returnItems[0].id || returnItems[0].uuid || ''),
-        requestType: 'return_refund',
-        reasonType: 'other',
-        reason: '',
-        quantity: '1',
-      })
-      setReturnModalOpen(true)
-    }
-
-    const handleCreateReturn = async (event) => {
-      event.preventDefault()
-      if (!returnForm.orderItemId || !returnForm.reason.trim()) {
-        toast.error('Select an item and enter a reason.')
-        return
-      }
-
-      setReturnSaving(true)
-      try {
-        const res = await api.post(`/admin/orders/${order.uuid || order.id}/returns`, {
-          order_item_id: returnForm.orderItemId,
-          request_type: returnForm.requestType,
-          reason_type: returnForm.reasonType,
-          reason: returnForm.reason.trim(),
-          quantity: Number(returnForm.quantity),
-        })
-        const created = res.data?.data
-        setReturnModalOpen(false)
-        toast.success(`${returnForm.requestType === 'exchange' ? 'Exchange' : 'Refund'} request created and approved.`)
-        if (created?.uuid) {
-          navigate(`/admin/orders/returns/${created.uuid}`)
-        } else {
-          await loadOrder()
-        }
-      } catch (err) {
-        toast.error(err.response?.data?.message || 'Failed to create the exchange or refund request.')
-      } finally {
-        setReturnSaving(false)
-      }
     }
 
     setStatusSaving(true)
