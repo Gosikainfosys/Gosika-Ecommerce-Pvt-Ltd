@@ -77,11 +77,17 @@ function StatusChip({ status }) {
 function RefundPanel({ returnItem, onRefunded, onApprove, onReject }) {
   const toast = useToast()
   const isEsewa = returnItem?.order?.payment_method === 'esewa'
+  const order = returnItem?.order
   const maxAmt = refundable(returnItem)
   const refundedAmt = alreadyRefunded(returnItem?.refunds)
   const partialRemaining = Math.max(0, maxAmt - reservedRefunds(returnItem?.refunds))
-  const remaining = Math.max(0, Number(returnItem?.full_refund_amount ?? partialRemaining))
-  const paidAmount = Number(returnItem?.paid_amount ?? returnItem?.order?.grand_total ?? 0)
+  const paymentStatus = String(order?.payment_status || '').toLowerCase()
+  const fallbackPaidAmount = order?.payment_method === 'cod' || ['paid', 'partially_refunded'].includes(paymentStatus)
+    ? Number(order?.grand_total || 0)
+    : 0
+  const paidAmount = Number(returnItem?.paid_amount ?? fallbackPaidAmount)
+  const fallbackFullRefundAmount = Math.max(0, paidAmount - reservedRefunds(returnItem?.refunds))
+  const remaining = Math.max(0, Number(returnItem?.full_refund_amount ?? fallbackFullRefundAmount))
   const previouslyRefundedOrReserved = Math.max(0, paidAmount - remaining)
   const refunds = returnItem?.refunds || []
 
@@ -165,7 +171,7 @@ function RefundPanel({ returnItem, onRefunded, onApprove, onReject }) {
       {/* ── Summary banner ── */}
       <div style={{ background: '#f8fafc', borderRadius: 12, padding: '14px 18px', display: 'flex', flexWrap: 'wrap', gap: 20, alignItems: 'center', border: '1px solid var(--border)' }}>
         <div>
-          <div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase' }}>Requested</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase' }}>Returned item value</div>
           <div style={{ fontSize: 18, fontWeight: 900, color: 'var(--ink)' }}>{money(maxAmt)}</div>
         </div>
         {refundedAmt > 0 && (
@@ -219,12 +225,26 @@ function RefundPanel({ returnItem, onRefunded, onApprove, onReject }) {
           {type === 'full' && (
             <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '12px 16px', marginBottom: 14 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: 13, color: '#15803d', fontWeight: 600 }}>Remaining paid order amount</span>
+                <span style={{ fontSize: 13, color: '#15803d', fontWeight: 600 }}>Full order amount to refund</span>
                 <span style={{ fontSize: 20, fontWeight: 900, color: '#15803d' }}>{money(remaining)}</span>
               </div>
               <div style={{ display: 'grid', gap: 5, marginTop: 10, paddingTop: 9, borderTop: '1px solid #bbf7d0', fontSize: 12, color: '#166534' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span>Paid amount (includes delivery and tax)</span><strong>{money(paidAmount)}</strong>
+                  <span>Items subtotal</span><strong>{money(order?.subtotal || 0)}</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Delivery charge included</span><strong>{money(order?.delivery_charge || 0)}</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Tax included</span><strong>{money(order?.tax || 0)}</strong>
+                </div>
+                {Number(order?.discount || 0) > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Discount</span><strong>−{money(order.discount)}</strong>
+                  </div>
+                )}
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}>
+                  <span>Total paid amount</span><strong>{money(paidAmount)}</strong>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span>Previously refunded or reserved</span><strong>−{money(previouslyRefundedOrReserved)}</strong>
@@ -284,7 +304,7 @@ function RefundPanel({ returnItem, onRefunded, onApprove, onReject }) {
           <div style={{ fontSize: 12, color: 'var(--muted)', background: '#f8fafc', padding: '8px 12px', borderRadius: 8, lineHeight: 1.6, borderLeft: `3px solid ${isEsewa ? '#60bb46' : 'var(--border)'}`, marginBottom: 14 }}>
             {isEsewa
               ? <>Creates a <strong>{type === 'full' ? 'Full' : 'Partial'}</strong> refund record of <strong>{money(effectiveAmt)}</strong>. Use <strong style={{ color: '#16a34a' }}>⚡ Process via eSewa</strong> below on the created record to trigger the payout instantly.</>
-              : <>Creates a <strong>{type === 'full' ? 'Full' : 'Partial'}</strong> refund of <strong>{money(effectiveAmt)}</strong> via <strong>{(returnItem?.order?.payment_method || 'gateway').toUpperCase()}</strong>. Finalize it in the refund records below.</>
+              : <>Creates a <strong>{type === 'full' ? 'Full' : 'Partial'}</strong> refund of <strong>{money(effectiveAmt)}</strong> via <strong>{(order?.payment_method || 'gateway').toUpperCase()}</strong>{type === 'full' ? ', including the order total, delivery, and tax' : ''}. Finalize it in the refund records below.</>
             }
           </div>
 

@@ -1371,6 +1371,12 @@ class OrderConfirmationRulesTest extends TestCase
 
         $returnId = $returnResponse->json('data.uuid');
         $this->actingAs($this->adminUser)
+            ->getJson("/api/v1/admin/orders/returns/{$returnId}")
+            ->assertOk()
+            ->assertJsonPath('data.paid_amount', '2500.00')
+            ->assertJsonPath('data.full_refund_amount', '2500.00');
+
+        $this->actingAs($this->adminUser)
             ->postJson("/api/v1/admin/orders/returns/{$returnId}/refund", [
                 'method' => 'cod',
                 'refund_type' => 'full',
