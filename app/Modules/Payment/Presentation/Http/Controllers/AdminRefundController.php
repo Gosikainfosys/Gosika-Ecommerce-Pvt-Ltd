@@ -42,6 +42,99 @@ class AdminRefundController extends Controller
         return $this->applyStatusUpdate($request, $refund);
     }
 
+    /**
+     * Trigger an eSewa refund directly via their Refund API, then mark the refund as REFUNDED.
+     *
+     * POST /admin/orders/returns/{return}/refunds/{refund}/esewa-process
+     *
+     * Optional body: { amount: float }  — override the stored refund amount for partial payouts.
+     */
+    public function processEsewaRefund(Request $request, string $returnId, string $refundId): JsonResponse
+    {
+        $request->validate([
+            'amount' => ['nullable', 'numeric', 'min:0.01'],
+        ]);
+
+        $return = ReturnRequest::where('uuid', $returnId)
+            ->when(ctype_digit($returnId), fn ($q) => $q->orWhere('id', (int) $returnId))
+            ->firstOrFail();
+
+        $refund = Refund::where('return_request_id', $return->id)
+            ->where(function ($query) use ($refundId) {
+                $query->where('uuid', $refundId);
+                if (ctype_digit($refundId)) {
+                    $query->orWhere('id', (int) $refundId);
+                }
+            })
+            ->with('payment')
+            ->firstOrFail();
+
+        if ($refund->status->value === RefundStatus::REFUNDED->value) {
+            return Response::error('This refund has already been completed.', ['status' => 'refunded'], 422);
+        }
+
+        if (! in_array($refund->status->value, [
+            RefundStatus::REQUESTED->value,
+            RefundStatus::APPROVED->value,
+            RefundStatus::PROCESSING->value,
+        ], true)) {
+            return Response::error('Refund is not in a processable state.', ['status' => $refund->status->value], 422);
+        }
+
+        $payment = $refund->payment;
+
+        if (! $payment || $payment->method !== 'esewa') {
+            return Response::error('This refund is not linked to an eSewa payment.', [], 422);
+        }
+
+        // Use caller-supplied amount for partial payouts; otherwise use the stored refund amount.
+        $refundAmount = $request->filled('amount')
+            ? (float) $request->input('amount')
+            : (float) $refund->amount;
+
+        if ($refundAmount <= 0 || $refundAmount > round((float) $refund->amount + 0.001, 2)) {
+            return Response::error(
+                'Refund amount must be between 0.01 and '.number_format((float) $refund->amount, 2).'.',
+                ['max' => (float) $refund->amount],
+                422
+            );
+        }
+
+        // Call the eSewa Refund API
+        $result = $this->paymentService->esewaRefund($payment, $refundAmount);
+
+        if (! ($result['success'] ?? false)) {
+            return Response::error(
+                $result['message'] ?? 'eSewa refund failed.',
+                ['esewa_response' => $result['raw'] ?? null],
+                422
+            );
+        }
+
+        $esewaStatus = $result['status']; // 'FULL_REFUND' or 'PARTIAL_REFUND'
+
+        // Mark the refund as REFUNDED and store the eSewa ref_id and raw response
+        try {
+            $refund = $this->refundService->updateStatus(
+                $request->user(),
+                $refund,
+                RefundStatus::REFUNDED,
+                $result['ref_id'] !== '' ? $result['ref_id'] : null,
+                ['esewa_refund' => $result['raw'], 'esewa_refund_type' => $esewaStatus]
+            );
+        } catch (DomainException $e) {
+            return Response::error($e->getMessage(), $e->getErrors(), $e->getStatusCode());
+        }
+
+        $typeLabel = $esewaStatus === 'PARTIAL_REFUND' ? 'Partial refund' : 'Full refund';
+
+        return Response::success(
+            new AdminRefundResource($refund->load('payment', 'order', 'orderItem')),
+            $typeLabel.' of NPR '.number_format($refundAmount, 2).' processed via eSewa'
+                .' (ref: '.($result['ref_id'] ?: 'N/A').').'
+        );
+    }
+
     private function applyStatusUpdate(Request $request, Refund $refund): JsonResponse
     {
         $request->validate([
@@ -74,7 +167,7 @@ class AdminRefundController extends Controller
                     $message = 'Refund finalized — verified at eSewa (status: '.$gatewayStatus.').';
                 } elseif ($gatewayStatus === 'COMPLETE') {
                     return Response::error(
-                        'eSewa reports this payment as not yet refunded (status: COMPLETE). Confirm the customer payout from the eSewa merchant dashboard before finalizing.',
+                        'eSewa reports this payment as not yet refunded (status: COMPLETE). Use "Process via eSewa" to trigger the refund directly, or confirm the payout from the eSewa merchant dashboard before marking as refunded.',
                         ['gateway_status' => 'COMPLETE'],
                         422
                     );

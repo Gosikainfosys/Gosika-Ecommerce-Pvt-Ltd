@@ -24,4 +24,7 @@ Route::prefix('v1/admin')->middleware(['auth:sanctum', 'ensure:admin'])->group(f
 
     Route::patch('orders/returns/{return}/refunds/{refund}/status', [AdminRefundController::class, 'updateReturnRefundStatus'])
         ->middleware('permission:orders.manage|refunds.manage');
+
+    Route::post('orders/returns/{return}/refunds/{refund}/esewa-process', [AdminRefundController::class, 'processEsewaRefund'])
+        ->middleware('permission:orders.manage|refunds.manage');
 });

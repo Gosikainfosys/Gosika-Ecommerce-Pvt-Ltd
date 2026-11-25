@@ -62,6 +62,52 @@ class PaymentService
         ];
     }
 
+    /**
+     * Initiate a refund directly via the eSewa Refund API.
+     *
+     * Returns an array:
+     *   ['success' => true, 'status' => 'FULL_REFUND'|'PARTIAL_REFUND', 'ref_id' => '...', 'raw' => [...]]
+     *   ['success' => false, 'message' => '...']
+     */
+    public function esewaRefund(Payment $payment, float $amount): array
+    {
+        $provider = $this->provider($payment->method);
+
+        if (! $provider instanceof EsewaProvider) {
+            return ['success' => false, 'message' => 'eSewa provider is not configured.'];
+        }
+
+        $transactionUuid = $this->esewaTransactionUuid($payment);
+
+        if ($transactionUuid === '') {
+            return ['success' => false, 'message' => 'No eSewa transaction reference available on this payment.'];
+        }
+
+        try {
+            $data = $provider->refund($transactionUuid, $amount);
+        } catch (\Throwable $e) {
+            return ['success' => false, 'message' => $e->getMessage()];
+        }
+
+        $status = strtoupper((string) ($data['status'] ?? ''));
+
+        if (! in_array($status, ['FULL_REFUND', 'PARTIAL_REFUND'], true)) {
+            return [
+                'success' => false,
+                'message' => 'eSewa returned unexpected refund status: '.$status,
+                'status' => $status,
+                'raw' => $data,
+            ];
+        }
+
+        return [
+            'success' => true,
+            'status'  => $status,
+            'ref_id'  => (string) ($data['ref_id'] ?? ''),
+            'raw'     => $data,
+        ];
+    }
+
     protected function esewaTransactionUuid(Payment $payment): string
     {
         $uuid = (string) data_get($payment->provider_response, 'fields.transaction_uuid', '');

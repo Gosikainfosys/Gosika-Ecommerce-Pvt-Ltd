@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import {
   RotateCcw, Check, X, Eye, RefreshCw,
-  ShoppingBag, Store, User, AlertCircle, Truck
+  ShoppingBag, Store, User, AlertCircle, Truck, Zap
 } from 'lucide-react'
 import api from '../../api/client'
 import PageHeader from '../../components/admin/PageHeader'
@@ -62,6 +62,7 @@ export default function AdminReturns() {
   const [detailItem, setDetailItem] = useState(null)
   const [refundStatusDrafts, setRefundStatusDrafts] = useState({})
   const [savingRefundId, setSavingRefundId] = useState(null)
+  const [processingEsewaRefundId, setProcessingEsewaRefundId] = useState(null)
 
   const [dialogState, setDialogState] = useState({
     isOpen: false,
@@ -70,7 +71,7 @@ export default function AdminReturns() {
     loading: false
   })
 
-  const [refundDraft, setRefundDraft] = useState({ method: 'esewa', amount: '', notes: '' })
+  const [refundDraft, setRefundDraft] = useState({ method: 'esewa', type: 'full', amount: '', notes: '' })
 
   const loadReturns = async () => {
     setLoading(true)
@@ -175,10 +176,38 @@ export default function AdminReturns() {
     }
   }
 
+  const processEsewaRefund = async (refund, overrideAmount = null) => {
+    if (!detailItem) return
+    const refundId = refund.uuid || refund.id
+    const returnId = detailItem.uuid || detailItem.id
+    setProcessingEsewaRefundId(refundId)
+    try {
+      const body = overrideAmount != null ? { amount: overrideAmount } : {}
+      const response = await api.post(`/admin/orders/returns/${returnId}/refunds/${refundId}/esewa-process`, body)
+      const updatedRefund = response.data?.data || { ...refund, status: 'refunded' }
+      const matchesRefund = current => (current.uuid || current.id) === refundId
+      setDetailItem(current => current ? {
+        ...current,
+        refunds: (current.refunds || []).map(existing => matchesRefund(existing) ? { ...existing, ...updatedRefund } : existing),
+      } : current)
+      setReturns(current => current.map(item => ({
+        ...item,
+        refunds: (item.refunds || []).map(existing => matchesRefund(existing) ? { ...existing, ...updatedRefund } : existing),
+      })))
+      toast.success(response.data?.message || `Refund #${refund.refund_number || refundId} processed via eSewa.`)
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'eSewa refund failed. Check the eSewa merchant dashboard.')
+    } finally {
+      setProcessingEsewaRefundId(null)
+    }
+  }
+
   const openRefundDialog = (item) => {
+    const max = maxRefundAmount(item)
     setRefundDraft({
       method: item.order?.payment_method || 'esewa',
-      amount: item.refund_amount || '',
+      type: 'full',
+      amount: max > 0 ? max.toFixed(2) : '',
       notes: ''
     })
     setDialogState({ isOpen: true, action: 'process_refund', returnItem: item, loading: false })
@@ -188,14 +217,23 @@ export default function AdminReturns() {
     const { returnItem } = dialogState
     if (!returnItem) return
 
+    const maxAmt = maxRefundAmount(returnItem)
+    const effectiveAmount = refundDraft.type === 'full' ? maxAmt : Number(refundDraft.amount || 0)
+
+    if (effectiveAmount <= 0 || effectiveAmount > maxAmt) return
+
     setDialogState(prev => ({ ...prev, loading: true }))
     try {
       await api.post(`/admin/orders/returns/${returnItem.uuid || returnItem.id}/refund`, {
         method: refundDraft.method,
-        amount: refundDraft.amount,
+        amount: effectiveAmount,
         notes: refundDraft.notes || null
       })
-      toast.success('Refund created. Continue tracking and finalizing it here.')
+      toast.success(
+        refundDraft.type === 'full'
+          ? `Full refund of ${money(effectiveAmount)} created.`
+          : `Partial refund of ${money(effectiveAmount)} created.`
+      )
       setDialogState({ isOpen: false, action: null, returnItem: null, loading: false })
       loadReturns()
     } catch (err) {
@@ -665,6 +703,48 @@ export default function AdminReturns() {
                     </div>
                     {refund.status !== 'refunded' && (
                       <div className="grid gap-2 mt-2">
+                        {/* eSewa direct refund — full or partial based on refund amount vs payment amount */}
+                        {detailOrder?.payment_method === 'esewa' && (() => {
+                          const refundAmt = Number(refund.amount || 0)
+                          const paymentAmt = Number(detailOrder?.payments?.[0]?.amount || 0)
+                          const isPartialRefund = paymentAmt > 0 && refundAmt < paymentAmt - 0.001
+                          const isProcessing = processingEsewaRefundId === (refund.uuid || refund.id)
+                          return (
+                            <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span style={{
+                                  fontSize: 10, fontWeight: 800, padding: '2px 7px', borderRadius: 20,
+                                  background: isPartialRefund ? '#fef3c7' : '#dcfce7',
+                                  color: isPartialRefund ? '#d97706' : '#15803d',
+                                  border: `1px solid ${isPartialRefund ? '#fcd34d' : '#86efac'}`,
+                                  textTransform: 'uppercase', letterSpacing: 0.5
+                                }}>
+                                  {isPartialRefund ? 'Partial' : 'Full'} Refund
+                                </span>
+                                <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)' }}>{money(refundAmt)}</span>
+                                {isPartialRefund && paymentAmt > 0 && (
+                                  <span style={{ fontSize: 11, color: 'var(--muted)' }}>of {money(paymentAmt)} paid</span>
+                                )}
+                              </div>
+                              <button
+                                type="button"
+                                className="btn btn-sm"
+                                disabled={isProcessing}
+                                onClick={() => processEsewaRefund(refund)}
+                                style={{ background: '#16a34a', color: '#fff', border: 'none', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'center' }}
+                                title="Trigger the refund directly via the eSewa API"
+                              >
+                                <Zap size={13} />
+                                {isProcessing ? 'Processing via eSewa…' : `Process ${isPartialRefund ? 'Partial ' : 'Full '}Refund via eSewa`}
+                              </button>
+                            </div>
+                          )
+                        })()}
+                        <div style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'center', marginBottom: 4 }}>
+                          {detailOrder?.payment_method === 'esewa'
+                            ? 'Or manually update the status below after confirming in the eSewa merchant dashboard:'
+                            : 'Update status manually:'}
+                        </div>
                         <select
                           className="input"
                           aria-label={`Refund status for ${refund.refund_number || refund.id}`}
@@ -715,6 +795,11 @@ export default function AdminReturns() {
                         </button>
                       </div>
                     )}
+                    {refund.status === 'refunded' && refund.provider_refund_id && (
+                      <div style={{ fontSize: 11, color: '#15803d', marginTop: 4 }}>
+                        eSewa ref: <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{refund.provider_refund_id}</span>
+                      </div>
+                    )}
                   </div>
                 )) : <div className="muted text-sm">No refund processing has been started.</div>}
                 <div className="muted text-xs mt-2">
@@ -727,37 +812,151 @@ export default function AdminReturns() {
       )}
 
       {/* Process Refund Dialog */}
-      {dialogState.isOpen && dialogState.action === 'process_refund' && dialogState.returnItem && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(15, 23, 42, 0.6)',
-            backdropFilter: 'blur(3px)',
-            zIndex: 999,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 16
-          }}
-          onClick={e => { if (e.target === e.currentTarget) setDialogState({ isOpen: false, action: null, returnItem: null, loading: false }) }}
-        >
+      {dialogState.isOpen && dialogState.action === 'process_refund' && dialogState.returnItem && (() => {
+        const maxAmt = maxRefundAmount(dialogState.returnItem)
+        const isEsewa = refundDraft.method === 'esewa'
+        const isFull = refundDraft.type === 'full'
+        const effectiveAmount = isFull ? maxAmt : Number(refundDraft.amount || 0)
+        const amountInvalid = effectiveAmount <= 0 || effectiveAmount > maxAmt
+        return (
           <div
-            className="card"
-            style={{ width: '100%', maxWidth: 480, background: '#fff', borderRadius: 16, padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }}
+            style={{
+              position: 'fixed',
+              inset: 0,
+              backgroundColor: 'rgba(15, 23, 42, 0.6)',
+              backdropFilter: 'blur(3px)',
+              zIndex: 999,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 16
+            }}
+            onClick={e => { if (e.target === e.currentTarget) setDialogState({ isOpen: false, action: null, returnItem: null, loading: false }) }}
           >
-            <div>
-              <h3 style={{ fontSize: 17, fontWeight: 800, margin: 0, color: 'var(--ink)' }}>
-                Process Refund — Return #{dialogState.returnItem.return_number || dialogState.returnItem.id}
-              </h3>
-              <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
-                Order #{dialogState.returnItem.order?.order_number || dialogState.returnItem.order_id} · Item: {dialogState.returnItem.order_item?.product_name || 'Product'}
+            <div
+              className="card"
+              style={{ width: '100%', maxWidth: 500, background: '#fff', borderRadius: 16, padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }}
+            >
+              {/* Header */}
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+                <div>
+                  <h3 style={{ fontSize: 17, fontWeight: 800, margin: 0, color: 'var(--ink)' }}>
+                    Process Refund — Return #{dialogState.returnItem.return_number || dialogState.returnItem.id}
+                  </h3>
+                  <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 3 }}>
+                    Order #{dialogState.returnItem.order?.order_number || dialogState.returnItem.order_id}
+                    {' · '}{dialogState.returnItem.order_item?.product_name || 'Product'}
+                    {' · '}Max refundable: <strong>{money(maxAmt)}</strong>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-xs"
+                  onClick={() => setDialogState({ isOpen: false, action: null, returnItem: null, loading: false })}
+                  aria-label="Close"
+                >
+                  <X size={15} />
+                </button>
               </div>
-            </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              {/* Refund type toggle */}
               <div>
-                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', display: 'block', marginBottom: 4 }}>Payment Method</label>
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', marginBottom: 8 }}>Refund Type</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  {[
+                    { value: 'full', label: 'Full Refund', desc: money(maxAmt), icon: '↩' },
+                    { value: 'partial', label: 'Partial Refund', desc: 'Enter amount', icon: '↪' },
+                  ].map(opt => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setRefundDraft(d => ({
+                        ...d,
+                        type: opt.value,
+                        amount: opt.value === 'full' ? maxAmt.toFixed(2) : '',
+                      }))}
+                      style={{
+                        padding: '10px 14px',
+                        borderRadius: 10,
+                        border: `2px solid ${refundDraft.type === opt.value ? (opt.value === 'full' ? '#16a34a' : '#d97706') : 'var(--border)'}`,
+                        background: refundDraft.type === opt.value
+                          ? (opt.value === 'full' ? '#f0fdf4' : '#fffbeb')
+                          : '#f8fafc',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        transition: 'all 0.15s',
+                      }}
+                    >
+                      <div style={{ fontSize: 15, marginBottom: 2 }}>{opt.icon}</div>
+                      <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--ink)' }}>{opt.label}</div>
+                      <div style={{ fontSize: 11, color: refundDraft.type === opt.value ? (opt.value === 'full' ? '#16a34a' : '#d97706') : 'var(--muted)', fontWeight: 600 }}>
+                        {opt.desc}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Partial amount input — only shown when partial selected */}
+              {!isFull && (
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', display: 'block', marginBottom: 6 }}>
+                    Partial Refund Amount
+                  </label>
+                  <div style={{ position: 'relative' }}>
+                    <span style={{
+                      position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)',
+                      fontWeight: 700, color: 'var(--muted)', fontSize: 13, pointerEvents: 'none'
+                    }}>NPR</span>
+                    <input
+                      className="input"
+                      type="number"
+                      min="0.01"
+                      max={maxAmt.toFixed(2)}
+                      step="0.01"
+                      autoFocus
+                      value={refundDraft.amount}
+                      onChange={e => setRefundDraft(d => ({ ...d, amount: e.target.value }))}
+                      style={{ paddingLeft: 46, height: 42, fontSize: 15, borderRadius: 8, fontWeight: 700,
+                        borderColor: amountInvalid && refundDraft.amount !== '' ? '#dc2626' : undefined }}
+                      placeholder="0.00"
+                    />
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 5 }}>
+                    <span style={{ fontSize: 11, color: amountInvalid && refundDraft.amount !== '' ? '#dc2626' : 'var(--muted)' }}>
+                      {amountInvalid && refundDraft.amount !== ''
+                        ? `Must be between 0.01 and ${money(maxAmt)}`
+                        : `Up to ${money(maxAmt)}`}
+                    </span>
+                    {/* Quick-fill shortcuts */}
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      {[25, 50, 75, 100].map(pct => (
+                        <button
+                          key={pct}
+                          type="button"
+                          className="btn btn-ghost btn-xs"
+                          style={{ fontSize: 10, padding: '2px 6px', fontWeight: 700 }}
+                          onClick={() => setRefundDraft(d => ({ ...d, amount: (maxAmt * pct / 100).toFixed(2) }))}
+                        >
+                          {pct}%
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Full refund amount display */}
+              {isFull && (
+                <div style={{ padding: '10px 14px', borderRadius: 10, background: '#f0fdf4', border: '1px solid #bbf7d0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: 13, color: '#15803d', fontWeight: 600 }}>Full amount to refund</span>
+                  <span style={{ fontSize: 18, fontWeight: 900, color: '#15803d' }}>{money(maxAmt)}</span>
+                </div>
+              )}
+
+              {/* Payment method */}
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', display: 'block', marginBottom: 6 }}>Payment Gateway</label>
                 <select
                   className="input"
                   value={refundDraft.method}
@@ -770,71 +969,67 @@ export default function AdminReturns() {
                   <option value="cod">Cash on Delivery</option>
                 </select>
               </div>
+
+              {/* Notes */}
               <div>
-                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', display: 'block', marginBottom: 4 }}>Refund Amount</label>
-                <input
+                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', display: 'block', marginBottom: 6 }}>Notes (optional)</label>
+                <textarea
                   className="input"
-                  type="number"
-                  min="0.01"
-                  max={maxRefundAmount(dialogState.returnItem).toFixed(2)}
-                  step="0.01"
-                  value={refundDraft.amount}
-                  onChange={e => setRefundDraft(d => ({ ...d, amount: e.target.value }))}
-                  style={{ height: 38, fontSize: 13, borderRadius: 8, fontWeight: 600 }}
+                  rows={2}
+                  value={refundDraft.notes}
+                  onChange={e => setRefundDraft(d => ({ ...d, notes: e.target.value }))}
+                  placeholder="Administrative note for this refund..."
+                  style={{ fontSize: 13, borderRadius: 8 }}
                 />
-                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
-                  Maximum for this item and quantity: {money(maxRefundAmount(dialogState.returnItem))}
-                </div>
+              </div>
+
+              {/* Info callout */}
+              <div style={{ fontSize: 12, color: 'var(--muted)', background: '#f8fafc', padding: '8px 12px', borderRadius: 8, lineHeight: 1.6, borderLeft: `3px solid ${isEsewa ? '#60bb46' : 'var(--border)'}` }}>
+                {isEsewa ? (
+                  <>
+                    Creates a <strong>{isFull ? 'Full' : 'Partial'}</strong> refund record of <strong>{money(effectiveAmount)}</strong>.
+                    Open the return details and click <strong style={{ color: '#60bb46' }}>⚡ Process via eSewa</strong> to trigger
+                    the {isFull ? 'full ' : ''}payout directly — no merchant dashboard visit needed.
+                  </>
+                ) : (
+                  <>
+                    Creates a <strong>{isFull ? 'Full' : 'Partial'}</strong> refund of <strong>{money(effectiveAmount)}</strong> via{' '}
+                    <strong>{refundDraft.method.toUpperCase()}</strong>. Track and finalize it in the <strong>Refunds</strong> section.
+                  </>
+                )}
+              </div>
+
+              {/* Footer buttons */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10 }}>
+                <button
+                  type="button"
+                  className="btn btn-outline btn-sm"
+                  onClick={() => setDialogState({ isOpen: false, action: null, returnItem: null, loading: false })}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  disabled={dialogState.loading || amountInvalid}
+                  onClick={submitRefund}
+                  style={{
+                    background: isFull ? '#16a34a' : '#d97706',
+                    color: '#fff', border: 'none', fontWeight: 700,
+                    opacity: amountInvalid ? 0.5 : 1
+                  }}
+                >
+                  {dialogState.loading
+                    ? 'Creating…'
+                    : isFull
+                      ? `Create Full Refund · ${money(maxAmt)}`
+                      : `Create Partial Refund · ${money(effectiveAmount)}`}
+                </button>
               </div>
             </div>
-
-            <div>
-              <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', display: 'block', marginBottom: 4 }}>Notes (optional)</label>
-              <textarea
-                className="input"
-                rows={3}
-                value={refundDraft.notes}
-                onChange={e => setRefundDraft(d => ({ ...d, notes: e.target.value }))}
-                placeholder="Any administrative note for this refund..."
-                style={{ fontSize: 13, borderRadius: 8 }}
-              />
-            </div>
-
-            <div style={{ fontSize: 12, color: 'var(--muted)', background: '#f8fafc', padding: '8px 12px', borderRadius: 8, lineHeight: 1.5 }}>
-              {refundDraft.method === 'esewa' ? (
-                <>
-                  Creates a <strong>Requested</strong> refund and verifies the payment via the <strong>eSewa status API</strong>. The payout is issued from the
-                  eSewa merchant dashboard — update the refund status in the <strong>Refunds</strong> section of this page after confirming the payout.
-                </>
-              ) : (
-                <>
-                  Creates a <strong>Requested</strong> refund against the order payment via <strong>{refundDraft.method.toUpperCase()}</strong>. Track and finalize it in the{' '}
-                  <strong>Refunds</strong> section of this page.
-                </>
-              )}
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, paddingTop: 4 }}>
-              <button
-                type="button"
-                className="btn btn-outline btn-sm"
-                onClick={() => setDialogState({ isOpen: false, action: null, returnItem: null, loading: false })}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="btn btn-sm"
-                disabled={dialogState.loading}
-                onClick={submitRefund}
-                style={{ background: '#ff5500', color: '#fff', border: 'none', fontWeight: 700 }}
-              >
-                {dialogState.loading ? 'Creating...' : 'Create Refund'}
-              </button>
-            </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
 
       {/* Confirmation Dialog */}
       <ConfirmDialog
