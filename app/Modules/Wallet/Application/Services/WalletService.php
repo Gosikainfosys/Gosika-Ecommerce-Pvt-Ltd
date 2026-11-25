@@ -248,6 +248,11 @@ class WalletService
         return $releasedOrderCount;
     }
 
+    public function reconcileRefundEarningsForVendor(Vendor $vendor): void
+    {
+        $this->reconcileRefundEarnings($vendor);
+    }
+
     protected function distributeMaturedEligibleSettlements(Vendor $vendor): int
     {
         $releasedOrderCount = 0;

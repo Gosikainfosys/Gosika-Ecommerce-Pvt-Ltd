@@ -1732,7 +1732,7 @@ class OrderConfirmationRulesTest extends TestCase
             ->count());
     }
 
-    public function test_scheduler_repairs_refund_debit_when_earned_commission_has_no_earning_transaction(): void
+    public function test_vendor_finance_ledger_repairs_refund_debit_without_earning_transaction(): void
     {
         Setting::set('settlement.waiting_days', 7, 'settlement', 'integer', true);
         [$order, $vendorOrder, $customer] = $this->createOrder(OrderStatus::DELIVERED, isCod: false);
@@ -1789,7 +1789,10 @@ class OrderConfirmationRulesTest extends TestCase
             'description' => 'Customer return refund '.$refund->refund_number,
         ]);
 
-        app(WalletService::class)->releaseMaturedVendorEarnings();
+        $this->actingAs($this->adminUser)
+            ->getJson('/api/v1/admin/wallet/vendors/'.$this->vendor->uuid.'/ledger')
+            ->assertOk()
+            ->assertJsonPath('data.wallet.balance', '0.00');
 
         $this->assertSame('0.00', $wallet->fresh()->balance);
         $this->assertSame('0.00', $wallet->fresh()->pending_balance);

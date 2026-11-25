@@ -334,6 +334,7 @@ class AdminWalletController extends Controller
     {
         $vendor = $this->vendor($vendorId);
 
+        $this->service->reconcileRefundEarningsForVendor($vendor);
         $wallet = $this->service->walletForVendor($vendor);
 
         $settlementModels = $this->service->settlementsFor($vendor);
