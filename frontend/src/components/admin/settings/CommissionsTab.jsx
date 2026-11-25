@@ -199,7 +199,7 @@ export default function CommissionsTab({ form, onChange, disabled }) {
               <input
                 type="number"
                 min="0"
-                max="60"
+                max="365"
                 className="input input-sm"
                 value={form.settlement_holding_days ?? form['settlement.waiting_days'] ?? 7}
                 onChange={e => {
@@ -251,7 +251,7 @@ export default function CommissionsTab({ form, onChange, disabled }) {
                 disabled={disabled}
               >
                 <option value="yes">Yes (Admin must verify bank account)</option>
-                <option value="no">No (Auto-disburse approved schedules)</option>
+                <option value="no">No (Auto-approve; admin still records the transfer)</option>
               </select>
             </div>
           </div>

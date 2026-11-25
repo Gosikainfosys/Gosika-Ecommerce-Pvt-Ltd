@@ -378,6 +378,15 @@ export default function VendorFinance() {
 
   const availableBalance = Number(wallet?.available_balance || 0)
   const minimumPayout = Number(wallet?.minimum_payout_amount || DEFAULT_MIN_PAYOUT)
+  const payoutsEnabled = wallet?.vendor_payouts_enabled !== false
+  const payoutFrequency = wallet?.payout_frequency || 'weekly'
+  const payoutFrequencyLabel = {
+    manual: 'Manual on-demand',
+    daily: 'Daily',
+    weekly: 'Weekly (Sunday)',
+    biweekly: 'Biweekly (1st and 15th)',
+    monthly: 'Monthly (1st)',
+  }[payoutFrequency] || payoutFrequency
   const pendingOrderEarnings = useMemo(
     () => rows
       .filter((row) => row.category === 'orders'
@@ -698,7 +707,7 @@ export default function VendorFinance() {
               setPayoutAmount(availableBalance.toFixed(2))
               setPayoutOpen(true)
             }}
-            disabled={availableBalance < minimumPayout}
+            disabled={!payoutsEnabled || availableBalance < minimumPayout}
           >
             Withdraw available balance
           </Button>
@@ -1147,7 +1156,9 @@ export default function VendorFinance() {
 
       {activePage === 'wallet' && (
         <div className="alert alert-info" style={{ marginBottom: 0 }}>
-          Withdrawals can only be requested from your available balance. Paid, delivered orders become withdrawable after {wallet?.earnings_maturity_days ?? 'the configured'} days—the longer of the admin return window ({wallet?.return_window_days ?? 'configured'} days) and vendor settlement cycle ({wallet?.settlement_cycle_days ?? 'configured'} days).
+          {payoutsEnabled
+            ? <>Withdrawals can only be requested from your available balance. Paid, delivered orders become withdrawable after {wallet?.earnings_maturity_days ?? 'the configured'} days, based on the configured holding period, return window, and vendor settlement cycle. Payout schedule: {payoutFrequencyLabel}.</>
+            : 'Vendor payouts are currently disabled by the administrator.'}
         </div>
       )}
 
@@ -1155,6 +1166,9 @@ export default function VendorFinance() {
         <form onSubmit={requestPayout} className="flex flex-col gap-2">
           <p className="muted text-sm" style={{ marginTop: 0 }}>
             Request a payout to a registered bank account. Minimum payout: {money(minimumPayout)}.
+            {' '}Payout schedule: {payoutFrequencyLabel}. {wallet?.requires_manual_payout_approval === false
+              ? 'Requests are auto-approved; payout completion is still recorded by the admin.'
+              : 'Requests require admin approval.'}
           </p>
           <Input
             label="Amount (NPR)"

@@ -35,6 +35,9 @@ class SettingsSeeder extends Seeder
             ['payment.expiration_minutes', '60', 'payment', 'integer', true],
             ['settlement.waiting_days', '7', 'settlement', 'integer', true],
             ['settlement.min_payout_amount', '1000', 'settlement', 'decimal', true],
+            ['settlement.payout_frequency', 'weekly', 'settlement', 'string', true],
+            ['settlement.require_manual_payout_approval', 'true', 'settlement', 'boolean', true],
+            ['commission.vendor_payouts_enabled', 'true', 'commission', 'boolean', true],
             ['currency.code', 'NPR', 'currency', 'string', true],
             ['marketplace.initial_market', 'Koshi Province, Nepal', 'marketplace', 'string', true],
         ];

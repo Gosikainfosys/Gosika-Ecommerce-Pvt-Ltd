@@ -4,7 +4,9 @@ namespace Tests\Feature;
 
 use App\Modules\Identity\Domain\Roles;
 use App\Modules\Identity\Infrastructure\Models\User;
+use App\Modules\Platform\Infrastructure\Models\Setting;
 use App\Modules\Shared\Domain\Enums\VendorStatus;
+use App\Modules\Shared\Domain\Enums\PayoutStatus;
 use App\Modules\Vendor\Infrastructure\Models\BankAccount;
 use App\Modules\Vendor\Infrastructure\Models\Store;
 use App\Modules\Vendor\Infrastructure\Models\Vendor;
@@ -92,6 +94,103 @@ class VendorWalletPayoutTest extends TestCase
         $this->assertDatabaseCount('payout_requests', 0);
         $this->assertSame('5000.00', $wallet->fresh()->balance);
         $this->assertSame('5000.00', $wallet->fresh()->available_balance);
+    }
+
+    public function test_vendor_must_select_a_registered_bank_account_for_a_payout(): void
+    {
+        [$user, $vendor, , $wallet] = $this->createVendorWallet(5000, 5000, 0);
+
+        $this->actingAs($user)
+            ->postJson('/api/v1/vendor/wallet/payouts', ['amount' => 4500])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('bank_account_id');
+
+        $this->assertDatabaseCount('payout_requests', 0);
+        $this->assertSame('5000.00', $wallet->fresh()->available_balance);
+    }
+
+    public function test_vendor_payout_request_uses_the_configured_minimum_amount(): void
+    {
+        [$user, $vendor, $bankAccount, $wallet] = $this->createVendorWallet(5000, 5000, 0);
+        Setting::set('settlement.min_payout_amount', 5000, 'settlement', 'decimal');
+
+        $this->actingAs($user)
+            ->postJson('/api/v1/vendor/wallet/payouts', [
+                'amount' => 4500,
+                'bank_account_id' => $bankAccount->uuid,
+            ])
+            ->assertUnprocessable();
+
+        $this->assertDatabaseCount('payout_requests', 0);
+        $this->assertSame('5000.00', $wallet->fresh()->available_balance);
+    }
+
+    public function test_vendor_payout_requests_are_blocked_when_admin_disables_payouts(): void
+    {
+        [$user, $vendor, $bankAccount] = $this->createVendorWallet(5000, 5000, 0);
+        Setting::set('commission.vendor_payouts_enabled', false, 'commission', 'boolean');
+
+        $this->actingAs($user)
+            ->postJson('/api/v1/vendor/wallet/payouts', [
+                'amount' => 4500,
+                'bank_account_id' => $bankAccount->uuid,
+            ])
+            ->assertUnprocessable();
+
+        $this->assertDatabaseCount('payout_requests', 0);
+    }
+
+    public function test_vendor_payout_is_approved_automatically_when_manual_approval_is_disabled(): void
+    {
+        [$user, $vendor, $bankAccount] = $this->createVendorWallet(5000, 5000, 0);
+        Setting::set('settlement.require_manual_payout_approval', false, 'settlement', 'boolean');
+
+        $response = $this->actingAs($user)
+            ->postJson('/api/v1/vendor/wallet/payouts', [
+                'amount' => 4500,
+                'bank_account_id' => $bankAccount->uuid,
+            ]);
+
+        $response->assertCreated()->assertJsonPath('data.status', PayoutStatus::APPROVED->value);
+        $this->assertNotNull($response->json('data.approved_at'));
+
+        $this->assertDatabaseHas('payout_requests', [
+            'vendor_id' => $vendor->id,
+            'status' => PayoutStatus::APPROVED->value,
+        ]);
+    }
+
+    public function test_admin_settlement_settings_are_saved_for_vendor_payouts(): void
+    {
+        $admin = User::factory()->create();
+        $admin->assignRole(Roles::SUPER_ADMIN);
+
+        $this->actingAs($admin)
+            ->putJson('/api/v1/admin/settings/commissions', [
+                'settlement_holding_days' => 12,
+                'min_payout_amount' => 2500,
+                'payout_frequency' => 'monthly',
+                'require_manual_payout_approval' => false,
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.settlement_holding_days', 12)
+            ->assertJsonPath('data.min_payout_amount', 2500)
+            ->assertJsonPath('data.payout_frequency', 'monthly')
+            ->assertJsonPath('data.require_manual_payout_approval', false);
+
+        $this->assertSame(12, Setting::get('settlement.waiting_days'));
+        $this->assertSame(2500.0, Setting::get('settlement.min_payout_amount'));
+        $this->assertSame('monthly', Setting::get('settlement.payout_frequency'));
+        $this->assertFalse(Setting::get('settlement.require_manual_payout_approval'));
+
+        [$vendorUser] = $this->createVendorWallet(5000, 5000, 0);
+        $this->actingAs($vendorUser)
+            ->getJson('/api/v1/vendor/wallet')
+            ->assertOk()
+            ->assertJsonPath('data.minimum_payout_amount', '2500.00')
+            ->assertJsonPath('data.payout_frequency', 'monthly')
+            ->assertJsonPath('data.requires_manual_payout_approval', false)
+            ->assertJsonPath('data.settlement_holding_days', 12);
     }
 
     public function test_admin_payout_profiles_always_include_vendors_with_wallet_and_bank_details(): void

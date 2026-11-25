@@ -426,14 +426,20 @@ class WalletService
 
     public function requestPayout(Settlement $settlement, ?int $bankAccountId, User $user): PayoutRequest
     {
+        $this->assertPayoutsEnabled();
+
         if (! $this->isRequestable($settlement)) {
             throw new DomainException('Only eligible settlements with a completed cycle can be requested for payout.', 422);
         }
 
         $amount = round((float) $settlement->net_payable, 2);
+        $minimumAmount = (float) Setting::get('settlement.min_payout_amount', 1000);
 
         if ($amount <= 0) {
             throw new DomainException('Settlement net payable must be greater than zero.', 422);
+        }
+        if ($amount < $minimumAmount) {
+            throw new DomainException('Payout amount is below the minimum allowed amount.', 422);
         }
 
         if ($bankAccountId) {
@@ -482,6 +488,10 @@ class WalletService
             ]);
 
             $this->dispatcher->payoutRequested($payout);
+            $automaticallyApproved = $this->autoApprovePayoutIfConfigured($payout);
+            if ($automaticallyApproved) {
+                $this->dispatcher->payoutUpdated($payout, 'approved');
+            }
 
             return $payout->fresh(['bankAccount', 'settlement']);
         });
@@ -493,6 +503,8 @@ class WalletService
         ?int $bankAccountId,
         User $user
     ): PayoutRequest {
+        $this->assertPayoutsEnabled();
+
         $amount = round($requestedAmount, 2);
         $minimumAmount = (float) Setting::get('settlement.min_payout_amount', 1000);
 
@@ -541,9 +553,41 @@ class WalletService
             ]);
 
             $this->dispatcher->payoutRequested($payout);
+            $automaticallyApproved = $this->autoApprovePayoutIfConfigured($payout);
+            if ($automaticallyApproved) {
+                $this->dispatcher->payoutUpdated($payout, 'approved');
+            }
 
             return $payout->fresh(['bankAccount', 'settlement']);
         });
+    }
+
+    protected function assertPayoutsEnabled(): void
+    {
+        $enabled = Setting::get('commission.vendor_payouts_enabled', true);
+        if (! in_array($enabled, [true, 1, '1', 'true'], true)) {
+            throw new DomainException('Vendor payouts are currently disabled.', 422);
+        }
+    }
+
+    protected function autoApprovePayoutIfConfigured(PayoutRequest $payout): bool
+    {
+        $requiresManualApproval = Setting::get('settlement.require_manual_payout_approval', true);
+        if (in_array($requiresManualApproval, [true, 1, '1', 'true'], true)) {
+            return false;
+        }
+
+        $payout->status = PayoutStatus::APPROVED;
+        $payout->approved_at = now();
+        $payout->save();
+
+        if ($payout->settlement && $payout->settlement->status->value === SettlementStatus::ELIGIBLE->value) {
+            $payout->settlement->status = SettlementStatus::PROCESSING;
+            $payout->settlement->hold_reason = null;
+            $payout->settlement->save();
+        }
+
+        return true;
     }
 
     public function approvePayout(PayoutRequest $payout, User $user): PayoutRequest
@@ -758,7 +802,8 @@ class WalletService
 
         $returnWindowDays = max(1, (int) Setting::get('return.window_days', 7));
         $settlementCycleDays = max(1, (int) ($vendor->meta['settlement_cycle_days'] ?? 14));
-        $maturityAt = $deliveredAt->copy()->addDays(max($returnWindowDays, $settlementCycleDays));
+        $holdingDays = max(0, (int) Setting::get('settlement.waiting_days', 7));
+        $maturityAt = $deliveredAt->copy()->addDays(max($returnWindowDays, $settlementCycleDays, $holdingDays));
 
         return $maturityAt->lte(now());
     }

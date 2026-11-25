@@ -12,6 +12,9 @@ class WalletResource extends JsonResource
     {
         $returnWindowDays = max(1, (int) Setting::get('return.window_days', 7));
         $settlementCycleDays = max(1, (int) ($this->vendor?->meta['settlement_cycle_days'] ?? 14));
+        $settlementHoldingDays = max(0, (int) Setting::get('settlement.waiting_days', 7));
+        $requiresManualApproval = Setting::get('settlement.require_manual_payout_approval', true);
+        $payoutsEnabled = Setting::get('commission.vendor_payouts_enabled', true);
 
         return [
             'id' => $this->uuid,
@@ -21,9 +24,13 @@ class WalletResource extends JsonResource
             'available_balance' => number_format((float) $this->available_balance, 2, '.', ''),
             'pending_balance' => number_format((float) $this->pending_balance, 2, '.', ''),
             'minimum_payout_amount' => number_format((float) Setting::get('settlement.min_payout_amount', 1000), 2, '.', ''),
+            'payout_frequency' => (string) Setting::get('settlement.payout_frequency', 'weekly'),
+            'requires_manual_payout_approval' => in_array($requiresManualApproval, [true, 1, '1', 'true'], true),
+            'vendor_payouts_enabled' => in_array($payoutsEnabled, [true, 1, '1', 'true'], true),
+            'settlement_holding_days' => $settlementHoldingDays,
             'return_window_days' => $returnWindowDays,
             'settlement_cycle_days' => $settlementCycleDays,
-            'earnings_maturity_days' => max($returnWindowDays, $settlementCycleDays),
+            'earnings_maturity_days' => max($returnWindowDays, $settlementCycleDays, $settlementHoldingDays),
             'currency' => $this->currency,
             'version' => $this->version,
             'created_at' => $this->created_at?->toISOString(),

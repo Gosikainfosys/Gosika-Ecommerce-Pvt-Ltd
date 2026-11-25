@@ -30,7 +30,7 @@ class UpdateCommissionSettingsRequest extends FormRequest
             // Payouts & Settlements
             'vendor_payouts_enabled'   => ['nullable', 'boolean'],
             'payout_frequency'         => ['nullable', 'string', 'in:manual,daily,weekly,biweekly,monthly'],
-            'min_payout_amount'        => ['nullable', 'numeric', 'min:0'],
+            'min_payout_amount'        => ['nullable', 'numeric', 'min:100'],
             'payout_processing_fee'    => ['nullable', 'numeric', 'min:0'],
             'settlement_holding_days'  => ['nullable', 'integer', 'min:0', 'max:365'],
             'require_delivery_for_settlement' => ['nullable', 'boolean'],

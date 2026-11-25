@@ -76,14 +76,57 @@ class AdminSettingsController extends Controller
     public function getCommissions(): JsonResponse
     {
         $settings = $this->settingsService->getGroup('commission', false);
-        return Response::success($settings, 'Commission settings retrieved.');
+        $settlementSettings = $this->settingsService->getGroup('settlement', false);
+        $manualApproval = $settlementSettings['settlement.require_manual_payout_approval'] ?? true;
+
+        return Response::success(array_merge($settings, [
+            'settlement_holding_days' => (int) ($settlementSettings['settlement.waiting_days'] ?? 7),
+            'min_payout_amount' => (float) ($settlementSettings['settlement.min_payout_amount'] ?? 1000),
+            'payout_frequency' => $settlementSettings['settlement.payout_frequency'] ?? 'weekly',
+            'require_manual_payout_approval' => in_array($manualApproval, [true, 1, '1', 'true'], true),
+        ]), 'Commission settings retrieved.');
     }
 
     public function updateCommissions(UpdateCommissionSettingsRequest $request): JsonResponse
     {
         $validated = $request->validated();
-        $updated = $this->settingsService->updateGroup('commission', $validated, $request->user());
-        return Response::success($updated, 'Commission settings updated successfully.');
+        $commissionKeys = [
+            'settlement_holding_days',
+            'min_payout_amount',
+            'payout_frequency',
+            'require_manual_payout_approval',
+        ];
+        $commissionSettings = array_diff_key($validated, array_flip($commissionKeys));
+        $settlementSettings = [];
+
+        if (array_key_exists('settlement_holding_days', $validated)) {
+            $settlementSettings['settlement.waiting_days'] = (int) $validated['settlement_holding_days'];
+        }
+        if (array_key_exists('min_payout_amount', $validated)) {
+            $settlementSettings['settlement.min_payout_amount'] = (float) $validated['min_payout_amount'];
+        }
+        if (array_key_exists('payout_frequency', $validated)) {
+            $settlementSettings['settlement.payout_frequency'] = $validated['payout_frequency'];
+        }
+        if (array_key_exists('require_manual_payout_approval', $validated)) {
+            $settlementSettings['settlement.require_manual_payout_approval'] = (bool) $validated['require_manual_payout_approval'];
+        }
+
+        $this->settingsService->updateGroup('commission', $commissionSettings, $request->user());
+        if ($settlementSettings) {
+            $this->settingsService->updateGroup('settlement', $settlementSettings, $request->user());
+        }
+
+        $commissionValues = $this->settingsService->getGroup('commission', false);
+        $settlementValues = $this->settingsService->getGroup('settlement', false);
+        $manualApproval = $settlementValues['settlement.require_manual_payout_approval'] ?? true;
+
+        return Response::success(array_merge($commissionValues, [
+            'settlement_holding_days' => (int) ($settlementValues['settlement.waiting_days'] ?? 7),
+            'min_payout_amount' => (float) ($settlementValues['settlement.min_payout_amount'] ?? 1000),
+            'payout_frequency' => $settlementValues['settlement.payout_frequency'] ?? 'weekly',
+            'require_manual_payout_approval' => in_array($manualApproval, [true, 1, '1', 'true'], true),
+        ]), 'Commission settings updated successfully.');
     }
 
     public function getShipping(): JsonResponse
