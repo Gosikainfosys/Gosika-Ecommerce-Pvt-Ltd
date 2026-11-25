@@ -186,11 +186,12 @@ class WalletService
         });
     }
 
-    public function releaseMaturedVendorEarnings(): int
+    public function releaseMaturedVendorEarnings(?Vendor $vendorFilter = null): int
     {
         $vendorIds = VendorOrder::query()
             ->whereIn('status', [OrderStatus::DELIVERED, OrderStatus::COMPLETED])
             ->where('delivery_status', DeliveryStatus::DELIVERED)
+            ->when($vendorFilter, fn ($query) => $query->where('vendor_id', $vendorFilter->id))
             ->whereHas('order', fn ($query) => $query->whereIn('payment_status', [
                 OrderPaymentStatus::PAID,
                 OrderPaymentStatus::PARTIALLY_REFUNDED,

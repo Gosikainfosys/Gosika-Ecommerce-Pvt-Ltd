@@ -34,6 +34,14 @@ class VendorWalletController extends Controller
         return Response::success(new WalletResource($this->service->walletForVendor($vendor)), 'Wallet retrieved.');
     }
 
+    public function releaseMaturedEarnings(Request $request): JsonResponse
+    {
+        $vendor = $this->vendorFor($request);
+        $this->service->releaseMaturedVendorEarnings($vendor);
+
+        return Response::success(new WalletResource($this->service->walletForVendor($vendor)), 'Wallet refreshed.');
+    }
+
     public function transactions(Request $request): JsonResponse
     {
         $vendor = $this->vendorFor($request);

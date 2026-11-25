@@ -166,15 +166,14 @@ export default function VendorFinance() {
     setError(null)
 
     try {
+      const walletResponse = await api.post('/vendor/wallet/release-matured')
       const [
-        walletResponse,
         transactionRows,
         orders,
         payoutResponse,
         settlements,
         bankResponse,
       ] = await Promise.all([
-        api.get('/vendor/wallet'),
         fetchAllPages('/vendor/wallet/transactions'),
         fetchAllPages('/vendor/orders'),
         api.get('/vendor/wallet/payouts'),
@@ -330,7 +329,7 @@ export default function VendorFinance() {
 
   const refreshWallet = useCallback(async () => {
     try {
-      const response = await api.get('/vendor/wallet')
+      const response = await api.post('/vendor/wallet/release-matured')
       const nextWallet = response.data?.data ?? response.data
       const previousWallet = walletRef.current
       const balanceChanged = previousWallet && ['balance', 'available_balance', 'pending_balance']

@@ -13,6 +13,7 @@ Route::prefix('v1/admin')->middleware(['auth:sanctum', 'ensure:admin'])->group(f
 
 Route::prefix('v1/vendor/wallet')->middleware(['auth:sanctum', 'ensure:vendor'])->group(function () {
     Route::get('/', [VendorWalletController::class, 'summary']);
+    Route::post('release-matured', [VendorWalletController::class, 'releaseMaturedEarnings']);
     Route::get('transactions', [VendorWalletController::class, 'transactions']);
     Route::get('payouts', [VendorWalletController::class, 'payouts']);
     Route::get('settlements', [VendorWalletController::class, 'settlements']);

@@ -1461,6 +1461,26 @@ class OrderConfirmationRulesTest extends TestCase
         $this->assertSame('2300.00', $walletService->walletForVendor($this->vendor)->available_balance);
     }
 
+    public function test_vendor_wallet_refresh_releases_matured_earnings_without_scheduler(): void
+    {
+        Setting::set('settlement.waiting_days', 0, 'settlement', 'integer', true);
+        [$order, $vendorOrder] = $this->createOrder(OrderStatus::COMPLETED, isCod: false);
+        $order->update(['completed_at' => now()->subDay()]);
+        $vendorOrder->update([
+            'status' => OrderStatus::COMPLETED,
+            'delivery_status' => DeliveryStatus::DELIVERED,
+            'vendor_payable' => 810,
+            'commission_rate' => 10,
+            'commission_amount' => 90,
+        ]);
+
+        $this->actingAs($this->vendorUser)
+            ->postJson('/api/v1/vendor/wallet/release-matured')
+            ->assertOk()
+            ->assertJsonPath('data.available_balance', '810.00')
+            ->assertJsonPath('data.pending_balance', '0.00');
+    }
+
     public function test_vendor_analytics_excludes_rejected_orders_from_projected_earnings(): void
     {
         [, $rejectedVendorOrder] = $this->createOrder(OrderStatus::REJECTED, isCod: false);
