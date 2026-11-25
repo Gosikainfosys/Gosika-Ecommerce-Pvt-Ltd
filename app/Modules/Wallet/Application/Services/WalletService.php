@@ -12,6 +12,7 @@ use App\Modules\Shared\Domain\Enums\DeliveryStatus;
 use App\Modules\Shared\Domain\Enums\OrderPaymentStatus;
 use App\Modules\Shared\Domain\Enums\OrderStatus;
 use App\Modules\Shared\Domain\Enums\PayoutStatus;
+use App\Modules\Shared\Domain\Enums\RefundStatus;
 use App\Modules\Shared\Domain\Enums\SettlementStatus;
 use App\Modules\Shared\Domain\Enums\WalletTransactionType;
 use App\Modules\Shared\Domain\Exceptions\DomainException;
@@ -84,9 +85,15 @@ class WalletService
 
         return DB::transaction(function () use ($vendorOrder) {
             $commission = $this->recordCommission($vendorOrder);
+            $wallet = $this->lockWallet($vendorOrder->vendor_id);
+            $earningsAlreadyCredited = WalletTransaction::query()
+                ->where('wallet_id', $wallet->id)
+                ->where('transaction_type', WalletTransactionType::CREDIT_EARNINGS->value)
+                ->where('reference_type', 'vendor_order')
+                ->where('reference_id', $vendorOrder->id)
+                ->exists();
 
-            if ($commission->status->value !== CommissionStatus::EARNED->value) {
-                $wallet = $this->lockWallet($vendorOrder->vendor_id);
+            if (! $earningsAlreadyCredited) {
                 $amount = (float) $vendorOrder->vendor_payable;
 
                 $this->mutate($wallet, function (VendorWallet $wallet) use ($amount) {
@@ -99,7 +106,9 @@ class WalletService
                     'reference_id' => $vendorOrder->id,
                     'description' => 'Earnings from order '.$vendorOrder->order?->order_number,
                 ]);
+            }
 
+            if ($commission->status->value !== CommissionStatus::EARNED->value) {
                 $commission->status = CommissionStatus::EARNED;
                 $commission->save();
             }
@@ -188,6 +197,8 @@ class WalletService
 
     public function releaseMaturedVendorEarnings(?Vendor $vendorFilter = null): int
     {
+        $this->reconcileRefundEarnings($vendorFilter);
+
         $vendorIds = VendorOrder::query()
             ->whereIn('status', [OrderStatus::DELIVERED, OrderStatus::COMPLETED])
             ->where('delivery_status', DeliveryStatus::DELIVERED)
@@ -938,9 +949,6 @@ class WalletService
         }
 
         $commission = $this->recordCommission($vendorOrder);
-        if ($commission->status === CommissionStatus::EARNED) {
-            return true;
-        }
 
         $earningsAlreadyCredited = WalletTransaction::query()
             ->where('wallet_id', $wallet->id)
@@ -976,6 +984,35 @@ class WalletService
         $commission->save();
 
         return true;
+    }
+
+    protected function reconcileRefundEarnings(?Vendor $vendorFilter = null): void
+    {
+        $refunds = Refund::query()
+            ->select('refunds.*')
+            ->join('wallet_transactions as refund_transactions', function ($join) {
+                $join->on('refund_transactions.reference_id', '=', 'refunds.id')
+                    ->where('refund_transactions.reference_type', '=', 'refund')
+                    ->where('refund_transactions.transaction_type', '=', WalletTransactionType::DEBIT_REFUND->value);
+            })
+            ->join('vendor_orders', 'vendor_orders.id', '=', 'refunds.vendor_order_id')
+            ->where('refunds.status', RefundStatus::REFUNDED->value)
+            ->when($vendorFilter, fn ($query) => $query->where('vendor_orders.vendor_id', $vendorFilter->id))
+            ->whereNotExists(function ($query) {
+                $query->selectRaw('1')
+                    ->from('wallet_transactions as earnings_transactions')
+                    ->whereColumn('earnings_transactions.wallet_id', 'refund_transactions.wallet_id')
+                    ->where('earnings_transactions.transaction_type', WalletTransactionType::CREDIT_EARNINGS->value)
+                    ->where('earnings_transactions.reference_type', 'vendor_order')
+                    ->whereColumn('earnings_transactions.reference_id', 'vendor_orders.id');
+            })
+            ->with('vendorOrder.order')
+            ->distinct()
+            ->get();
+
+        foreach ($refunds as $refund) {
+            $this->debitRefund($refund);
+        }
     }
 
     protected function deductRefundBalances(VendorWallet $wallet, float $amount): void

@@ -1707,6 +1707,16 @@ class OrderConfirmationRulesTest extends TestCase
             'currency' => 'NPR',
             'version' => 1,
         ]);
+        WalletTransaction::create([
+            'wallet_id' => $wallet->id,
+            'transaction_type' => 'credit_earnings',
+            'reference_type' => 'vendor_order',
+            'reference_id' => $vendorOrder->id,
+            'amount' => 1200,
+            'balance_before' => 300,
+            'balance_after' => 1500,
+            'description' => 'Existing order earnings',
+        ]);
 
         $walletService = app(WalletService::class);
         $walletService->debitRefund($refund);
@@ -1718,6 +1728,81 @@ class OrderConfirmationRulesTest extends TestCase
         $this->assertSame(1, WalletTransaction::query()
             ->where('wallet_id', $wallet->id)
             ->where('reference_type', 'refund')
+            ->where('reference_id', $refund->id)
+            ->count());
+    }
+
+    public function test_scheduler_repairs_refund_debit_when_earned_commission_has_no_earning_transaction(): void
+    {
+        Setting::set('settlement.waiting_days', 7, 'settlement', 'integer', true);
+        [$order, $vendorOrder, $customer] = $this->createOrder(OrderStatus::DELIVERED, isCod: false);
+        $vendorOrder->update([
+            'status' => OrderStatus::DELIVERED,
+            'delivery_status' => DeliveryStatus::DELIVERED,
+            'vendor_payable' => 1200,
+        ]);
+        $order->update(['payment_status' => OrderPaymentStatus::PARTIALLY_REFUNDED]);
+        Commission::query()->create([
+            'vendor_order_id' => $vendorOrder->id,
+            'order_id' => $order->id,
+            'vendor_id' => $this->vendor->id,
+            'status' => CommissionStatus::EARNED,
+        ]);
+        $payment = Payment::create([
+            'payment_number' => 'PAY-'.strtoupper(Str::random(10)),
+            'order_id' => $order->id,
+            'vendor_order_id' => $vendorOrder->id,
+            'user_id' => $customer->id,
+            'amount' => 2500,
+            'currency' => 'NPR',
+            'method' => 'esewa',
+            'provider' => 'esewa',
+            'status' => PaymentStatus::PARTIALLY_REFUNDED,
+            'initiated_at' => now(),
+            'verified_at' => now(),
+        ]);
+        $refund = Refund::create([
+            'refund_number' => 'REF-'.strtoupper(Str::random(8)),
+            'payment_id' => $payment->id,
+            'order_id' => $order->id,
+            'vendor_order_id' => $vendorOrder->id,
+            'amount' => 1200,
+            'status' => RefundStatus::REFUNDED,
+            'completed_at' => now(),
+        ]);
+        $wallet = VendorWallet::create([
+            'vendor_id' => $this->vendor->id,
+            'balance' => -1200,
+            'pending_balance' => -1200,
+            'available_balance' => 0,
+            'currency' => 'NPR',
+            'version' => 1,
+        ]);
+        WalletTransaction::create([
+            'wallet_id' => $wallet->id,
+            'transaction_type' => 'debit_refund',
+            'reference_type' => 'refund',
+            'reference_id' => $refund->id,
+            'amount' => 1200,
+            'balance_before' => 0,
+            'balance_after' => -1200,
+            'description' => 'Customer return refund '.$refund->refund_number,
+        ]);
+
+        app(WalletService::class)->releaseMaturedVendorEarnings();
+
+        $this->assertSame('0.00', $wallet->fresh()->balance);
+        $this->assertSame('0.00', $wallet->fresh()->pending_balance);
+        $this->assertSame('0.00', $wallet->fresh()->available_balance);
+        $this->assertSame(1, WalletTransaction::query()
+            ->where('wallet_id', $wallet->id)
+            ->where('transaction_type', 'credit_earnings')
+            ->where('reference_type', 'vendor_order')
+            ->where('reference_id', $vendorOrder->id)
+            ->count());
+        $this->assertSame(1, WalletTransaction::query()
+            ->where('wallet_id', $wallet->id)
+            ->where('transaction_type', 'debit_refund')
             ->where('reference_id', $refund->id)
             ->count());
     }
