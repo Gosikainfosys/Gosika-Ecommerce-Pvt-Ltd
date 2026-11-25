@@ -46,9 +46,13 @@ export default function DeliveryReturns() {
   const handleConfirmPickup = async () => {
     if (!confirmPickup) return
     const targetId = confirmPickup.id
+    const cashRefundDue = Number(confirmPickup.cod_refund_due || 0)
     setBusyId(targetId)
     try {
-      const res = await api.post(`/delivery-partner/returns/${targetId}/collect`)
+      const res = await api.post(
+        `/delivery-partner/returns/${targetId}/collect`,
+        cashRefundDue > 0 ? { cash_refund_amount: cashRefundDue.toFixed(2) } : {},
+      )
       const updated = res?.data?.data
       const collectedTime = updated?.pickup_collected_at || new Date().toISOString()
 
@@ -59,6 +63,9 @@ export default function DeliveryReturns() {
               ? {
                   ...p,
                   pickup_collected_at: collectedTime,
+                  cash_refund_amount: updated?.cash_refund_amount ?? p.cash_refund_amount,
+                  cash_refund_handed_at: updated?.cash_refund_handed_at ?? p.cash_refund_handed_at,
+                  cod_refund_due: updated?.cod_refund_due ?? p.cod_refund_due,
                   status: p.status === 'approved' || p.status === 'pickup_arranged' ? 'collected' : p.status,
                 }
               : p
@@ -66,7 +73,9 @@ export default function DeliveryReturns() {
         )
       }
 
-      toast.success('Customer return pickup confirmed.')
+      toast.success(cashRefundDue > 0
+        ? `COD refund cash handoff of ${money(cashRefundDue)} confirmed.`
+        : 'Customer return pickup confirmed.')
       setConfirmPickup(null)
       customerReturns.reload({ silent: true })
     } catch (e) {
@@ -174,6 +183,8 @@ export default function DeliveryReturns() {
                 </div>
               </div>
               {(() => {
+                const cashRefundDue = Number(pickup.cod_refund_due || 0)
+                const needsCashRefund = pickup.is_cod && cashRefundDue > 0
                 const isCollected = Boolean(
                   pickup.pickup_collected_at ||
                   ['collected', 'inspected', 'completed', 'refunded'].includes(pickup.status)
@@ -186,23 +197,31 @@ export default function DeliveryReturns() {
                         <>
                           <CheckCircle size={14} style={{ color: 'var(--success, #16a34a)' }} />
                           <span style={{ color: 'var(--success, #16a34a)', fontWeight: 600 }}>
-                            {pickup.pickup_collected_at
-                              ? `Pickup confirmed ${formatDateTime(pickup.pickup_collected_at)}`
-                              : `Pickup completed (${String(pickup.status || '').replace(/_/g, ' ')})`}
+                            {needsCashRefund
+                              ? `COD cash refund due: ${money(cashRefundDue)}`
+                              : pickup.cash_refund_handed_at
+                                ? `COD cash refund ${money(pickup.cash_refund_amount)} handed over ${formatDateTime(pickup.cash_refund_handed_at)}`
+                                : pickup.pickup_collected_at
+                                  ? `Pickup confirmed ${formatDateTime(pickup.pickup_collected_at)}`
+                                  : `Pickup completed (${String(pickup.status || '').replace(/_/g, ' ')})`}
                           </span>
                         </>
                       ) : (
                         `Approved ${formatDateTime(pickup.updated_at || pickup.created_at)}`
                       )}
                     </span>
-                    {!isCollected && (
+                    {(!isCollected || needsCashRefund) && (
                       <button
                         type="button"
                         className="btn btn-primary btn-xs flex items-center gap-1"
                         onClick={() => setConfirmPickup(pickup)}
                         disabled={busyId === pickup.id}
                       >
-                        <CheckCircle size={12} /> {busyId === pickup.id ? 'Confirming…' : 'Confirm Pickup'}
+                        <CheckCircle size={12} /> {busyId === pickup.id
+                          ? 'Confirming…'
+                          : needsCashRefund
+                            ? `Confirm Cash Refund · ${money(cashRefundDue)}`
+                            : 'Confirm Pickup'}
                       </button>
                     )}
                   </div>
@@ -257,14 +276,21 @@ export default function DeliveryReturns() {
         onClose={() => setConfirmPickup(null)}
         onConfirm={handleConfirmPickup}
         loading={busyId === confirmPickup?.id}
-        title="Confirm customer return pickup?"
-        confirmText="Confirm Pickup"
-        message="Confirm only after you have collected the approved item from the customer. This records the pickup for the original delivery."
+        title={Number(confirmPickup?.cod_refund_due || 0) > 0 ? 'Confirm COD cash refund handoff?' : 'Confirm customer return pickup?'}
+        confirmText={Number(confirmPickup?.cod_refund_due || 0) > 0 ? 'Confirm Cash Handed Over' : 'Confirm Pickup'}
+        message={Number(confirmPickup?.cod_refund_due || 0) > 0
+          ? 'Hand this exact approved amount to the customer in cash, then confirm. The refund will be completed and recorded only after this confirmation.'
+          : 'Confirm only after you have collected the approved item from the customer. This records the pickup for the original delivery.'}
       >
         {confirmPickup && (
           <div className="card" style={{ background: 'var(--bg)', padding: 12, margin: 0 }}>
             <div className="font-bold text-sm text-ink">{confirmPickup.return_number} · {confirmPickup.product_name}</div>
             <div className="muted text-xs mt-0.5">{confirmPickup.pickup_address}</div>
+            {Number(confirmPickup.cod_refund_due || 0) > 0 && (
+              <div className="font-bold text-sm mt-2" style={{ color: 'var(--success, #16a34a)' }}>
+                Cash to hand to customer: {money(confirmPickup.cod_refund_due)}
+              </div>
+            )}
           </div>
         )}
       </ConfirmDialog>

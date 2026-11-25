@@ -5,8 +5,10 @@ namespace App\Modules\Shipping\Presentation\Http\Controllers;
 use App\Modules\Identity\Infrastructure\Models\User;
 use App\Modules\Order\Infrastructure\Models\ReturnRequest;
 use App\Modules\Order\Infrastructure\Models\VendorOrder;
+use App\Modules\Payment\Application\Services\RefundService;
 use App\Modules\Payment\Infrastructure\Models\Refund;
 use App\Modules\Shared\Domain\Enums\DeliveryStatus;
+use App\Modules\Shared\Domain\Enums\RefundStatus;
 use App\Modules\Shared\Domain\Enums\ReturnStatus;
 use App\Modules\Shared\Domain\Exceptions\DomainException;
 use App\Modules\Shared\Presentation\Http\Filters\ListingDateRange;
@@ -30,12 +32,14 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
 
 class DeliveryPartnerController extends Controller
 {
-    public function __construct(protected DeliveryService $service)
+    public function __construct(
+        protected DeliveryService $service,
+        protected RefundService $refundService,
+    )
     {
         $this->middleware('auth:sanctum');
         $this->middleware('ensure:delivery')->except(['apply']);
@@ -139,27 +143,8 @@ class DeliveryPartnerController extends Controller
         );
     }
 
-    private static function ensurePickupColumnsExist(): void
-    {
-        try {
-            if (! Schema::hasColumn('return_requests', 'pickup_collected_at')) {
-                Schema::table('return_requests', function ($table) {
-                    if (! Schema::hasColumn('return_requests', 'pickup_collected_at')) {
-                        $table->timestamp('pickup_collected_at')->nullable();
-                    }
-                    if (! Schema::hasColumn('return_requests', 'pickup_collected_by')) {
-                        $table->unsignedBigInteger('pickup_collected_by')->nullable();
-                    }
-                });
-            }
-        } catch (\Throwable) {
-            // Silently continue if DDL is restricted
-        }
-    }
-
     public function returns(Request $request): JsonResponse
     {
-        self::ensurePickupColumnsExist();
         $partner = $this->partnerFor($request->user());
         $assignments = $partner->assignments()
             ->whereNotNull('delivered_at')
@@ -172,6 +157,14 @@ class DeliveryPartnerController extends Controller
         $returns = ReturnRequest::query()
             ->with(['order', 'orderItem', 'vendorOrder'])
             ->withCount('refunds')
+            ->withSum([
+                'refunds as cod_refund_due' => fn ($query) => $query
+                    ->where('status', RefundStatus::APPROVED->value),
+            ], 'amount')
+            ->withSum([
+                'refunds as cod_refund_completed' => fn ($query) => $query
+                    ->where('status', RefundStatus::REFUNDED->value),
+            ], 'amount')
             ->whereIn('vendor_order_id', $assignmentByVendorOrder->keys())
             ->whereIn('status', [
                 ReturnStatus::APPROVED->value,
@@ -202,11 +195,15 @@ class DeliveryPartnerController extends Controller
 
     public function collectReturn(Request $request, string $returnId): JsonResponse
     {
+        $request->validate([
+            'cash_refund_amount' => ['nullable', 'numeric', 'min:0.01'],
+        ]);
         $partner = $this->partnerFor($request->user());
 
         try {
             $return = DB::transaction(function () use ($partner, $request, $returnId) {
                 $return = ReturnRequest::query()
+                    ->with(['order', 'orderItem', 'vendorOrder', 'refunds.payment'])
                     ->where('uuid', $returnId)
                     ->when(ctype_digit($returnId), fn ($query) => $query->orWhere('id', (int) $returnId))
                     ->lockForUpdate()
@@ -236,23 +233,63 @@ class DeliveryPartnerController extends Controller
                     throw new DomainException('This customer return is not approved for pickup.', 422);
                 }
 
-                if (! empty($return->pickup_collected_at)) {
+                $isCod = $return->order?->payment_method === 'cod';
+                $approvedRefunds = $return->refunds
+                    ->filter(fn (Refund $refund) => $refund->status === RefundStatus::APPROVED)
+                    ->values();
+                $completedCashRefunds = (float) $return->refunds
+                    ->filter(fn (Refund $refund) => $refund->status === RefundStatus::REFUNDED)
+                    ->sum('amount');
+                $cashRefundDue = max(0, round(
+                    (float) $approvedRefunds->sum('amount')
+                    + $completedCashRefunds
+                    - (float) $return->cash_refund_amount,
+                    2
+                ));
+                $hasCashRefundAmount = $request->filled('cash_refund_amount');
+                $alreadyPickedUp = ! empty($return->pickup_collected_at);
+
+                if ($alreadyPickedUp && ($cashRefundDue <= 0 || ! $isCod)) {
                     throw new DomainException('This return pickup has already been confirmed.', 422);
                 }
-
-                self::ensurePickupColumnsExist();
+                if (! $isCod && $hasCashRefundAmount) {
+                    throw new DomainException('Cash refund handoff is only available for COD orders.', 422);
+                }
+                if ($hasCashRefundAmount && $cashRefundDue <= 0) {
+                    throw new DomainException('There is no approved COD refund to hand to the customer.', 422);
+                }
+                if ($isCod && $cashRefundDue > 0) {
+                    if (! $hasCashRefundAmount) {
+                        throw new DomainException('Confirm the exact approved cash refund amount before completing this COD return.', 422);
+                    }
+                    if (round((float) $request->input('cash_refund_amount'), 2) !== $cashRefundDue) {
+                        throw new DomainException(
+                            'Cash handed to the customer must match the exact approved refund amount of NPR '.number_format($cashRefundDue, 2).'.',
+                            422
+                        );
+                    }
+                }
 
                 $now = now();
-                if (Schema::hasColumn('return_requests', 'pickup_collected_at')) {
+                if (! $alreadyPickedUp) {
                     $return->pickup_collected_at = $now;
-                }
-                if (Schema::hasColumn('return_requests', 'pickup_collected_by')) {
                     $return->pickup_collected_by = $request->user()->id;
+                }
+                if ($isCod && $cashRefundDue > 0) {
+                    $return->cash_refund_amount = round((float) $return->cash_refund_amount + $cashRefundDue, 2);
+                    $return->cash_refund_handed_at = $now;
+                    $return->cash_refund_handed_by = $request->user()->id;
                 }
 
                 $currentNotes = (string) ($return->review_notes ?? '');
-                if (! str_contains($currentNotes, '[PICKUP_COLLECTED:')) {
+                if (! $alreadyPickedUp && ! str_contains($currentNotes, '[PICKUP_COLLECTED:')) {
                     $return->review_notes = trim($currentNotes . ' [PICKUP_COLLECTED:' . $now->toISOString() . ':by:' . $request->user()->id . ']');
+                }
+                if ($isCod && $cashRefundDue > 0) {
+                    $return->review_notes = trim(
+                        (string) ($return->review_notes ?? $currentNotes)
+                        .' [COD_CASH_REFUND:'.number_format($cashRefundDue, 2, '.', '').':'.$now->toISOString().':by:'.$request->user()->id.']'
+                    );
                 }
 
                 if (in_array($statusVal, ['approved', 'pickup_arranged'], true)) {
@@ -260,8 +297,23 @@ class DeliveryPartnerController extends Controller
                 }
                 $return->save();
 
-                $return->load(['order', 'orderItem', 'vendorOrder']);
+                foreach ($approvedRefunds as $refund) {
+                    $this->refundService->updateStatus(
+                        $request->user(),
+                        $refund,
+                        RefundStatus::REFUNDED,
+                        null,
+                        ['cod_cash_handoff' => [
+                            'amount' => number_format($cashRefundDue, 2, '.', ''),
+                            'handed_at' => $now->toISOString(),
+                            'delivery_partner_user_id' => $request->user()->id,
+                        ]]
+                    );
+                }
+
+                $return->load(['order', 'orderItem', 'vendorOrder', 'refunds.payment']);
                 $return->setRelation('pickup_assignment', $assignment);
+                $return->setAttribute('cod_refund_due', 0);
 
                 return $return;
             });

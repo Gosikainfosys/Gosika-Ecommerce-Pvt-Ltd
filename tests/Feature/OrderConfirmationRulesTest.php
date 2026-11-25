@@ -1295,15 +1295,17 @@ class OrderConfirmationRulesTest extends TestCase
                 'refund_type' => 'full',
             ])
             ->assertOk()
-            ->assertJsonPath('data.amount', '878.50')
+            ->assertJsonPath('data.amount', '2178.50')
             ->assertJsonPath('data.refund_type', 'full');
-        $this->assertSame('1200.00', $return->fresh()->refund_amount);
+        $this->assertSame('2500.00', $return->fresh()->refund_amount);
 
         $this->actingAs($this->adminUser)
             ->getJson("/api/v1/admin/orders/returns/{$return->uuid}")
             ->assertOk()
             ->assertJsonPath('data.refunds.0.refund_type', 'partial')
-            ->assertJsonPath('data.refunds.1.refund_type', 'full');
+            ->assertJsonPath('data.refunds.1.refund_type', 'full')
+            ->assertJsonPath('data.paid_amount', '2500.00')
+            ->assertJsonPath('data.full_refund_amount', '0.00');
     }
 
     public function test_esewa_refund_initiation_is_reported_as_unsupported(): void
@@ -1864,7 +1866,7 @@ class OrderConfirmationRulesTest extends TestCase
         $this->assertSame('187.16', $transactions[1]->balance_after);
     }
 
-    public function test_refund_debit_is_capped_at_the_delivered_order_vendor_payable(): void
+    public function test_refund_debit_records_the_exact_refund_above_vendor_payable(): void
     {
         [$order, $vendorOrder, $customer] = $this->createOrder(OrderStatus::DELIVERED, isCod: false);
         $vendorOrder->update([
@@ -1904,9 +1906,9 @@ class OrderConfirmationRulesTest extends TestCase
             ->where('transaction_type', 'debit_refund')
             ->firstOrFail();
 
-        $this->assertSame('0.00', $wallet->fresh()->balance);
-        $this->assertSame('0.00', $wallet->fresh()->pending_balance);
-        $this->assertSame('1000.00', $refundDebit->amount);
+        $this->assertSame('-800.00', $wallet->fresh()->balance);
+        $this->assertSame('-800.00', $wallet->fresh()->pending_balance);
+        $this->assertSame('1800.00', $refundDebit->amount);
     }
 
     public function test_refund_for_undelivered_order_does_not_debit_vendor_earnings(): void

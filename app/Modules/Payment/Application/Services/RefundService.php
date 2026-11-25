@@ -22,6 +22,20 @@ class RefundService
         protected WalletService $walletService,
     ) {}
 
+    public function remainingRefundableAmount(Payment $payment): float
+    {
+        $reserved = $payment->refunds()
+            ->whereIn('status', [
+                RefundStatus::REQUESTED->value,
+                RefundStatus::APPROVED->value,
+                RefundStatus::PROCESSING->value,
+                RefundStatus::REFUNDED->value,
+            ])
+            ->sum('amount');
+
+        return max(0, round((float) $payment->amount - (float) $reserved, 2));
+    }
+
     public function create(
         Payment $payment,
         User $actor,
@@ -44,18 +58,19 @@ class RefundService
                 throw new DomainException('Only paid payments can be refunded.', 422);
             }
 
+            $already = $payment->refunds()
+                ->whereIn('status', [
+                    RefundStatus::REQUESTED->value,
+                    RefundStatus::APPROVED->value,
+                    RefundStatus::PROCESSING->value,
+                    RefundStatus::REFUNDED->value,
+                ])
+                ->sum('amount');
+            $paymentRemaining = round((float) $payment->amount - (float) $already, 2);
+
             $orderItem = null;
             if ($returnRequest) {
                 $orderItem = OrderItem::query()->find($returnRequest->order_item_id);
-                $itemRefunds = Refund::query()
-                    ->where('order_item_id', $returnRequest->order_item_id)
-                    ->whereIn('status', [
-                        RefundStatus::REQUESTED->value,
-                        RefundStatus::APPROVED->value,
-                        RefundStatus::PROCESSING->value,
-                        RefundStatus::REFUNDED->value,
-                    ])
-                    ->sum('amount');
                 $returnRefunds = Refund::query()
                     ->where('return_request_id', $returnRequest->id)
                     ->whereIn('status', [
@@ -69,21 +84,33 @@ class RefundService
                 $quantity = max(1, (int) $orderItem?->quantity);
                 $returnLimit = round(((float) ($orderItem?->line_total ?? 0) / $quantity) * $returnRequest->quantity, 2);
                 $returnRemaining = round($returnLimit - (float) $returnRefunds, 2);
+                $refundType ??= (round($amount, 2) >= $paymentRemaining ? 'full' : 'partial');
 
-                if (! $orderItem || round((float) $itemRefunds, 2) + round($amount, 2) > round((float) $orderItem->line_total, 2)
-                    || round((float) $returnRefunds, 2) + round($amount, 2) > $returnLimit) {
-                    throw new DomainException('Refund amount exceeds the refundable value for this returned item.', 422);
+                if (! $orderItem) {
+                    throw new DomainException('The returned order item could not be found.', 422);
                 }
 
-                $refundType = $refundType ?? (round($amount, 2) >= $returnRemaining ? 'full' : 'partial');
-                if ($refundType === 'full' && round($amount, 2) !== $returnRemaining) {
-                    throw new DomainException('A full refund must use the remaining refundable amount for this return.', 422);
+                if ($refundType !== 'full') {
+                    $itemRefunds = Refund::query()
+                        ->where('order_item_id', $returnRequest->order_item_id)
+                        ->whereIn('status', [
+                            RefundStatus::REQUESTED->value,
+                            RefundStatus::APPROVED->value,
+                            RefundStatus::PROCESSING->value,
+                            RefundStatus::REFUNDED->value,
+                        ])
+                        ->sum('amount');
+
+                    if (round((float) $itemRefunds, 2) + round($amount, 2) > round((float) $orderItem->line_total, 2)
+                        || round((float) $returnRefunds, 2) + round($amount, 2) > $returnLimit) {
+                        throw new DomainException('Partial refund amount exceeds the refundable value for this returned item.', 422);
+                    }
                 }
             }
 
-            $already = $payment->refunds()
-                ->whereIn('status', [RefundStatus::REQUESTED->value, RefundStatus::APPROVED->value, RefundStatus::PROCESSING->value, RefundStatus::REFUNDED->value])
-                ->sum('amount');
+            if ($refundType === 'full' && round($amount, 2) !== $paymentRemaining) {
+                throw new DomainException('A full refund must equal the remaining amount paid for the order.', 422);
+            }
 
             if (round($already, 2) + round($amount, 2) > round((float) $payment->amount, 2)) {
                 throw new DomainException('Refund amount exceeds the payment balance.', 422);
@@ -171,6 +198,33 @@ class RefundService
 
             if ($oldStatus === RefundStatus::REFUNDED) {
                 throw new DomainException('A refunded transaction cannot be modified.', 422);
+            }
+
+            if ($status === RefundStatus::REFUNDED && $refund->return_request_id) {
+                $payment = Payment::query()->find($refund->payment_id);
+                if ($payment?->method === 'cod') {
+                    $returnRequest = ReturnRequest::query()
+                        ->whereKey($refund->return_request_id)
+                        ->lockForUpdate()
+                        ->firstOrFail();
+                    $approvedAmount = (float) $returnRequest->refunds()
+                        ->whereIn('status', [
+                            RefundStatus::APPROVED->value,
+                            RefundStatus::REFUNDED->value,
+                        ])
+                        ->sum('amount');
+                    if (! in_array($refund->status, [RefundStatus::APPROVED, RefundStatus::REFUNDED], true)) {
+                        $approvedAmount += (float) $refund->amount;
+                    }
+
+                    if (! $returnRequest->cash_refund_handed_at
+                        || round((float) $returnRequest->cash_refund_amount, 2) + 0.001 < round($approvedAmount, 2)) {
+                        throw new DomainException(
+                            'A COD refund can only be completed after the delivery partner confirms the exact cash handoff.',
+                            422
+                        );
+                    }
+                }
             }
 
             $refund->status = $status;

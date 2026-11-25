@@ -907,17 +907,7 @@ class WalletService
                 return; // Idempotent — already applied
             }
 
-            $alreadyDebitedForOrder = WalletTransaction::query()
-                ->where('wallet_id', $wallet->id)
-                ->where('transaction_type', WalletTransactionType::DEBIT_REFUND->value)
-                ->where('reference_type', 'refund')
-                ->whereIn('reference_id', Refund::query()
-                    ->select('id')
-                    ->where('vendor_order_id', $vendorOrder->id)
-                    ->where('status', 'refunded'))
-                ->sum('amount');
-            $remainingVendorPayable = max(0, (float) $vendorOrder->vendor_payable - (float) $alreadyDebitedForOrder);
-            $amount = min((float) $refund->amount, $remainingVendorPayable);
+            $amount = (float) $refund->amount;
 
             if ($amount <= 0) {
                 return;

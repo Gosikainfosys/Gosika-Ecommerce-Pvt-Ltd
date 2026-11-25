@@ -16,6 +16,9 @@ class ReturnRequestMigrationTest extends TestCase
         $this->assertTrue(Schema::hasColumn('return_requests', 'preferred_resolution'));
         $this->assertTrue(Schema::hasColumn('return_requests', 'pickup_collected_at'));
         $this->assertTrue(Schema::hasColumn('return_requests', 'pickup_collected_by'));
+        $this->assertTrue(Schema::hasColumn('return_requests', 'cash_refund_amount'));
+        $this->assertTrue(Schema::hasColumn('return_requests', 'cash_refund_handed_at'));
+        $this->assertTrue(Schema::hasColumn('return_requests', 'cash_refund_handed_by'));
         $this->assertTrue(Schema::hasColumn('return_requests', 'exchange_order_id'));
         $this->assertTrue(Schema::hasTable('return_request_media'));
         $this->assertTrue(Schema::hasTable('return_status_history'));

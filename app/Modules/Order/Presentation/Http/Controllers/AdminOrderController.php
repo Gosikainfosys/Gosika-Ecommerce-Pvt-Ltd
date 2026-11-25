@@ -212,6 +212,21 @@ class AdminOrderController extends Controller
             ->firstOrFail();
 
         $data = $return->toArray();
+        $payment = $this->paidPaymentForReturn($return);
+        $paidAmount = $payment
+            ? (float) $payment->amount
+            : ($return->order?->payment_method === PaymentMethod::COD->value
+                ? (float) $return->order->grand_total
+                : 0.0);
+        $data['paid_amount'] = number_format($paidAmount, 2, '.', '');
+        $data['full_refund_amount'] = number_format(
+            $payment
+                ? $this->refundService->remainingRefundableAmount($payment)
+                : $paidAmount,
+            2,
+            '.',
+            ''
+        );
         $data['refunds'] = $return->refunds
             ->map(fn ($refund) => (new AdminRefundResource($refund))->resolve())
             ->all();
@@ -295,13 +310,7 @@ class AdminOrderController extends Controller
             );
         }
 
-        $amount = round((float) ($request->input('amount') ?? $return->refund_amount), 2);
-        if ($amount < 0.01) {
-            return Response::error('Enter a refund amount greater than zero.', ['amount' => 'required'], 422);
-        }
-        $payment = $return->order->payments
-            ->first(fn ($p) => $p->vendor_order_id === $return->vendor_order_id && $p->isPaid())
-            ?? $return->order->payments->first(fn ($p) => $p->isPaid());
+        $payment = $this->paidPaymentForReturn($return);
 
         if (! $payment) {
             if ($return->order->payments->isNotEmpty()
@@ -323,6 +332,14 @@ class AdminOrderController extends Controller
                 'initiated_at' => now(),
                 'verified_at' => now(),
             ]);
+        }
+
+        $refundType = $request->input('refund_type');
+        $amount = $refundType === 'full'
+            ? $this->refundService->remainingRefundableAmount($payment)
+            : round((float) ($request->input('amount') ?? $return->refund_amount), 2);
+        if ($amount < 0.01) {
+            return Response::error('No paid amount remains available to refund.', ['amount' => 'unavailable'], 422);
         }
 
         $gateway = null;
@@ -352,7 +369,7 @@ class AdminOrderController extends Controller
                 $request->input('notes') ?? "Refund for return {$return->return_number}",
                 $gateway,
                 $return,
-                $request->input('refund_type')
+                $refundType
             );
         } catch (DomainException $e) {
             return Response::error($e->getMessage(), $e->getErrors(), $e->getStatusCode());
@@ -366,6 +383,16 @@ class AdminOrderController extends Controller
             new AdminRefundResource($refund->load('payment', 'order', 'orderItem')),
             $message
         );
+    }
+
+    private function paidPaymentForReturn(ReturnRequest $return): ?Payment
+    {
+        $payments = $return->order?->payments ?? collect();
+
+        return $payments->first(fn (Payment $payment) =>
+            (int) $payment->vendor_order_id === (int) $return->vendor_order_id
+            && $payment->isPaid()
+        ) ?? $payments->first(fn (Payment $payment) => $payment->isPaid());
     }
 
     // ─── Admin: Dispatch exchange ──────────────────────────────────────────

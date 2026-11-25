@@ -79,7 +79,10 @@ function RefundPanel({ returnItem, onRefunded, onApprove, onReject }) {
   const isEsewa = returnItem?.order?.payment_method === 'esewa'
   const maxAmt = refundable(returnItem)
   const refundedAmt = alreadyRefunded(returnItem?.refunds)
-  const remaining = Math.max(0, maxAmt - reservedRefunds(returnItem?.refunds))
+  const partialRemaining = Math.max(0, maxAmt - reservedRefunds(returnItem?.refunds))
+  const remaining = Math.max(0, Number(returnItem?.full_refund_amount ?? partialRemaining))
+  const paidAmount = Number(returnItem?.paid_amount ?? returnItem?.order?.grand_total ?? 0)
+  const previouslyRefundedOrReserved = Math.max(0, paidAmount - remaining)
   const refunds = returnItem?.refunds || []
 
   /* create-refund form */
@@ -94,7 +97,9 @@ function RefundPanel({ returnItem, onRefunded, onApprove, onReject }) {
   const [processingEsewaId, setProcessingEsewaId] = useState(null)
 
   const effectiveAmt = type === 'full' ? remaining : Number(partialAmt || 0)
-  const invalid = effectiveAmt <= 0 || effectiveAmt > remaining + 0.001
+  const invalid = type === 'full'
+    ? remaining <= 0
+    : effectiveAmt <= 0 || effectiveAmt > partialRemaining + 0.001
 
   const canRefund = (!returnItem?.request_type || returnItem?.request_type === 'return_refund')
     && ['collected', 'inspected', 'approved'].includes(returnItem?.status)
@@ -212,9 +217,22 @@ function RefundPanel({ returnItem, onRefunded, onApprove, onReject }) {
 
           {/* Full amount display */}
           {type === 'full' && (
-            <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '10px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-              <span style={{ fontSize: 13, color: '#15803d', fontWeight: 600 }}>Full amount to refund</span>
-              <span style={{ fontSize: 20, fontWeight: 900, color: '#15803d' }}>{money(remaining)}</span>
+            <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '12px 16px', marginBottom: 14 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 13, color: '#15803d', fontWeight: 600 }}>Remaining paid order amount</span>
+                <span style={{ fontSize: 20, fontWeight: 900, color: '#15803d' }}>{money(remaining)}</span>
+              </div>
+              <div style={{ display: 'grid', gap: 5, marginTop: 10, paddingTop: 9, borderTop: '1px solid #bbf7d0', fontSize: 12, color: '#166534' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Paid amount (includes delivery and tax)</span><strong>{money(paidAmount)}</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Previously refunded or reserved</span><strong>−{money(previouslyRefundedOrReserved)}</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800 }}>
+                  <span>Refund now</span><strong>{money(remaining)}</strong>
+                </div>
+              </div>
             </div>
           )}
 
@@ -228,7 +246,7 @@ function RefundPanel({ returnItem, onRefunded, onApprove, onReject }) {
                   className="input"
                   type="number"
                   min="0.01"
-                  max={remaining.toFixed(2)}
+                  max={partialRemaining.toFixed(2)}
                   step="0.01"
                   autoFocus
                   value={partialAmt}
@@ -239,13 +257,13 @@ function RefundPanel({ returnItem, onRefunded, onApprove, onReject }) {
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6 }}>
                 <span style={{ fontSize: 11, color: invalid && partialAmt !== '' ? '#dc2626' : 'var(--muted)' }}>
-                  {invalid && partialAmt !== '' ? `Must be 0.01 – ${money(remaining)}` : `Up to ${money(remaining)}`}
+                  {invalid && partialAmt !== '' ? `Must be 0.01 – ${money(partialRemaining)}` : `Up to ${money(partialRemaining)}`}
                 </span>
                 <div style={{ display: 'flex', gap: 4 }}>
                   {[25, 50, 75, 100].map(pct => (
                     <button key={pct} type="button" className="btn btn-ghost btn-xs"
                       style={{ fontSize: 10, padding: '2px 7px', fontWeight: 700 }}
-                      onClick={() => setPartialAmt((remaining * pct / 100).toFixed(2))}>
+                      onClick={() => setPartialAmt((partialRemaining * pct / 100).toFixed(2))}>
                       {pct}%
                     </button>
                   ))}

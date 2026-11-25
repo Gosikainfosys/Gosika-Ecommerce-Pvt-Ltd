@@ -43,6 +43,13 @@ class DeliveryReturnResource extends JsonResource
             }
         }
 
+        $cashRefundHandedAt = $this->cash_refund_handed_at;
+        if ($cashRefundHandedAt instanceof DateTimeInterface) {
+            $cashRefundHandedAt = $cashRefundHandedAt->toISOString();
+        } elseif (! empty($cashRefundHandedAt)) {
+            $cashRefundHandedAt = Carbon::parse($cashRefundHandedAt)->toISOString();
+        }
+
         $createdAtIso = $this->created_at instanceof DateTimeInterface
             ? $this->created_at->toISOString()
             : ($this->created_at ? Carbon::parse($this->created_at)->toISOString() : null);
@@ -50,6 +57,13 @@ class DeliveryReturnResource extends JsonResource
         $updatedAtIso = $this->updated_at instanceof DateTimeInterface
             ? $this->updated_at->toISOString()
             : ($this->updated_at ? Carbon::parse($this->updated_at)->toISOString() : null);
+
+        $cashRefundDue = max(
+            0,
+            (float) ($this->cod_refund_due ?? 0)
+            + (float) ($this->cod_refund_completed ?? 0)
+            - (float) $this->cash_refund_amount
+        );
 
         return [
             'id' => $this->uuid,
@@ -66,6 +80,12 @@ class DeliveryReturnResource extends JsonResource
             'recipient_name' => $assignment?->recipient_name,
             'recipient_phone' => $assignment?->recipient_phone,
             'pickup_collected_at' => $collectedAtIso,
+            'is_cod' => $this->order?->payment_method === 'cod',
+            'cod_refund_due' => number_format($cashRefundDue, 2, '.', ''),
+            'cash_refund_amount' => $this->cash_refund_amount === null
+                ? null
+                : number_format((float) $this->cash_refund_amount, 2, '.', ''),
+            'cash_refund_handed_at' => $cashRefundHandedAt,
             'created_at' => $createdAtIso,
             'updated_at' => $updatedAtIso,
         ];

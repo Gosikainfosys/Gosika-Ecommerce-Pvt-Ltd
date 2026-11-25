@@ -18,6 +18,7 @@ use App\Modules\Shared\Domain\Enums\DeliveryStatus;
 use App\Modules\Shared\Domain\Enums\OrderPaymentStatus;
 use App\Modules\Shared\Domain\Enums\OrderStatus;
 use App\Modules\Shared\Domain\Enums\PaymentStatus;
+use App\Modules\Shared\Domain\Enums\RefundStatus;
 use App\Modules\Shared\Domain\Enums\ReturnStatus;
 use App\Modules\Shared\Domain\Enums\PaymentMethod;
 use App\Modules\Shared\Domain\Enums\StoreStatus;
@@ -1025,5 +1026,93 @@ class DeliveryAssignmentTest extends TestCase
             ->assertOk()
             ->assertJsonCount(1, 'data')
             ->assertJsonPath('data.0.type', 'refund');
+    }
+
+    public function test_cod_return_refund_requires_exact_cash_handoff_before_refund_completion(): void
+    {
+        [$order, $vendorOrder] = $this->createTestOrder(OrderStatus::DELIVERED, isCod: true);
+        $vendorOrder->update(['delivery_status' => DeliveryStatus::DELIVERED]);
+        $item = $order->items()->firstOrFail();
+        $assignment = DeliveryAssignment::create([
+            'uuid' => (string) Str::uuid(),
+            'vendor_order_id' => $vendorOrder->id,
+            'delivery_partner_id' => $this->rider1->id,
+            'status' => DeliveryStatus::DELIVERED,
+            'delivery_fee' => 150,
+            'pickup_address' => 'Vendor store address',
+            'dropoff_address' => 'Customer delivery address',
+            'recipient_name' => 'Ram Shrestha',
+            'recipient_phone' => '9812345678',
+            'delivered_at' => now()->subDay(),
+        ]);
+        $payment = Payment::create([
+            'payment_number' => 'PAY-'.strtoupper(Str::random(10)),
+            'order_id' => $order->id,
+            'vendor_order_id' => $vendorOrder->id,
+            'user_id' => $order->user_id,
+            'amount' => $order->grand_total,
+            'currency' => 'NPR',
+            'method' => 'cod',
+            'provider' => 'manual',
+            'status' => PaymentStatus::PAID,
+            'initiated_at' => now(),
+            'verified_at' => now(),
+        ]);
+        $return = ReturnRequest::create([
+            'return_number' => 'RTN-'.strtoupper(Str::random(8)),
+            'user_id' => $order->user_id,
+            'order_id' => $order->id,
+            'vendor_order_id' => $vendorOrder->id,
+            'order_item_id' => $item->id,
+            'store_id' => $this->store->id,
+            'vendor_id' => $this->vendor->id,
+            'reason_type' => 'damaged',
+            'reason' => 'Item arrived damaged',
+            'quantity' => 1,
+            'refund_amount' => 2650,
+            'status' => ReturnStatus::REFUND_PENDING,
+        ]);
+        $refund = Refund::create([
+            'refund_number' => 'REF-'.strtoupper(Str::random(10)),
+            'payment_id' => $payment->id,
+            'order_id' => $order->id,
+            'vendor_order_id' => $vendorOrder->id,
+            'order_item_id' => $item->id,
+            'return_request_id' => $return->id,
+            'amount' => 2650,
+            'status' => RefundStatus::APPROVED,
+            'initiated_by' => $this->adminUser->id,
+            'initiated_at' => now(),
+        ]);
+
+        $this->actingAs($this->adminUser)
+            ->patchJson("/api/v1/admin/orders/returns/{$return->uuid}/refunds/{$refund->uuid}/status", [
+                'status' => RefundStatus::REFUNDED->value,
+            ])
+            ->assertUnprocessable();
+        $this->assertSame(RefundStatus::APPROVED, $refund->fresh()->status);
+
+        $this->actingAs($this->riderUser1)
+            ->postJson("/api/v1/delivery-partner/returns/{$return->uuid}/collect", [
+                'cash_refund_amount' => '2649.99',
+            ])
+            ->assertUnprocessable();
+
+        $this->assertNull($return->fresh()->cash_refund_handed_at);
+        $this->assertSame(RefundStatus::APPROVED, $refund->fresh()->status);
+
+        $this->actingAs($this->riderUser1)
+            ->postJson("/api/v1/delivery-partner/returns/{$return->uuid}/collect", [
+                'cash_refund_amount' => '2650.00',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.cash_refund_amount', '2650.00')
+            ->assertJsonPath('data.cod_refund_due', '0.00');
+
+        $this->assertSame(RefundStatus::REFUNDED, $refund->fresh()->status);
+        $this->assertSame(2650.0, (float) $return->fresh()->cash_refund_amount);
+        $this->assertSame($this->riderUser1->id, $return->fresh()->cash_refund_handed_by);
+        $this->assertNotNull($return->fresh()->cash_refund_handed_at);
+        $this->assertNotNull($assignment->fresh()->delivered_at);
     }
 }

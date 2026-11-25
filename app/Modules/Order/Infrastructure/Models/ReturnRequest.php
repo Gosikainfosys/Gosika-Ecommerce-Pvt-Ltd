@@ -40,6 +40,9 @@ class ReturnRequest extends BaseModel
         'pickup_instructions',
         'pickup_collected_at',
         'pickup_collected_by',
+        'cash_refund_amount',
+        'cash_refund_handed_at',
+        'cash_refund_handed_by',
         // Inspection
         'inspection_condition',
         'inspection_notes',
@@ -65,6 +68,8 @@ class ReturnRequest extends BaseModel
             'reviewed_at'          => 'datetime',
             'window_expires_at'    => 'datetime',
             'pickup_collected_at'  => 'datetime',
+            'cash_refund_amount'   => 'decimal:2',
+            'cash_refund_handed_at' => 'datetime',
             'inspected_at'         => 'datetime',
             'exchange_dispatched_at'    => 'datetime',
             'replacement_dispatched_at' => 'datetime',
@@ -112,6 +117,11 @@ class ReturnRequest extends BaseModel
     public function pickupCollectedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'pickup_collected_by');
+    }
+
+    public function cashRefundHandedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'cash_refund_handed_by');
     }
 
     public function exchangeOrder(): BelongsTo
