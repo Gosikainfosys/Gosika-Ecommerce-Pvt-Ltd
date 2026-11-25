@@ -1395,9 +1395,10 @@ class OrderConfirmationRulesTest extends TestCase
         ]);
     }
 
-    public function test_matured_paid_delivered_order_earnings_become_available_once_after_both_waits(): void
+    public function test_matured_paid_delivered_order_earnings_become_available_once_after_holding_period(): void
     {
         Setting::set('return.window_days', 7, 'return', 'integer', true);
+        Setting::set('settlement.waiting_days', 14, 'settlement', 'integer', true);
         $this->vendor->update(['meta' => ['settlement_cycle_days' => 14]]);
         [$order, $vendorOrder] = $this->createOrder(OrderStatus::COMPLETED, isCod: false);
         $order->update(['completed_at' => now()->subDays(13)]);
@@ -1439,12 +1440,13 @@ class OrderConfirmationRulesTest extends TestCase
             ->count());
     }
 
-    public function test_return_window_remains_a_minimum_when_vendor_cycle_is_shorter(): void
+    public function test_zero_day_holding_period_overrides_return_window_and_vendor_cycle(): void
     {
         Setting::set('return.window_days', 21, 'return', 'integer', true);
+        Setting::set('settlement.waiting_days', 0, 'settlement', 'integer', true);
         $this->vendor->update(['meta' => ['settlement_cycle_days' => 14]]);
         [$order, $vendorOrder] = $this->createOrder(OrderStatus::COMPLETED, isCod: false);
-        $order->update(['completed_at' => now()->subDays(20)]);
+        $order->update(['completed_at' => now()->subDay()]);
         $vendorOrder->update([
             'status' => OrderStatus::COMPLETED,
             'delivery_status' => DeliveryStatus::DELIVERED,
@@ -1455,11 +1457,29 @@ class OrderConfirmationRulesTest extends TestCase
         ]);
         $walletService = app(WalletService::class);
 
-        $this->assertSame(0, $walletService->releaseMaturedVendorEarnings());
-
-        $order->update(['completed_at' => now()->subDays(22)]);
         $this->assertSame(1, $walletService->releaseMaturedVendorEarnings());
         $this->assertSame('2300.00', $walletService->walletForVendor($this->vendor)->available_balance);
+    }
+
+    public function test_vendor_analytics_excludes_rejected_orders_from_projected_earnings(): void
+    {
+        [, $rejectedVendorOrder] = $this->createOrder(OrderStatus::REJECTED, isCod: false);
+        $rejectedVendorOrder->update([
+            'vendor_payable' => 2300,
+            'commission_amount' => 200,
+        ]);
+        [, $acceptedVendorOrder] = $this->createOrder(OrderStatus::COMPLETED, isCod: false);
+        $acceptedVendorOrder->update([
+            'vendor_payable' => 1800,
+            'commission_amount' => 200,
+        ]);
+
+        $this->actingAs($this->vendorUser)
+            ->getJson('/api/v1/vendor/analytics/summary?range=30d')
+            ->assertOk()
+            ->assertJsonPath('data.revenue', '2500.00')
+            ->assertJsonPath('data.orders_count', 1)
+            ->assertJsonPath('data.net_earnings', '1800.00');
     }
 
     public function test_matured_earnings_require_paid_and_delivered_order_status(): void

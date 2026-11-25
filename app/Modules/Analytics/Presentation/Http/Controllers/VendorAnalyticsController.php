@@ -29,25 +29,34 @@ class VendorAnalyticsController extends Controller
         $from = $this->fromDate($request->input('range', '30d'));
 
         $orders = VendorOrder::query()->where('vendor_id', $vendor->id)->where('created_at', '>=', $from);
+        $eligibleOrders = (clone $orders)->whereNotIn('status', [
+            OrderStatus::CANCELLED->value,
+            OrderStatus::FAILED->value,
+            OrderStatus::REJECTED->value,
+        ]);
 
-        $revenue = (float) (clone $orders)->whereNotIn('status', [OrderStatus::CANCELLED->value, OrderStatus::FAILED->value])->sum('grand_total');
-        $ordersCount = (clone $orders)->count();
+        $revenue = (float) (clone $eligibleOrders)->sum('grand_total');
+        $ordersCount = (clone $eligibleOrders)->count();
         $avgOrderValue = $ordersCount > 0 ? $revenue / $ordersCount : 0;
-        $commissionTotal = (float) (clone $orders)->whereNotIn('status', [OrderStatus::CANCELLED->value, OrderStatus::FAILED->value])->sum('commission_amount');
-        $deliveryFees = (float) (clone $orders)->sum('delivery_charge');
+        $commissionTotal = (float) (clone $eligibleOrders)->sum('commission_amount');
+        $deliveryFees = (float) (clone $eligibleOrders)->sum('delivery_charge');
         $productsSold = (int) OrderItem::query()
             ->join('vendor_orders', 'vendor_orders.id', '=', 'order_items.vendor_order_id')
             ->where('order_items.vendor_id', $vendor->id)
             ->where('vendor_orders.created_at', '>=', $from)
-            ->whereNotIn('vendor_orders.status', [OrderStatus::CANCELLED->value, OrderStatus::FAILED->value])
+            ->whereNotIn('vendor_orders.status', [
+                OrderStatus::CANCELLED->value,
+                OrderStatus::FAILED->value,
+                OrderStatus::REJECTED->value,
+            ])
             ->sum('order_items.quantity');
         $refundsTotal = (float) Refund::query()
             ->whereHas('vendorOrder', fn ($query) => $query->where('vendor_id', $vendor->id))
             ->where('completed_at', '>=', $from)
             ->where('status', 'refunded')
             ->sum('amount');
-        $netEarnings = $revenue - $commissionTotal - $refundsTotal;
-        $orderCompleted = (clone $orders)->whereIn('status', [OrderStatus::COMPLETED->value, OrderStatus::DELIVERED->value])->count();
+        $netEarnings = (float) (clone $eligibleOrders)->sum('vendor_payable') - $refundsTotal;
+        $orderCompleted = (clone $eligibleOrders)->whereIn('status', [OrderStatus::COMPLETED->value, OrderStatus::DELIVERED->value])->count();
 
         return Response::success([
             'range' => $request->input('range', '30d'),

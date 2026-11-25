@@ -202,6 +202,9 @@ export default function VendorFinance() {
         const linked = relatedTransactions('vendor_order', order.ledger_reference_id)
         const earnings = linked.find((transaction) => transaction.transaction_type === 'credit_earnings')
         if (earnings) consumedTransactions.add(earnings.id)
+        const paymentReceived = ['paid', 'partially_refunded'].includes(String(order.payment_status || '').toLowerCase())
+        const delivered = ['delivered', 'completed'].includes(String(order.status || '').toLowerCase())
+          && String(order.delivery_status || '').toLowerCase() === 'delivered'
 
         nextRows.push({
           id: `order:${order.id}`,
@@ -220,7 +223,13 @@ export default function VendorFinance() {
           commissionAmount: Number(order.commission_amount || 0),
           direction: earnings ? 'credit' : 'neutral',
           balanceAfter: earnings?.balance_after ?? null,
-          walletStatus: earnings ? 'Credited to wallet' : 'Not yet credited',
+          walletStatus: earnings
+            ? 'Credited to wallet'
+            : !paymentReceived
+              ? 'Awaiting payment'
+              : !delivered
+                ? 'Awaiting delivery'
+                : 'Awaiting wallet release',
           order,
         })
       })
@@ -816,7 +825,7 @@ export default function VendorFinance() {
               {
                 label: 'Projected net earnings',
                 value: money(analyticsSummary?.net_earnings),
-                hint: 'Includes unsettled orders',
+                hint: 'Estimate includes unpaid orders; withdrawable balance is credited funds only',
                 icon: PiggyBank,
                 color: 'var(--success)',
               },
@@ -1157,7 +1166,7 @@ export default function VendorFinance() {
       {activePage === 'wallet' && (
         <div className="alert alert-info" style={{ marginBottom: 0 }}>
           {payoutsEnabled
-            ? <>Withdrawals can only be requested from your available balance. Paid, delivered orders become withdrawable after {wallet?.earnings_maturity_days ?? 'the configured'} days, based on the configured holding period, return window, and vendor settlement cycle. Payout schedule: {payoutFrequencyLabel}.</>
+            ? <>Withdrawals can only be requested from your available balance. Paid, delivered orders become withdrawable after the admin-configured {wallet?.settlement_holding_days ?? 'holding'}-day holding period. Payout schedule: {payoutFrequencyLabel}.</>
             : 'Vendor payouts are currently disabled by the administrator.'}
         </div>
       )}

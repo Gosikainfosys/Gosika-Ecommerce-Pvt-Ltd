@@ -79,7 +79,7 @@ class WalletService
     public function creditEarnings(VendorOrder $vendorOrder, ?Vendor $vendor = null): Commission
     {
         if (! $this->isEligibleForEarnings($vendorOrder, $vendor)) {
-            throw new DomainException('Order has not completed its return and settlement waiting periods.', 422);
+            throw new DomainException('Order has not met the payment, delivery, and settlement holding requirements.', 422);
         }
 
         return DB::transaction(function () use ($vendorOrder) {
@@ -800,10 +800,8 @@ class WalletService
             return false;
         }
 
-        $returnWindowDays = max(1, (int) Setting::get('return.window_days', 7));
-        $settlementCycleDays = max(1, (int) ($vendor->meta['settlement_cycle_days'] ?? 14));
         $holdingDays = max(0, (int) Setting::get('settlement.waiting_days', 7));
-        $maturityAt = $deliveredAt->copy()->addDays(max($returnWindowDays, $settlementCycleDays, $holdingDays));
+        $maturityAt = $deliveredAt->copy()->addDays($holdingDays);
 
         return $maturityAt->lte(now());
     }

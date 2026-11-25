@@ -30,7 +30,7 @@ class WalletResource extends JsonResource
             'settlement_holding_days' => $settlementHoldingDays,
             'return_window_days' => $returnWindowDays,
             'settlement_cycle_days' => $settlementCycleDays,
-            'earnings_maturity_days' => max($returnWindowDays, $settlementCycleDays, $settlementHoldingDays),
+            'earnings_maturity_days' => $settlementHoldingDays,
             'currency' => $this->currency,
             'version' => $this->version,
             'created_at' => $this->created_at?->toISOString(),
