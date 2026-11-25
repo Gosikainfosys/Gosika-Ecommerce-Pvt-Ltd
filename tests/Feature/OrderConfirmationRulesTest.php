@@ -599,6 +599,7 @@ class OrderConfirmationRulesTest extends TestCase
             ->assertJsonPath('data.0.gross_sales', '2500.00')
             ->assertJsonPath('data.0.commission_total', '250.00')
             ->assertJsonPath('data.0.earned_total', '2250.00')
+            ->assertJsonPath('data.0.unsettled_balance', '0.00')
             ->assertJsonPath('data.0.net_payable', '2250.00')
             ->assertJsonPath('data.0.available_balance', '2250.00')
             ->assertJsonPath('data.0.pending_balance', '0.00')
@@ -606,6 +607,39 @@ class OrderConfirmationRulesTest extends TestCase
             ->assertJsonPath('data.1.stores.0.name', 'New Vendor Shop')
             ->assertJsonPath('data.1.settlements_count', 0)
             ->assertJsonPath('data.1.earned_total', '0.00');
+    }
+
+    public function test_unmatured_earnings_are_visible_but_not_available_for_payout(): void
+    {
+        Setting::set('settlement.waiting_days', 7, 'settlement', 'integer', true);
+        [$order, $vendorOrder] = $this->createOrder(OrderStatus::DELIVERED, false);
+        $order->update(['completed_at' => now()->subDay()]);
+        $vendorOrder->update([
+            'status' => OrderStatus::DELIVERED,
+            'delivery_status' => DeliveryStatus::DELIVERED,
+            'commission_rate' => 10,
+            'commission_amount' => 250,
+            'vendor_payable' => 2250,
+        ]);
+
+        $this->actingAs($this->adminUser)
+            ->getJson('/api/v1/admin/wallet/settlements?group_by_vendor=1')
+            ->assertOk()
+            ->assertJsonPath('data.0.earned_total', '2250.00')
+            ->assertJsonPath('data.0.unsettled_balance', '2250.00')
+            ->assertJsonPath('data.0.net_payable', '0.00')
+            ->assertJsonPath('data.0.available_balance', '0.00');
+
+        $this->actingAs($this->adminUser)
+            ->getJson('/api/v1/admin/wallet/vendors/'.$this->vendor->uuid.'/ledger')
+            ->assertOk()
+            ->assertJsonPath('data.stats.unsettled_earnings', '2250.00')
+            ->assertJsonPath('data.stats.settlement_holding_days', 7)
+            ->assertJsonPath('data.stats.orders_count', 1)
+            ->assertJsonPath('data.stats.total_commission', '250.00')
+            ->assertJsonPath('data.stats.total_net_payable', '2250.00')
+            ->assertJsonPath('data.wallet.balance', '0.00')
+            ->assertJsonPath('data.wallet.available_balance', '0.00');
     }
 
     // ── 6. Customer cancellation blocked once order is confirmed ────────

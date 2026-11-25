@@ -386,7 +386,7 @@ export default function AdminVendorFinance() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14 }}>
         <div className="card" style={{ padding: '16px 18px', borderLeft: '4px solid var(--primary, #2563eb)' }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted, #6b7280)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 }}>
-            <Wallet size={12} style={{ marginRight: 4, verticalAlign: 'middle' }} /> Total Balance
+            <Wallet size={12} style={{ marginRight: 4, verticalAlign: 'middle' }} /> Credited Wallet Balance
           </div>
           <div style={{ fontSize: 20, fontWeight: 900, color: 'var(--ink, #111827)' }}>{money(wallet.balance || 0)}</div>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{wallet.currency || 'NPR'}</div>
@@ -403,7 +403,16 @@ export default function AdminVendorFinance() {
             <Clock size={12} style={{ marginRight: 4, verticalAlign: 'middle' }} /> Pending
           </div>
           <div style={{ fontSize: 20, fontWeight: 900, color: '#d97706' }}>{money(wallet.pending_balance || 0)}</div>
-          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Awaiting payout request</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Credited, awaiting release</div>
+        </div>
+        <div className="card" style={{ padding: '16px 18px', borderLeft: '4px solid #f59e0b' }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 }}>
+            <Clock size={12} style={{ marginRight: 4, verticalAlign: 'middle' }} /> Awaiting Settlement
+          </div>
+          <div style={{ fontSize: 20, fontWeight: 900, color: '#b45309' }}>{money(stats.unsettled_earnings || 0)}</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
+            Not yet credited · {stats.settlement_holding_days ?? 0}-day hold
+          </div>
         </div>
         <div className="card" style={{ padding: '16px 18px', borderLeft: '4px solid #7c3aed' }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 }}>

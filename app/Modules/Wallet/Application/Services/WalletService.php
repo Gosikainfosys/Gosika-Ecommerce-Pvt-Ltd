@@ -248,6 +248,37 @@ class WalletService
         return $releasedOrderCount;
     }
 
+    public function unsettledEarningsByVendor(?Vendor $vendorFilter = null): Collection
+    {
+        return VendorOrder::query()
+            ->whereIn('status', [
+                OrderStatus::DELIVERED->value,
+                OrderStatus::COMPLETED->value,
+                OrderStatus::RETURNED->value,
+            ])
+            ->where('delivery_status', DeliveryStatus::DELIVERED->value)
+            ->when($vendorFilter, fn ($query) => $query->where('vendor_id', $vendorFilter->id))
+            ->whereHas('order', fn ($query) => $query->whereIn('payment_status', [
+                OrderPaymentStatus::PAID->value,
+                OrderPaymentStatus::PARTIALLY_REFUNDED->value,
+                OrderPaymentStatus::REFUNDED->value,
+            ]))
+            ->whereNotExists(function ($query) {
+                $query->selectRaw('1')
+                    ->from('wallet_transactions as earnings_transactions')
+                    ->where('earnings_transactions.transaction_type', WalletTransactionType::CREDIT_EARNINGS->value)
+                    ->where('earnings_transactions.reference_type', 'vendor_order')
+                    ->whereColumn('earnings_transactions.reference_id', 'vendor_orders.id');
+            })
+            ->withSum(['refunds as refunded_total' => fn ($query) => $query->where('status', RefundStatus::REFUNDED->value)], 'amount')
+            ->get(['id', 'vendor_id', 'vendor_payable'])
+            ->groupBy('vendor_id')
+            ->map(fn (Collection $orders) => round($orders->sum(fn (VendorOrder $order) => max(
+                0,
+                round((float) $order->vendor_payable - (float) ($order->refunded_total ?? 0), 2)
+            )), 2));
+    }
+
     public function reconcileRefundEarningsForVendor(Vendor $vendor): void
     {
         $this->reconcileRefundEarnings($vendor);

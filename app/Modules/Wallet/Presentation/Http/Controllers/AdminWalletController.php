@@ -336,6 +336,7 @@ class AdminWalletController extends Controller
                 ->groupBy('vendor_orders.vendor_id')
                 ->get()
                 ->mapWithKeys(fn ($row) => [(int) $row->vendor_id => (float) $row->refunded_total]);
+            $unsettledByVendor = $this->service->unsettledEarningsByVendor();
 
             $statusPriority = [
                 SettlementStatus::PROCESSING->value => 0,
@@ -345,7 +346,7 @@ class AdminWalletController extends Controller
                 'not_generated' => 4,
             ];
 
-            $grouped = $vendors->map(function (Vendor $vendor) use ($statusPriority, $settlementsByVendor, $earningsByVendor, $refundsByVendor) {
+            $grouped = $vendors->map(function (Vendor $vendor) use ($statusPriority, $settlementsByVendor, $earningsByVendor, $refundsByVendor, $unsettledByVendor) {
                 $rows = $settlementsByVendor->get($vendor->id, collect());
                 $earnings = $earningsByVendor->get($vendor->id);
                 $statuses = $rows->pluck('status')->map->value;
@@ -371,6 +372,7 @@ class AdminWalletController extends Controller
                     'gross_sales' => number_format((float) ($earnings?->gross_sales ?? 0), 2, '.', ''),
                     'commission_total' => number_format((float) ($earnings?->commission_total ?? 0), 2, '.', ''),
                     'earned_total' => number_format((float) $earnedTotal, 2, '.', ''),
+                    'unsettled_balance' => number_format((float) $unsettledByVendor->get($vendor->id, 0), 2, '.', ''),
                     'net_payable' => number_format((float) ($wallet?->balance ?? 0), 2, '.', ''),
                     'available_balance' => number_format((float) ($wallet?->available_balance ?? 0), 2, '.', ''),
                     'pending_balance' => number_format((float) ($wallet?->pending_balance ?? 0), 2, '.', ''),
@@ -407,8 +409,9 @@ class AdminWalletController extends Controller
     {
         $vendor = $this->vendor($vendorId);
 
-        $this->service->reconcileRefundEarningsForVendor($vendor);
+        $this->service->releaseMaturedVendorEarnings($vendor);
         $wallet = $this->service->walletForVendor($vendor);
+        $unsettledEarnings = (float) $this->service->unsettledEarningsByVendor($vendor)->get($vendor->id, 0);
 
         $settlementModels = $this->service->settlementsFor($vendor);
 
@@ -426,22 +429,40 @@ class AdminWalletController extends Controller
             }
         }
 
-        $validOrdersQuery = VendorOrder::query()
+        $earningOrderStatuses = [
+            OrderStatus::DELIVERED->value,
+            OrderStatus::COMPLETED->value,
+            OrderStatus::RETURNED->value,
+        ];
+        $earningPaymentStatuses = [
+            OrderPaymentStatus::PAID->value,
+            OrderPaymentStatus::PARTIALLY_REFUNDED->value,
+            OrderPaymentStatus::REFUNDED->value,
+        ];
+        $earningOrdersQuery = VendorOrder::query()
             ->where('vendor_id', $vendor->id)
-            ->whereNotIn('status', ['cancelled', 'returned']);
+            ->whereIn('status', $earningOrderStatuses)
+            ->where('delivery_status', DeliveryStatus::DELIVERED->value)
+            ->whereHas('order', fn ($query) => $query->whereIn('payment_status', $earningPaymentStatuses));
 
-        $totalVendorPayable = (float) (clone $validOrdersQuery)->sum('vendor_payable');
+        $totalVendorPayable = (float) (clone $earningOrdersQuery)->sum('vendor_payable');
         $totalRefunded = (float) Refund::query()
-            ->whereHas('vendorOrder', fn ($query) => $query->where('vendor_id', $vendor->id))
+            ->whereHas('vendorOrder', fn ($query) => $query
+                ->where('vendor_id', $vendor->id)
+                ->whereIn('status', $earningOrderStatuses)
+                ->where('delivery_status', DeliveryStatus::DELIVERED->value)
+                ->whereHas('order', fn ($orders) => $orders->whereIn('payment_status', $earningPaymentStatuses)))
             ->where('status', 'refunded')
             ->sum('amount');
         $stats = [
-            'orders_count' => (clone $validOrdersQuery)->count(),
-            'total_gross' => number_format((float) (clone $validOrdersQuery)->sum('grand_total'), 2, '.', ''),
-            'total_commission' => number_format((float) (clone $validOrdersQuery)->sum('commission_amount'), 2, '.', ''),
-            'total_vendor_payable' => number_format((float) (clone $validOrdersQuery)->sum('vendor_payable'), 2, '.', ''),
+            'orders_count' => (clone $earningOrdersQuery)->count(),
+            'total_gross' => number_format((float) (clone $earningOrdersQuery)->sum('grand_total'), 2, '.', ''),
+            'total_commission' => number_format((float) (clone $earningOrdersQuery)->sum('commission_amount'), 2, '.', ''),
+            'total_vendor_payable' => number_format((float) (clone $earningOrdersQuery)->sum('vendor_payable'), 2, '.', ''),
             'total_refunded' => number_format($totalRefunded, 2, '.', ''),
             'total_net_payable' => number_format(max(0, $totalVendorPayable - $totalRefunded), 2, '.', ''),
+            'unsettled_earnings' => number_format($unsettledEarnings, 2, '.', ''),
+            'settlement_holding_days' => max(0, (int) Setting::get('settlement.waiting_days', 7)),
             'total_settled' => number_format($settlementModels->where('status', SettlementStatus::PAID)->sum(fn ($s) => (float) $s->net_payable), 2, '.', ''),
             'total_withdrawn' => number_format(PayoutRequest::query()->where('vendor_id', $vendor->id)->where('status', PayoutStatus::PAID->value)->sum('amount'), 2, '.', ''),
         ];

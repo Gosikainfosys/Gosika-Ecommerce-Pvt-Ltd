@@ -126,6 +126,7 @@ export default function AdminSettlements() {
         { label: 'Gross Sales', align: 'right' },
         { label: 'Platform Commission', align: 'right' },
         { label: 'Net Earned', align: 'right' },
+        { label: 'Awaiting Settlement', align: 'right' },
         { label: 'Wallet Balance', align: 'right' },
         { label: 'Available Balance', align: 'right' },
         { label: 'Pending Balance', align: 'right' },
@@ -139,6 +140,7 @@ export default function AdminSettlements() {
         s.gross_sales || 0,
         s.commission_total || 0,
         s.earned_total || 0,
+        s.unsettled_balance || 0,
         s.net_payable || 0,
         s.available_balance || 0,
         s.pending_balance || 0,
@@ -298,6 +300,9 @@ export default function AdminSettlements() {
                     </div>
                     <div style={{ fontSize: 10.5, color: 'var(--muted)', fontWeight: 500 }}>
                       Available {money(s.available_balance || 0)} · Pending {money(s.pending_balance || 0)}
+                    </div>
+                    <div style={{ fontSize: 10.5, color: '#b45309', fontWeight: 600 }}>
+                      Awaiting settlement {money(s.unsettled_balance || 0)}
                     </div>
                   </td>
                   <td style={{ padding: '12px 16px' }}>
