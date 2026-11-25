@@ -225,13 +225,13 @@ export default function OrderDetail({ embedded = false, basePath = '/orders' }) 
     <div className="page-shell container">
       <nav className="flex items-center gap-1 muted text-sm mb-2" aria-label="Breadcrumb">
         <Link to={basePath}>My Orders</Link> <ChevronRight size={13} />
-        <span className="font-semibold" style={{ color: 'var(--ink)' }}>#{order.order_number}</span>
+        <span className="font-semibold" style={{ color: 'var(--ink)' }}>{order.order_number}</span>
       </nav>
 
       <div className="card mb-2">
         <div className="flex items-center justify-between wrap gap-2">
           <div>
-            <h1 style={{ fontSize: 20, marginBottom: 4 }}>Order #{order.order_number}</h1>
+            <h1 style={{ fontSize: 20, marginBottom: 4 }}>Order {order.order_number}</h1>
             <div className="muted text-sm">Placed on {formatDateTime(order.placed_at)}</div>
           </div>
           <div className="flex items-center gap-2">

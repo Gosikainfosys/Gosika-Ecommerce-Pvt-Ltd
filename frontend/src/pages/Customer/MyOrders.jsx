@@ -44,7 +44,7 @@ export default function MyOrders() {
                 </div>
               </div>
               <div className="flex items-center justify-between text-sm">
-                <span>Order #{o.id}</span>
+                <span>Order {o.id}</span>
                 <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--primary)' }>Rs. {o.total}</span>
               </div>
               <div className="mt-3">

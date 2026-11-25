@@ -231,7 +231,7 @@ export default function AdminVendorFinance() {
   const txnDirection = (t) => (t.transaction_type || '').startsWith('debit_') ? 'debit' : 'credit'
   const txnReference = (t) => {
     if (!t.reference_type) return t.id
-    return `${String(t.reference_type).replace(/_/g, ' ')} #${t.reference_id ?? ''}`
+    return `${String(t.reference_type).replace(/_/g, ' ')} ${t.reference_id ?? ''}`
   }
 
   const exportTransactions = () => {
@@ -274,8 +274,8 @@ export default function AdminVendorFinance() {
     )
     exportReportFromRows({
       columns: [
-        { label: 'Order #' },
-        { label: 'Vendor Shipment #' },
+        { label: 'Order' },
+        { label: 'Vendor Shipment' },
         { label: 'Date' },
         { label: 'Status' },
         { label: 'Gross Total', align: 'right' },
@@ -565,7 +565,7 @@ export default function AdminVendorFinance() {
               <input
                 className="input"
                 style={{ width: '100%', paddingLeft: 32, height: 36, fontSize: 13 }}
-                placeholder="Search vendor order #, order #, product name..."
+                placeholder="Search vendor order, order, product name..."
                 value={orderSearch}
                 onChange={e => setOrderSearch(e.target.value)}
               />
@@ -577,8 +577,8 @@ export default function AdminVendorFinance() {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
                 <thead>
                   <tr style={{ background: '#f8fafc', borderBottom: '2px solid var(--border)' }}>
-                    <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 800, color: 'var(--muted)', whiteSpace: 'nowrap' }}>Order #</th>
-                    <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 800, color: 'var(--muted)', whiteSpace: 'nowrap' }}>Vendor Shipment #</th>
+                    <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 800, color: 'var(--muted)', whiteSpace: 'nowrap' }}>Order</th>
+                    <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 800, color: 'var(--muted)', whiteSpace: 'nowrap' }}>Vendor Shipment</th>
                     <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 800, color: 'var(--muted)' }}>Date</th>
                     <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 800, color: 'var(--muted)' }}>Status</th>
                     <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 800, color: 'var(--muted)', whiteSpace: 'nowrap' }}>Settlement Period</th>
@@ -609,7 +609,7 @@ export default function AdminVendorFinance() {
                           <td style={{ padding: '10px 14px', fontWeight: 700, color: 'var(--ink)', whiteSpace: 'nowrap' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                               {expanded ? <ChevronUp size={13} color="var(--muted)" /> : <ChevronDown size={13} color="var(--muted)" />}
-                              #{o.order_number || o.vendor_order_number}
+                              {o.order_number || o.vendor_order_number}
                             </div>
                           </td>
                           <td style={{ padding: '10px 14px', fontWeight: 600, color: 'var(--ink)' }}>{o.vendor_order_number || '—'}</td>

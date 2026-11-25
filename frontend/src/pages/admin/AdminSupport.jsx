@@ -323,7 +323,7 @@ export default function AdminSupport() {
                         </div>
                         {t.order_number && (
                           <div className="muted text-xs font-mono" style={{ fontSize: 10 }}>
-                            Order Ref: #{t.order_number}
+                            Order Ref: {t.order_number}
                           </div>
                         )}
                       </td>

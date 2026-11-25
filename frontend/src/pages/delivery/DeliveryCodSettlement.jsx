@@ -76,7 +76,7 @@ export default function DeliveryCodSettlement() {
   const exportReport = () => {
     exportReportFromRows({
       columns: [
-        { label: 'Order #' },
+        { label: 'Order' },
         { label: 'Recipient' },
         { label: 'Delivered At' },
         { label: 'Original COD', align: 'right' },
@@ -221,7 +221,7 @@ export default function DeliveryCodSettlement() {
                   <TrendingUp size={16} />
                 </span>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div className="font-bold text-sm text-ink truncate">#{r.order_number || r.id}</div>
+                  <div className="font-bold text-sm text-ink truncate">{r.order_number || r.id}</div>
                   <div className="muted text-xs mt-0.5 truncate">{r.at ? formatDateTime(r.at) : '—'} · {r.recipient_name || '—'}</div>
                 </div>
                 <div className="text-right flex flex-col items-end" style={{ gap: 2 }}>

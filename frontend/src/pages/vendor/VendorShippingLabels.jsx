@@ -247,7 +247,7 @@ export default function VendorShippingLabels() {
                   <div style={{ minWidth: 0 }}>
                     <div className="flex items-center gap-2 wrap">
                       <span className="font-mono font-bold text-sm" style={{ color: 'var(--primary)' }}>
-                        #{orderNumber}
+                        {orderNumber}
                       </span>
                       <StatusBadge status={order.status} />
                     </div>

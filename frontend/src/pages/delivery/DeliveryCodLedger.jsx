@@ -53,7 +53,7 @@ export default function DeliveryCodLedger() {
   const exportCod = () => {
     exportReportFromRows({
       columns: [
-        { label: 'Order #' },
+        { label: 'Order' },
         { label: 'Recipient' },
         { label: 'Delivered At' },
         { label: 'Original COD', align: 'right' },
@@ -190,7 +190,7 @@ export default function DeliveryCodLedger() {
                   <Banknote size={16} />
                 </span>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div className="font-bold text-sm text-ink truncate">#{a.order_number || a.vendor_order_number || a.id}</div>
+                  <div className="font-bold text-sm text-ink truncate">{a.order_number || a.vendor_order_number || a.id}</div>
                   <div className="muted text-xs mt-0.5 truncate">{a.delivered_at ? formatDateTime(a.delivered_at) : '—'} · {a.recipient_name || '—'}</div>
                 </div>
                 <div className="flex items-center gap-3">

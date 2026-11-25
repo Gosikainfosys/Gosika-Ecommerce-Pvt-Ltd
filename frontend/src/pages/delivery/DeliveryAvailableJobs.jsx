@@ -130,7 +130,7 @@ export default function DeliveryAvailableJobs() {
           <Search size={15} style={{ position: 'absolute', left: 12, top: 11, color: '#94a3b8' }} />
           <input
             type="text"
-            placeholder="Search store name, destination, order #…"
+            placeholder="Search store name, destination, order…"
             value={search}
             onChange={e => setSearch(e.target.value)}
             className="input"
@@ -229,7 +229,7 @@ export default function DeliveryAvailableJobs() {
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, flexWrap: 'wrap', gap: 6 }}>
                   <div>
                     <span style={{ fontSize: 14, fontWeight: 900, color: 'var(--ink)' }}>
-                      #{job.order_number || job.vendor_order_number}
+                      {job.order_number || job.vendor_order_number}
                     </span>
                     <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 1 }}>
                       Ready {job.ready_at ? timeAgo(job.ready_at) : 'recently'}

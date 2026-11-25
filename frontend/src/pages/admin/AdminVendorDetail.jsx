@@ -568,7 +568,7 @@ export default function AdminVendorDetail() {
                   ) : (
                     commissions.map(c => (
                       <tr key={c.id || c.uuid}>
-                        <td style={{ fontFamily: 'monospace', fontSize: 12 }}>#{c.vendor_order_id || c.order_id}</td>
+                        <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{c.vendor_order_id || c.order_id}</td>
                         <td style={{ fontWeight: 600 }}>{c.rate}%</td>
                         <td style={{ textAlign: 'right' }}>{money(c.basis_amount)}</td>
                         <td style={{ textAlign: 'right', fontWeight: 800, color: '#16a34a' }}>{money(c.amount)}</td>

@@ -65,7 +65,7 @@ export default function CustomerReturns() {
                 </div>
               </div>
               <div className="flex items-center justify-between text-sm">
-                <span>Order #{r.order_id}</span>
+                <span>Order {r.order_id}</span>
                 <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--primary)' }}>Rs. {r.total}</span>
               </div>
               <div className="mt-3">

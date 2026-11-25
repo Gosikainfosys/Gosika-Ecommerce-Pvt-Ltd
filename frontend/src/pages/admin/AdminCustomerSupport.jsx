@@ -126,7 +126,7 @@ export default function AdminCustomerSupport() {
           </div>
           {item.order_number && (
             <div style={{ fontSize: 10.5, color: '#94a3b8', marginTop: 3 }}>
-              Order #{item.order_number} · {item.category}
+              Order {item.order_number} · {item.category}
             </div>
           )}
         </div>
@@ -300,7 +300,7 @@ export default function AdminCustomerSupport() {
               </div>
               {selectedTicket.order_number && (
                 <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>
-                  Associated Order: #{selectedTicket.order_number}
+                  Associated Order: {selectedTicket.order_number}
                 </div>
               )}
             </div>

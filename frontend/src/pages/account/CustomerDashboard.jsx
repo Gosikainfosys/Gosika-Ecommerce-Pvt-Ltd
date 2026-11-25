@@ -121,7 +121,7 @@ export default function CustomerDashboard() {
       >
         <StatusOrderTable
           columns={[
-            { key: 'id', label: 'Order', render: (r) => <span style={{ color: 'var(--primary)', fontWeight: 700, whiteSpace: 'nowrap' }}>#{r.id}</span> },
+            { key: 'id', label: 'Order', render: (r) => <span style={{ color: 'var(--primary)', fontWeight: 700, whiteSpace: 'nowrap' }}>{r.id}</span> },
             { key: 'item', label: 'Item' },
             { key: 'date', label: 'Date' },
             { key: 'amount', label: 'Amount', render: (r) => <span style={{ fontWeight: 800, color: '#0f172a' }}>{money(r.amount)}</span> },

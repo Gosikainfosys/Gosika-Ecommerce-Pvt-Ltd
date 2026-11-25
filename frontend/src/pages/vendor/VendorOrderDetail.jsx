@@ -111,7 +111,7 @@ export default function VendorOrderDetail() {
     const today = new Date().toLocaleDateString('en-GB', { year: 'numeric', month: 'short', day: 'numeric' })
     const { customerName, customerPhone, addrHtml, billTo, groupsHtml, totalsHtml } = buildOrderDocumentParts(order)
     const metaRows = [
-      ['Order #', order.order_number || order.vendor_order_number],
+      ['Order', order.order_number || order.vendor_order_number],
       ['Order Date', formatDateTime(order.created_at)],
       ['Customer', customerName],
       ['Phone', customerPhone],
@@ -158,13 +158,13 @@ export default function VendorOrderDetail() {
     <div className="flex flex-col gap-4">
       <nav className="flex items-center gap-1 muted text-sm" aria-label="Breadcrumb">
         <Link to="/vendor/orders">Orders</Link> <ChevronRight size={13} />
-        <span className="font-semibold" style={{ color: 'var(--ink)' }}>#{order.order_number || order.vendor_order_number}</span>
+        <span className="font-semibold" style={{ color: 'var(--ink)' }}>{order.order_number || order.vendor_order_number}</span>
       </nav>
 
       <div className="card">
         <div className="flex items-center justify-between wrap gap-2">
           <div>
-            <h2 style={{ fontSize: 18, marginBottom: 4 }}>#{order.order_number || order.vendor_order_number}</h2>
+            <h2 style={{ fontSize: 18, marginBottom: 4 }}>{order.order_number || order.vendor_order_number}</h2>
             <div className="muted text-sm">Placed {formatDateTime(order.created_at)} · {order.store_name}</div>
           </div>
           <div className="flex items-center gap-2 wrap">

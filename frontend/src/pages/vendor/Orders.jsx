@@ -46,7 +46,7 @@ export default function VendorOrders() {
               </div>
               <div className="flex items-center justify-between text-sm">
                 <div>
-                  <span>Order #</span>
+                  <span>Order</span>
                   <span style={{ fontWeight: 600, color: 'var(--primary)' }}>{o.id}</span>
                 </div>
                 <div>

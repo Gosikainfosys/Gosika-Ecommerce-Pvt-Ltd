@@ -204,7 +204,7 @@ export default function OrderList({ basePath = '/orders' }) {
               <div className="flex items-center justify-between wrap gap-2">
                 <div>
                   <div className="flex items-center gap-2 wrap">
-                    <span className="font-bold">#{o.order_number}</span>
+                    <span className="font-bold">{o.order_number}</span>
                     <StatusBadge status={o.status} />
                     {o.payment_status && <StatusBadge status={o.payment_status} />}
                   </div>

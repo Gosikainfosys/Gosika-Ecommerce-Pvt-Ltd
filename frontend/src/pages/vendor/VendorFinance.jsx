@@ -296,7 +296,7 @@ export default function VendorFinance() {
           category: transactionType.includes('refund') ? 'refunds' : 'transactions',
           categoryLabel: transactionType.includes('refund') ? 'Refund' : 'Wallet transaction',
           reference: transaction.reference_id
-            ? `${transaction.reference_type || 'reference'} #${transaction.reference_id}`
+            ? `${transaction.reference_type || 'reference'} ${transaction.reference_id}`
             : transaction.transaction_type?.replace(/_/g, ' '),
           description: transaction.description || transaction.transaction_type?.replace(/_/g, ' '),
           customer: '',

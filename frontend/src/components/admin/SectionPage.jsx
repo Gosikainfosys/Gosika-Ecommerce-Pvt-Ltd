@@ -54,7 +54,7 @@ export default function SectionPage({ section }) {
         { key: 'status', label: 'Status', render: (r, badge) => <StatusPill badge={badge} label={r.status} /> },
       ]
     : [
-        { key: 'id', label: 'Order ID', render: (r) => <a href={`/${role === 'vendor' ? 'vendor' : 'admin'}/orders/${r.id}`} style={{ color: '#ff5500', fontWeight: 700, textDecoration: 'none' }}>#{r.id}</a> },
+        { key: 'id', label: 'Order ID', render: (r) => <a href={`/${role === 'vendor' ? 'vendor' : 'admin'}/orders/${r.id}`} style={{ color: '#ff5500', fontWeight: 700, textDecoration: 'none' }}>{r.id}</a> },
         { key: 'customer', label: 'Customer' },
         { key: 'product', label: 'Item' },
         { key: 'amount', label: 'Amount', render: (r) => <span style={{ fontWeight: 800, color: '#0f172a' }}>{money(r.amount)}</span> },

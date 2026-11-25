@@ -122,7 +122,7 @@ export function buildOrderDocumentParts(order) {
       <div class="group">
         <div class="group-head">
           <strong>${esc(order.store_name || 'Store')}</strong>
-          <span>Order #${esc(order.order_number || order.vendor_order_number)}</span>
+          <span>Order ${esc(order.order_number || order.vendor_order_number)}</span>
           <span>${esc(String(order.status || '').replace(/_/g, ' ')).toUpperCase()}</span>
         </div>
         <table>
@@ -171,7 +171,7 @@ async function buildPackingSlipContent(order, { brandName, logoUrl }) {
     ? `<img class="brand-logo" src="${esc(apiImage(logoUrl))}" alt="${esc(brandName)} logo">`
     : `${defaultLogo}<div class="wordmark">GOSI<span>KA</span></div>`
   const metaRows = [
-    ['Order #', orderNumber],
+    ['Order', orderNumber],
     ['Order Date', formatDateTime(order.created_at)],
     ['Store', order.store_name || 'Store'],
     ['Customer', customerName],

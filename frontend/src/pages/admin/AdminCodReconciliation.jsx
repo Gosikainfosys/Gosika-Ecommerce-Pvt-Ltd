@@ -164,7 +164,7 @@ export default function AdminCodReconciliation() {
               ) : records.map((record) => (
                 <tr key={record.id}>
                   <td>
-                    <div className="font-bold">#{record.order_number || record.vendor_order_number}</div>
+                    <div className="font-bold">{record.order_number || record.vendor_order_number}</div>
                     {record.vendor_order_number && <div className="muted text-xs">{record.vendor_order_number}</div>}
                   </td>
                   <td>{record.customer_name || '—'}</td>

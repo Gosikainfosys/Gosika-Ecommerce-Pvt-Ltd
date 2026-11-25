@@ -68,7 +68,7 @@ export default function OrderSuccess() {
         </span>
         <h1 style={{ fontSize: 24 }}>Order Placed Successfully!</h1>
         <p className="muted">
-          Thank you for shopping on Gosika. Your order <strong className="text-primary">#{order.order_number || order.id}</strong> has been placed.
+          Thank you for shopping on Gosika. Your order <strong className="text-primary">{order.order_number || order.id}</strong> has been placed.
           {order.payment_method === 'cod' && ' Pay cash on delivery when your order arrives.'}
         </p>
         {onlinePayment && !isConfirmed && (

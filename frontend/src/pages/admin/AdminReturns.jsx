@@ -83,7 +83,7 @@ export default function AdminReturns() {
     try {
       if (action === 'approve') await api.post(`/admin/orders/returns/${targetId}/approve`, { notes })
       else await api.post(`/admin/orders/returns/${targetId}/reject`, { notes })
-      toast.success(`Return #${item.return_number || item.id} ${action === 'approve' ? 'approved' : 'rejected'}.`)
+      toast.success(`Return ${item.return_number || item.id} ${action === 'approve' ? 'approved' : 'rejected'}.`)
       setDialog({ open: false, action: null, item: null, loading: false })
       load()
     } catch (err) {
@@ -94,11 +94,11 @@ export default function AdminReturns() {
 
   const columns = [
     {
-      header: 'Return #',
+      header: 'Return',
       render: item => (
         <Link to={`/admin/orders/returns/${item.uuid || item.id}`}
           style={{ fontWeight: 800, color: 'var(--primary)', fontSize: 13, textDecoration: 'none' }}>
-          #{item.return_number || item.id}
+          {item.return_number || item.id}
         </Link>
       )
     },
@@ -107,7 +107,7 @@ export default function AdminReturns() {
       render: item => (
         <Link to={`/admin/orders/${item.order?.uuid || item.order?.id || item.order_id}`}
           style={{ color: 'var(--primary)', fontWeight: 700, fontSize: 13, textDecoration: 'none' }}>
-          #{item.order?.order_number || item.order_id}
+          {item.order?.order_number || item.order_id}
         </Link>
       )
     },
@@ -241,7 +241,7 @@ export default function AdminReturns() {
         search={search}
         onSearchChange={v => { setPage(1); setSearch(v) }}
         debounceMs={300}
-        searchPlaceholder="Search return #, order #, customer, store…"
+        searchPlaceholder="Search return, order, customer, store…"
         statusFilter={statusFilter}
         onStatusChange={v => { setPage(1); setStatusFilter(v) }}
         fromDate={fromDate}
@@ -280,8 +280,8 @@ export default function AdminReturns() {
         onConfirm={handleAction}
         loading={dialog.loading}
         title={dialog.action === 'approve'
-          ? `Approve Return #${dialog.item?.return_number || dialog.item?.id}?`
-          : `Reject Return #${dialog.item?.return_number || dialog.item?.id}?`}
+          ? `Approve Return ${dialog.item?.return_number || dialog.item?.id}?`
+          : `Reject Return ${dialog.item?.return_number || dialog.item?.id}?`}
         message={dialog.action === 'approve'
           ? `Approving authorises the item return of ${money(dialog.item?.refund_amount || 0)}.`
           : 'Rejecting requires an explanatory reason for the buyer.'}

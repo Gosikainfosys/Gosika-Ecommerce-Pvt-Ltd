@@ -375,8 +375,8 @@ export default function AdminDeliveries() {
   const exportCSV = () => {
     exportReportFromRows({
       columns: [
-        { label: 'Order #' },
-        { label: 'Vendor Shipment #' },
+        { label: 'Order' },
+        { label: 'Vendor Shipment' },
         { label: 'Customer' },
         { label: 'Phone' },
         { label: 'Store' },
@@ -422,7 +422,7 @@ export default function AdminDeliveries() {
       render: item => (
         <div>
           <div style={{ fontWeight: 800, color: 'var(--ink)', fontSize: 13 }}>
-            #{item.order_number || item.order?.order_number || item.vendor_order_number}
+            {item.order_number || item.order?.order_number || item.vendor_order_number}
           </div>
           <div style={{ fontSize: 11, color: 'var(--muted)' }}>
             {item.vendor_order_number ? `Shipment ${item.vendor_order_number} · ` : ''}{item.package_count ?? 1} pkg
@@ -623,7 +623,7 @@ export default function AdminDeliveries() {
       <FilterBar
         search={search}
         onSearchChange={handleSearch}
-        searchPlaceholder="Search order #, customer, store, partner..."
+        searchPlaceholder="Search order, customer, store, partner..."
         statusFilter={statusFilter}
         onStatusChange={v => { setStatusFilter(v); setPage(1) }}
         statusOptions={DISPATCH_TABS}
@@ -782,7 +782,7 @@ export default function AdminDeliveries() {
       <Drawer
         open={drawer.open}
         onClose={() => setDrawer(prev => ({ ...prev, open: false }))}
-        title={drawer.row ? `Dispatch #${drawer.row.order_number || drawer.row.order?.order_number || drawer.row.vendor_order_number}` : 'Order Dispatch'}
+        title={drawer.row ? `Dispatch ${drawer.row.order_number || drawer.row.order?.order_number || drawer.row.vendor_order_number}` : 'Order Dispatch'}
       >
         {drawer.loading ? (
           <div style={{ padding: 40, textAlign: 'center', color: 'var(--muted)' }}>
@@ -839,7 +839,7 @@ export default function AdminDeliveries() {
             </div>
             {assignState.targets.length === 1 ? (
               <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--ink)' }}>
-                #{assignState.targets[0].order_number || assignState.targets[0].order?.order_number || assignState.targets[0].vendor_order_number} · {money(Number(assignState.targets[0].amount) || 0)} · {assignState.targets[0].store?.name || 'Marketplace'}
+                {assignState.targets[0].order_number || assignState.targets[0].order?.order_number || assignState.targets[0].vendor_order_number} · {money(Number(assignState.targets[0].amount) || 0)} · {assignState.targets[0].store?.name || 'Marketplace'}
               </div>
             ) : (
               <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--ink)' }}>
@@ -848,7 +848,7 @@ export default function AdminDeliveries() {
             )}
             {assignState.targets.length > 1 && (
               <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-                {assignState.targets.map(t => `#${t.order_number || t.order?.order_number || t.vendor_order_number}`).join(' · ')}
+                {assignState.targets.map(t => `${t.order_number || t.order?.order_number || t.vendor_order_number}`).join(' · ')}
               </div>
             )}
           </div>
@@ -933,7 +933,7 @@ export default function AdminDeliveries() {
               Reassigning
             </div>
             <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--ink)' }}>
-              #{reassignState.row?.order_number || reassignState.row?.order?.order_number || reassignState.row?.vendor_order_number}
+              {reassignState.row?.order_number || reassignState.row?.order?.order_number || reassignState.row?.vendor_order_number}
             </div>
             <div style={{ fontSize: 12, color: 'var(--muted)' }}>
               Current: <strong>{reassignState.row?.delivery_partner?.name || '—'}</strong>
@@ -1040,7 +1040,7 @@ function detailContent(d, handlers) {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
           <div>
             <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--ink)' }}>
-              #{d.order_number || d.order?.order_number || d.vendor_order_number}
+              {d.order_number || d.order?.order_number || d.vendor_order_number}
             </div>
             <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
               {d.vendor_order_number ? `Shipment ${d.vendor_order_number} · ` : ''}Placed {order.placed_at ? formatDateTime(order.placed_at) : '—'}

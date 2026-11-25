@@ -614,7 +614,7 @@ export default function VendorDashboard() {
                       navigate(`/vendor/orders/${r.id}`)
                     }}
                   >
-                    #{r.order_number || r.id}
+                    {r.order_number || r.id}
                   </a>
                 ),
               },

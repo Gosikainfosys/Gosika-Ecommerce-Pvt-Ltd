@@ -64,7 +64,7 @@ export default function AccountActiveOrders() {
             <div key={o.id} className="card" style={{ padding: 18, width: '100%', display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div className="flex items-center justify-between" style={{ gap: 12, flexWrap: 'wrap' }}>
                 <div>
-                  <div className="font-semibold" style={{ fontSize: 14, color: 'var(--primary)' }}>#{o.order_number || o.id}</div>
+                  <div className="font-semibold" style={{ fontSize: 14, color: 'var(--primary)' }}>{o.order_number || o.id}</div>
                   <div className="muted text-xs">{o.placed_at ? formatDateTime(o.placed_at) : ''}</div>
                 </div>
                 <StatusBadge status={o.status} />

@@ -107,7 +107,7 @@ export default function AdminPayments() {
     exportReportFromRows({
       columns: [
         { label: 'Payment #' },
-        { label: 'Order #' },
+        { label: 'Order' },
         { label: 'Customer' },
         { label: 'Gateway Provider' },
         { label: 'Amount', align: 'right' },
@@ -154,7 +154,7 @@ export default function AdminPayments() {
           to={`/admin/orders/${item.order_id || item.order?.id}`}
           style={{ color: 'var(--primary)', fontWeight: 700, fontSize: 13, textDecoration: 'none' }}
         >
-          #{item.order_number || item.order_id}
+          {item.order_number || item.order_id}
         </Link>
       )
     },
@@ -265,7 +265,7 @@ export default function AdminPayments() {
       <FilterBar
         search={search}
         onSearchChange={value => { setPage(1); setSearch(value) }}
-        searchPlaceholder="Search payment #, order #, provider ref..."
+        searchPlaceholder="Search payment #, order, provider ref..."
         debounceMs={350}
         statusFilter={statusFilter}
         onStatusChange={value => { setPage(1); setStatusFilter(value) }}
@@ -348,7 +348,7 @@ export default function AdminPayments() {
                   Transaction #{selectedTxn.payment_number || selectedTxn.id}
                 </h3>
                 <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
-                  Order #{selectedTxn.order_number || selectedTxn.order_id}
+                  Order {selectedTxn.order_number || selectedTxn.order_id}
                 </div>
               </div>
               <button className="btn btn-ghost btn-xs" onClick={() => setSelectedTxn(null)}>✕</button>

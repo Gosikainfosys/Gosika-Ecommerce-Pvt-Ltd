@@ -220,7 +220,7 @@ export default function AdminDashboard() {
           </div>
           <StatusOrderTable
             columns={[
-              { key: 'id', label: 'Order ID', render: (r) => <a href={`/admin/orders/${r.id}`} style={{ color: '#ff5500', fontWeight: 700, textDecoration: 'none', whiteSpace: 'nowrap' }} onClick={(e) => { e.preventDefault(); navigate(`/admin/orders/${r.id}`) }}>#{r.id}</a>, sticky: true },
+              { key: 'id', label: 'Order ID', render: (r) => <a href={`/admin/orders/${r.id}`} style={{ color: '#ff5500', fontWeight: 700, textDecoration: 'none', whiteSpace: 'nowrap' }} onClick={(e) => { e.preventDefault(); navigate(`/admin/orders/${r.id}`) }}>{r.id}</a>, sticky: true },
               { key: 'customer', label: 'Customer', render: (r) => <><div style={{ fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>{r.customer}</div><div style={{ fontSize: 10.5, color: '#94a3b8' }}>{r.city}</div></> },
               { key: 'product', label: 'Product', render: (r) => <span style={{ color: '#334155', fontWeight: 500, maxWidth: 200, display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.product}</span> },
               { key: 'amount', label: 'Amount', render: (r) => <span style={{ fontWeight: 800, color: '#0f172a', whiteSpace: 'nowrap' }}>{money(r.amount)}</span> },

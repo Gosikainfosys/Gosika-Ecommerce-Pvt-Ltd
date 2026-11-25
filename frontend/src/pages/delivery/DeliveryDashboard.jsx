@@ -504,7 +504,7 @@ export default function DeliveryDashboard() {
                 <Search size={15} style={{ position: 'absolute', left: 12, top: 11, color: '#94a3b8' }} />
                 <input
                   type="text"
-                  placeholder="Search pickup store, order #, items…"
+                  placeholder="Search pickup store, order, items…"
                   value={searchAvailable}
                   onChange={e => setSearchAvailable(e.target.value)}
                   className="input"
@@ -620,7 +620,7 @@ export default function DeliveryDashboard() {
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, flexWrap: 'wrap', gap: 6 }}>
                       <div>
                         <span style={{ fontSize: 14, fontWeight: 900, color: 'var(--ink)' }}>
-                          #{job.order_number || job.vendor_order_number}
+                          {job.order_number || job.vendor_order_number}
                         </span>
                         <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 1 }}>
                           Ready {job.ready_at ? timeAgo(job.ready_at) : 'recently'}
@@ -803,7 +803,7 @@ export default function DeliveryDashboard() {
                     <div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <span style={{ fontSize: 14, fontWeight: 900, color: 'var(--ink)' }}>
-                          #{a.order_number || a.vendor_order_number || a.id.slice(0, 8)}
+                          {a.order_number || a.vendor_order_number || a.id.slice(0, 8)}
                         </span>
                         <DeliveryStatusBadge status={a.status} size="xs" />
                       </div>

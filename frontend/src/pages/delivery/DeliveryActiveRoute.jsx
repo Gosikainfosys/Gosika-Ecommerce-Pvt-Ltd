@@ -92,7 +92,7 @@ export default function DeliveryActiveRoute() {
         <div className="page-header-left">
           <h1 style={{ fontSize: 22, fontWeight: 900, color: 'var(--ink)' }}>Active Delivery</h1>
           <p style={{ color: 'var(--muted)', fontSize: 13, margin: '4px 0 0' }}>
-            #{a.order_number || a.vendor_order_number || a.id} · <strong className="text-success">+{money(a.delivery_fee)}</strong>
+            {a.order_number || a.vendor_order_number || a.id} · <strong className="text-success">+{money(a.delivery_fee)}</strong>
           </p>
         </div>
         <DeliveryStatusBadge status={a.status} />
@@ -213,7 +213,7 @@ export default function DeliveryActiveRoute() {
       >
         {confirmAccept && (
           <div className="card" style={{ background: 'var(--bg)', padding: 12, margin: 0 }}>
-            <div className="font-bold text-sm text-ink">Order #{confirmAccept.order_number || confirmAccept.vendor_order_number}</div>
+            <div className="font-bold text-sm text-ink">Order {confirmAccept.order_number || confirmAccept.vendor_order_number}</div>
             <div className="muted text-xs mt-0.5">
               {confirmAccept.recipient_name} · {money(confirmAccept.delivery_fee)}
             </div>

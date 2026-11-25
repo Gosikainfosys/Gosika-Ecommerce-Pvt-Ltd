@@ -41,7 +41,7 @@ class AdminExportController extends Controller
             // UTF-8 BOM for Excel compatibility
             fwrite($handle, "\xEF\xBB\xBF");
             fputcsv($handle, [
-                'Order #', 'Date', 'Customer Name', 'Customer Email',
+                'Order', 'Date', 'Customer Name', 'Customer Email',
                 'Payment Method', 'Payment Status', 'Order Status',
                 'Subtotal', 'Discount', 'Delivery Charge', 'Tax', 'Grand Total', 'Currency',
             ]);
@@ -142,7 +142,7 @@ class AdminExportController extends Controller
             $handle = fopen('php://output', 'w');
             fwrite($handle, "\xEF\xBB\xBF");
             fputcsv($handle, [
-                'Refund #', 'Order #', 'Date', 'Customer Name', 'Customer Email',
+                'Refund #', 'Order', 'Date', 'Customer Name', 'Customer Email',
                 'Amount (NPR)', 'Status', 'Reason', 'Completed At',
             ]);
 

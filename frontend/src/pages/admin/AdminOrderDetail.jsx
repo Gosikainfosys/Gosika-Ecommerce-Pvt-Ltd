@@ -401,7 +401,7 @@ export default function AdminOrderDetail() {
     try {
       if (action === 'cancel') {
         await api.post(`/admin/orders/${targetId}/cancel`, { reason })
-        toast.success(`Order #${order.order_number || order.id} has been cancelled.`)
+        toast.success(`Order ${order.order_number || order.id} has been cancelled.`)
       }
 
       setDialogState({ isOpen: false, action: null, loading: false })
@@ -463,7 +463,7 @@ export default function AdminOrderDetail() {
   const timelineEvents = [
     {
       title: 'Order Placed',
-      description: `Order #${order.order_number || order.id} created by customer.`,
+      description: `Order ${order.order_number || order.id} created by customer.`,
       status: 'pending',
       created_at: order.created_at || order.placed_at
     }
@@ -521,7 +521,7 @@ export default function AdminOrderDetail() {
       <div class="group">
         <div class="group-head">
           <strong>${esc(g.store)}</strong>
-          ${g.no ? `<span>Vendor Order #${esc(g.no)}</span>` : ''}
+          ${g.no ? `<span>Vendor Order ${esc(g.no)}</span>` : ''}
           ${g.status ? `<span>${esc(g.status.replace(/_/g, ' ')).toUpperCase()}</span>` : ''}
         </div>
         <table>
@@ -542,7 +542,7 @@ export default function AdminOrderDetail() {
     ${Number(order.refunded_amount) > 0 ? `<div class="trow"><span>Refunded</span><span>${money(order.refunded_amount)}</span></div><div class="trow total"><span>Net after refunds</span><span>${money(order.net_total)}</span></div>` : ''}`
 
   const baseMetaRows = [
-    ['Order #', order.order_number || order.id],
+    ['Order', order.order_number || order.id],
     ['Placed', formatDateTime(order.created_at || order.placed_at)],
     ['Customer', customerName],
     ['Email', customerEmail],
@@ -589,7 +589,7 @@ export default function AdminOrderDetail() {
       docTitle: 'Tax Invoice',
       docLines: `Invoice Date: ${today}`,
       metaRows: [
-        ['Invoice #', order.order_number || order.id],
+        ['Invoice', order.order_number || order.id],
         ['Order Date', formatDateTime(order.created_at || order.placed_at)],
         ['Customer', customerName],
         ['Email', customerEmail],
@@ -609,11 +609,11 @@ export default function AdminOrderDetail() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <PageHeader
-        title={`Order #${order.order_number || order.id}`}
+        title={`Order ${order.order_number || order.id}`}
         description={`Placed on ${formatDateTime(order.created_at || order.placed_at)} · Grand Total: ${money(order.grand_total || order.total || 0)}`}
         breadcrumbs={[
           { label: 'Orders', to: '/admin/orders' },
-          { label: `#${order.order_number || order.id}` }
+          { label: `${order.order_number || order.id}` }
         ]}
         actions={
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -692,7 +692,7 @@ export default function AdminOrderDetail() {
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontSize: 16, fontWeight: 900, color: 'var(--ink)' }}>
-                Order #{order.order_number || order.id}
+                Order {order.order_number || order.id}
               </span>
               <StatusBadge status={order.status} />
               {(order.return_categories || []).map(category => (
@@ -886,7 +886,7 @@ export default function AdminOrderDetail() {
                             <StatusBadge status={vo.status} />
                           </div>
                           <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 2 }}>
-                            Vendor Order #{vo.vendor_order_number || vo.id} · Commission: {vo.commission_rate ?? 10}% ({money(vo.commission_amount || 0)})
+                            Vendor Order {vo.vendor_order_number || vo.id} · Commission: {vo.commission_rate ?? 10}% ({money(vo.commission_amount || 0)})
                           </div>
                         </div>
 
@@ -1247,7 +1247,7 @@ export default function AdminOrderDetail() {
         onClose={() => setDialogState({ isOpen: false, action: null, loading: false })}
         onConfirm={handleConfirmAction}
         loading={dialogState.loading}
-        title={`Cancel Order #${order.order_number || order.id}?`}
+        title={`Cancel Order ${order.order_number || order.id}?`}
         message="Cancelling this order will update all vendor packages and notify the customer."
         variant="danger"
         confirmText="Cancel Order"
@@ -1304,7 +1304,7 @@ export default function AdminOrderDetail() {
             <form onSubmit={handlePartnerModalSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div style={{ background: '#f8fafc', padding: '12px 14px', borderRadius: 8, fontSize: 12.5, color: '#334155', display: 'flex', flexDirection: 'column', gap: 4 }}>
                 <div><strong>Package:</strong> {partnerModal.vendorOrder?.store?.name || partnerModal.vendorOrder?.vendor_name || 'Store Package'}</div>
-                <div><strong>Vendor Order #:</strong> {partnerModal.vendorOrder?.vendor_order_number || partnerModal.vendorOrder?.id}</div>
+                <div><strong>Vendor Order:</strong> {partnerModal.vendorOrder?.vendor_order_number || partnerModal.vendorOrder?.id}</div>
                 {order.shipping_address && (
                   <div><strong>Destination:</strong> {[order.shipping_address.address_line_1, order.shipping_address.municipality, order.shipping_address.district].filter(Boolean).join(', ')}</div>
                 )}

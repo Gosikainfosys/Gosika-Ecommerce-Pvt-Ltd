@@ -94,7 +94,7 @@ export default function AccountMyReviews() {
                           <div className="font-semibold" style={{ fontSize: 14 }}>{item.product_name || 'Purchased product'}</div>
                         )}
                         <div className="muted text-xs" style={{ marginTop: 4 }}>
-                          Order #{item.order_number || item.order_id} · {formatDate(item.placed_at)}
+                          Order {item.order_number || item.order_id} · {formatDate(item.placed_at)}
                         </div>
                       </div>
                     </div>

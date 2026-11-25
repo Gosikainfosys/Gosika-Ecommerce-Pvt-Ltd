@@ -393,7 +393,7 @@ export default function VendorReturns() {
 
                     <td>
                       <span className="font-mono text-xs" style={{ background: 'var(--bg)', padding: '2px 6px', borderRadius: 4, border: '1px solid var(--border)' }}>
-                        #{r.order_number || '—'}
+                        {r.order_number || '—'}
                       </span>
                     </td>
 
@@ -485,7 +485,7 @@ export default function VendorReturns() {
               </div>
               <div>
                 <div className="muted text-xs uppercase font-semibold">Order / Customer</div>
-                <div className="font-bold text-sm text-ink mt-0.5">#{selected.order_number}</div>
+                <div className="font-bold text-sm text-ink mt-0.5">{selected.order_number}</div>
                 <div className="muted text-xs">{selected.customer?.full_name}</div>
               </div>
               <div>

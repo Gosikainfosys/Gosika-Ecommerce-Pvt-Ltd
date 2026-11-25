@@ -553,12 +553,12 @@ export default function AdminReturnDetail() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <PageHeader
-        title={`Return #${item.return_number || item.id}`}
+        title={`Return ${item.return_number || item.id}`}
         description={`${getReturnType(item)} · Order ${detailOrder?.order_number || item.order_id}`}
         breadcrumbs={[
           { label: 'Orders', to: '/admin/orders' },
           { label: 'Returns & Exchanges', to: '/admin/orders/returns' },
-          { label: `#${item.return_number || item.id}` },
+          { label: `${item.return_number || item.id}` },
         ]}
         actions={
           <div style={{ display: 'flex', gap: 8 }}>
@@ -617,7 +617,7 @@ export default function AdminReturnDetail() {
         <InfoCard icon={ShoppingBag} title="Order">
           <Link to={`/admin/orders/${detailOrder?.uuid || detailOrder?.id || item.order_id}`}
             style={{ fontWeight: 700, fontSize: 14, color: 'var(--primary)', textDecoration: 'none' }}>
-            #{detailOrder?.order_number || item.order_id}
+            {detailOrder?.order_number || item.order_id}
           </Link>
           <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
             Payment: {getStatusLabel(detailOrder?.payment_status)} · {(detailOrder?.payment_method || '—').toUpperCase()}
@@ -794,7 +794,7 @@ export default function AdminReturnDetail() {
         onClose={() => setConfirmDialog({ open: false, action: null, loading: false })}
         onConfirm={handleAction}
         loading={confirmDialog.loading}
-        title={confirmDialog.action === 'approve' ? `Approve Return #${item.return_number || item.id}?` : `Reject Return #${item.return_number || item.id}?`}
+        title={confirmDialog.action === 'approve' ? `Approve Return ${item.return_number || item.id}?` : `Reject Return ${item.return_number || item.id}?`}
         message={confirmDialog.action === 'approve' ? 'Approving authorises the item return and refund process.' : 'Rejecting requires a reason for the customer.'}
         variant={confirmDialog.action === 'approve' ? 'success' : 'danger'}
         confirmText={confirmDialog.action === 'approve' ? 'Approve Return' : 'Reject Return'}

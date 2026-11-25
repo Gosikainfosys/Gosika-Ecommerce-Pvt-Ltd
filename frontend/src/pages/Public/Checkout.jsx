@@ -138,7 +138,7 @@ export default function Checkout() {
             <div style={{ textAlign: 'center', marginTop: 40 }}>
               <h3 style={{ fontSize: 24, color: 'var(--success)' }}>Order Placed Successfully!</h3>
               <p style={{ fontSize: 16, color: 'var(--muted)', marginBottom: 16 }}>
-                Order #ORD-001234
+                Order ORD-001234
               </p>
               <p style={{ fontSize: 16 }}>Your order will be delivered within 3-5 days.</p>
               <a href="/orders" className="btn btn-primary">View Order</a>

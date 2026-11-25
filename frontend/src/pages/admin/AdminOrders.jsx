@@ -99,7 +99,7 @@ export default function AdminOrders() {
 
     try {
       await api.post(`/admin/orders/${targetId}/cancel`, { reason })
-      toast.success(`Order #${order.order_number || order.id} has been cancelled.`)
+      toast.success(`Order ${order.order_number || order.id} has been cancelled.`)
       setDialogState({ isOpen: false, order: null, loading: false })
       loadOrders()
     } catch (err) {
@@ -117,7 +117,7 @@ export default function AdminOrders() {
 
     try {
       await api.delete(`/admin/orders/${targetId}`)
-      toast.success(`Order #${order.order_number || order.id} has been deleted.`)
+      toast.success(`Order ${order.order_number || order.id} has been deleted.`)
       setDeleteDialogState({ isOpen: false, order: null, loading: false })
       loadOrders()
     } catch (err) {
@@ -131,7 +131,7 @@ export default function AdminOrders() {
       ? `${appliedDateRange.from || 'Beginning'} – ${appliedDateRange.to || 'Present'}`
       : 'All time'
     const columns = [
-      { label: 'Order #' },
+      { label: 'Order' },
       { label: 'Customer' },
       { label: 'Customer Phone' },
       { label: 'Payment Method' },
@@ -175,13 +175,13 @@ export default function AdminOrders() {
 
   const columns = [
     {
-      header: 'Order #',
+      header: 'Order',
       render: item => (
         <Link
           to={`/admin/orders/${item.uuid || item.id}`}
           style={{ fontWeight: 800, color: 'var(--primary)', textDecoration: 'none', fontSize: 13 }}
         >
-          #{item.order_number || item.id}
+          {item.order_number || item.id}
         </Link>
       )
     },
@@ -360,7 +360,7 @@ export default function AdminOrders() {
       <FilterBar
         search={search}
         onSearchChange={value => { setPage(1); setSearch(value) }}
-        searchPlaceholder="Search order #, customer name, phone..."
+        searchPlaceholder="Search order, customer name, phone..."
         debounceMs={350}
         statusFilter={statusFilter}
         onStatusChange={value => { setPage(1); setStatusFilter(value) }}
@@ -420,7 +420,7 @@ export default function AdminOrders() {
         onClose={() => setDialogState({ isOpen: false, order: null, loading: false })}
         onConfirm={handleConfirmCancel}
         loading={dialogState.loading}
-        title={`Cancel Order #${dialogState.order?.order_number || dialogState.order?.id}?`}
+        title={`Cancel Order ${dialogState.order?.order_number || dialogState.order?.id}?`}
         message="Cancelling this order will release reserved inventory and cancel all vendor packages."
         variant="danger"
         confirmText="Cancel Order"
@@ -434,7 +434,7 @@ export default function AdminOrders() {
         onClose={() => setDeleteDialogState({ isOpen: false, order: null, loading: false })}
         onConfirm={handleConfirmDelete}
         loading={deleteDialogState.loading}
-        title={`Delete Order #${deleteDialogState.order?.order_number || deleteDialogState.order?.id}?`}
+        title={`Delete Order ${deleteDialogState.order?.order_number || deleteDialogState.order?.id}?`}
         message="This will permanently remove the order from the system. This action cannot be undone. Orders that are out for delivery, delivered, or completed cannot be deleted."
         variant="danger"
         confirmText="Delete Order"

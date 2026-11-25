@@ -427,7 +427,7 @@ export default function Returns() {
               type="text"
               className="input"
               style={{ paddingLeft: 30, height: 32, fontSize: 13 }}
-              placeholder="Search return #, order…"
+              placeholder="Search return, order…"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
             />
@@ -442,7 +442,7 @@ export default function Returns() {
             <table className="table" style={{ width: '100%', margin: 0 }}>
               <thead>
                 <tr>
-                  <th>Return #</th>
+                  <th>Return</th>
                   <th>Type</th>
                   <th>Product</th>
                   <th>Order</th>
@@ -470,7 +470,7 @@ export default function Returns() {
             <table className="table" style={{ width: '100%', margin: 0 }}>
               <thead>
                 <tr>
-                  <th>Return #</th>
+                  <th>Return</th>
                   <th>Type</th>
                   <th>Product</th>
                   <th>Order</th>
@@ -533,7 +533,7 @@ export default function Returns() {
                             color: 'var(--ink)',
                           }}
                         >
-                          #{r.order_number || '—'}
+                          {r.order_number || '—'}
                         </Link>
                       </td>
 
@@ -643,7 +643,7 @@ export default function Returns() {
                       <option value="">Select an order</option>
                       {eligibleOrders.map((o) => (
                         <option key={o.id} value={o.id}>
-                          Order #{o.order_number} · Delivered · {formatDate(o.completed_at || o.placed_at)}
+                          Order {o.order_number} · Delivered · {formatDate(o.completed_at || o.placed_at)}
                         </option>
                       ))}
                     </Select>
@@ -1016,7 +1016,7 @@ export default function Returns() {
                     <div className="flex-1">
                       <div className="font-bold text-sm text-ink">{selectedReturn.product_name || '—'}</div>
                       <div className="muted text-xs mt-0.5">
-                        Quantity: {selectedReturn.quantity} · Order #{selectedReturn.order_number || '—'}
+                        Quantity: {selectedReturn.quantity} · Order {selectedReturn.order_number || '—'}
                       </div>
                     </div>
                   </div>

@@ -235,7 +235,7 @@ export default function VendorOrders({ view = 'all' }) {
       <FilterBar
         search={search}
         onSearchChange={value => { setPage(1); setSearch(value) }}
-        searchPlaceholder="Search order #, store, item…"
+        searchPlaceholder="Search order, store, item…"
         debounceMs={350}
         statusFilter={status || 'all'}
         onStatusChange={value => { setPage(1); setStatus(value === 'all' ? '' : value) }}
@@ -277,7 +277,7 @@ export default function VendorOrders({ view = 'all' }) {
                         className="font-mono font-bold text-sm"
                         style={{ color: 'var(--primary)' }}
                       >
-                        #{o.order_number || o.vendor_order_number}
+                        {o.order_number || o.vendor_order_number}
                       </Link>
                       <div className="muted text-xs mt-0.5">{o.store_name || '—'}</div>
                     </td>
