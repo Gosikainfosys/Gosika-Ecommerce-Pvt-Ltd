@@ -46,6 +46,11 @@ const alreadyRefunded = refunds =>
     .filter(r => r.status === 'refunded')
     .reduce((s, r) => s + Number(r.amount || 0), 0)
 
+const reservedRefunds = refunds =>
+  (refunds || [])
+    .filter(r => ['requested', 'approved', 'processing', 'refunded'].includes(r.status))
+    .reduce((s, r) => s + Number(r.amount || 0), 0)
+
 /* ─── sub-components ──────────────────────────────────────────────────────── */
 function InfoCard({ icon: Icon, title, children }) {
   return (
@@ -74,7 +79,7 @@ function RefundPanel({ returnItem, onRefunded, onApprove, onReject }) {
   const isEsewa = returnItem?.order?.payment_method === 'esewa'
   const maxAmt = refundable(returnItem)
   const refundedAmt = alreadyRefunded(returnItem?.refunds)
-  const remaining = Math.max(0, maxAmt - refundedAmt)
+  const remaining = Math.max(0, maxAmt - reservedRefunds(returnItem?.refunds))
   const refunds = returnItem?.refunds || []
 
   /* create-refund form */
@@ -83,12 +88,10 @@ function RefundPanel({ returnItem, onRefunded, onApprove, onReject }) {
   const [notes, setNotes] = useState('')
   const [creating, setCreating] = useState(false)
 
-  /* esewa processing */
-  const [processingId, setProcessingId] = useState(null)
-
   /* refund status drafts (manual fallback) */
   const [drafts, setDrafts] = useState({})
   const [savingId, setSavingId] = useState(null)
+  const [processingEsewaId, setProcessingEsewaId] = useState(null)
 
   const effectiveAmt = type === 'full' ? remaining : Number(partialAmt || 0)
   const invalid = effectiveAmt <= 0 || effectiveAmt > remaining + 0.001
@@ -104,6 +107,7 @@ function RefundPanel({ returnItem, onRefunded, onApprove, onReject }) {
       await api.post(`/admin/orders/returns/${returnItem.uuid || returnItem.id}/refund`, {
         method: returnItem?.order?.payment_method || 'esewa',
         amount: effectiveAmt,
+        refund_type: type,
         notes: notes || null,
       })
       toast.success(`${type === 'full' ? 'Full' : 'Partial'} refund of ${money(effectiveAmt)} created.`)
@@ -114,20 +118,6 @@ function RefundPanel({ returnItem, onRefunded, onApprove, onReject }) {
       toast.error(err.response?.data?.message || 'Failed to create refund.')
     } finally {
       setCreating(false)
-    }
-  }
-
-  const processEsewa = async (refund) => {
-    const refundId = refund.uuid || refund.id
-    setProcessingId(refundId)
-    try {
-      const res = await api.post(`/admin/orders/returns/${returnItem.uuid || returnItem.id}/refunds/${refundId}/esewa-process`)
-      toast.success(res.data?.message || 'Refund processed via eSewa.')
-      onRefunded()
-    } catch (err) {
-      toast.error(err.response?.data?.message || 'eSewa refund failed.')
-    } finally {
-      setProcessingId(null)
     }
   }
 
@@ -146,6 +136,21 @@ function RefundPanel({ returnItem, onRefunded, onApprove, onReject }) {
       toast.error(err.response?.data?.message || 'Failed to update refund status.')
     } finally {
       setSavingId(null)
+    }
+  }
+
+  const processEsewa = async (refund) => {
+    const id = refund.uuid || refund.id
+    setProcessingEsewaId(id)
+    try {
+      await api.post(`/admin/orders/returns/${returnItem.uuid || returnItem.id}/refunds/${id}/esewa-process`)
+      toast.success('Refund verified and synced via eSewa.')
+      onRefunded()
+    } catch (err) {
+      const msg = err.response?.data?.message || 'eSewa processing failed.'
+      toast.error(msg)
+    } finally {
+      setProcessingEsewaId(null)
     }
   }
 
@@ -290,9 +295,12 @@ function RefundPanel({ returnItem, onRefunded, onApprove, onReject }) {
         {refunds.map(refund => {
           const rid = refund.uuid || refund.id
           const draft = drafts[rid] || { status: refund.status, provider_refund_id: refund.provider_refund_id || '' }
-          const paymentAmt = Number(returnItem?.order?.payments?.[0]?.amount || returnItem?.order?.grand_total || 0)
           const refundAmt = Number(refund.amount || 0)
-          const isPartial = paymentAmt > 0 && refundAmt < paymentAmt - 0.01
+          // Trust the stored refund_type first. When absent (older records), fall back to
+          // comparing the refund amount against the total refundable for this return (maxAmt).
+          const isPartial = refund.refund_type
+            ? refund.refund_type === 'partial'
+            : maxAmt > 0 && refundAmt < maxAmt - 0.01
           const done = refund.status === 'refunded'
 
           return (
@@ -324,21 +332,41 @@ function RefundPanel({ returnItem, onRefunded, onApprove, onReject }) {
                 </div>
               )}
 
-              {/* eSewa process button */}
+              {/* eSewa process and status verification */}
               {!done && isEsewa && (
-                <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '12px 14px', marginBottom: 10 }}>
+                <div style={{ minWidth: 0, background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '12px 14px', marginBottom: 10 }}>
                   <div style={{ fontSize: 12, color: '#15803d', marginBottom: 8 }}>
-                    Click below to send this {isPartial ? 'partial' : 'full'} refund of <strong>{money(refundAmt)}</strong> directly to the customer via eSewa.
+                    Click below to send this {isPartial ? 'partial' : 'full'} refund of{' '}
+                    <strong>{money(refundAmt)}</strong> directly to the customer via eSewa.
                   </div>
                   <button
                     type="button"
                     className="btn"
-                    disabled={processingId === rid}
+                    disabled={processingEsewaId === rid}
                     onClick={() => processEsewa(refund)}
-                    style={{ background: '#16a34a', color: '#fff', border: 'none', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6, borderRadius: 8, padding: '8px 16px', fontSize: 13 }}
+                    style={{
+                      width: '100%',
+                      background: '#16a34a',
+                      color: '#fff',
+                      border: 'none',
+                      fontWeight: 700,
+                      fontSize: 13,
+                      borderRadius: 8,
+                      padding: '10px 14px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 6,
+                      boxSizing: 'border-box',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
                   >
-                    <Zap size={14} />
-                    {processingId === rid ? 'Processing via eSewa…' : `Process ${isPartial ? 'Partial' : 'Full'} Refund via eSewa · ${money(refundAmt)}`}
+                    <Zap size={14} style={{ flexShrink: 0 }} />
+                    {processingEsewaId === rid
+                      ? 'Processing…'
+                      : `Process ${isPartial ? 'Partial' : 'Full'} Refund via eSewa · ${money(refundAmt)}`}
                   </button>
                 </div>
               )}
@@ -347,9 +375,19 @@ function RefundPanel({ returnItem, onRefunded, onApprove, onReject }) {
               {!done && (
                 <details style={{ marginTop: 4 }}>
                   <summary style={{ fontSize: 12, color: 'var(--muted)', cursor: 'pointer', userSelect: 'none', fontWeight: 600 }}>
-                    {isEsewa ? 'Manual override (if eSewa API unavailable)' : 'Update refund status manually'}
+                    {isEsewa ? '▶ Manual override (if eSewa API unavailable)' : 'Update refund status manually'}
                   </summary>
                   <div style={{ display: 'grid', gap: 8, marginTop: 10 }}>
+                    {isEsewa && (
+                      <a
+                        href="https://merchant.esewa.com.np/"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ fontSize: 12, color: '#15803d', fontWeight: 600 }}
+                      >
+                        Open eSewa Merchant Portal ↗
+                      </a>
+                    )}
                     <select className="input"
                       value={draft.status}
                       onChange={e => setDrafts(d => ({ ...d, [rid]: { ...draft, status: e.target.value } }))}>
@@ -529,7 +567,7 @@ export default function AdminReturnDetail() {
       </div>
 
       {/* Main two-column layout */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 380px', gap: 20, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 360px), 1fr))', gap: 20, alignItems: 'start' }}>
 
         {/* LEFT column */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>

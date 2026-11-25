@@ -28,10 +28,11 @@ class RefundService
         float $amount,
         ?string $reason,
         ?array $gateway = null,
-        ?ReturnRequest $returnRequest = null
+        ?ReturnRequest $returnRequest = null,
+        ?string $refundType = null
     ): Refund
     {
-        return DB::transaction(function () use ($payment, $actor, $amount, $reason, $gateway, $returnRequest) {
+        return DB::transaction(function () use ($payment, $actor, $amount, $reason, $gateway, $returnRequest, $refundType) {
             // Lock the payment row so concurrent refund creations cannot both pass
             // the outstanding-sum cap check and over-refund the payment.
             $payment = Payment::query()->whereKey($payment->getKey())->lockForUpdate()->firstOrFail();
@@ -67,10 +68,16 @@ class RefundService
 
                 $quantity = max(1, (int) $orderItem?->quantity);
                 $returnLimit = round(((float) ($orderItem?->line_total ?? 0) / $quantity) * $returnRequest->quantity, 2);
+                $returnRemaining = round($returnLimit - (float) $returnRefunds, 2);
 
                 if (! $orderItem || round((float) $itemRefunds, 2) + round($amount, 2) > round((float) $orderItem->line_total, 2)
                     || round((float) $returnRefunds, 2) + round($amount, 2) > $returnLimit) {
                     throw new DomainException('Refund amount exceeds the refundable value for this returned item.', 422);
+                }
+
+                $refundType = $refundType ?? (round($amount, 2) >= $returnRemaining ? 'full' : 'partial');
+                if ($refundType === 'full' && round($amount, 2) !== $returnRemaining) {
+                    throw new DomainException('A full refund must use the remaining refundable amount for this return.', 422);
                 }
             }
 
@@ -99,8 +106,12 @@ class RefundService
                 $refund->provider_refund_id = (string) $gateway['provider_refund_id'];
             }
 
-            if (isset($gateway['provider_response']) && is_array($gateway['provider_response'])) {
-                $refund->provider_response = $gateway['provider_response'];
+            $providerResponse = $gateway['provider_response'] ?? [];
+            if ($returnRequest && $refundType !== null) {
+                $providerResponse['refund_type'] = $refundType;
+            }
+            if ($providerResponse !== []) {
+                $refund->provider_response = $providerResponse;
             }
 
             $refund->save();

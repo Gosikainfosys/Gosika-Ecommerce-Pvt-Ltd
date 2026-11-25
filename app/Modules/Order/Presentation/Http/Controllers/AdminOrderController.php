@@ -203,6 +203,8 @@ class AdminOrderController extends Controller
                 'orderItem.product.primaryImage',
                 'store',
                 'refunds.payment',
+                'refunds.order',
+                'refunds.orderItem',
                 'media',
             ])
             ->where('uuid', $returnId)
@@ -210,6 +212,9 @@ class AdminOrderController extends Controller
             ->firstOrFail();
 
         $data = $return->toArray();
+        $data['refunds'] = $return->refunds
+            ->map(fn ($refund) => (new AdminRefundResource($refund))->resolve())
+            ->all();
         $data['media'] = $return->relationLoaded('media')
             ? $return->media->map(fn ($media) => [
                 'id'            => $media->uuid,
@@ -265,6 +270,7 @@ class AdminOrderController extends Controller
         $request->validate([
             'method' => ['required', Rule::in(['esewa', 'khalti', 'fonepay', 'cod'])],
             'amount' => ['nullable', 'numeric', 'min:0.01'],
+            'refund_type' => ['nullable', Rule::in(['full', 'partial'])],
             'notes' => ['nullable', 'string', 'max:1000'],
         ]);
 
@@ -345,7 +351,8 @@ class AdminOrderController extends Controller
                 $amount,
                 $request->input('notes') ?? "Refund for return {$return->return_number}",
                 $gateway,
-                $return
+                $return,
+                $request->input('refund_type')
             );
         } catch (DomainException $e) {
             return Response::error($e->getMessage(), $e->getErrors(), $e->getStatusCode());

@@ -22,8 +22,10 @@ use App\Modules\Payment\Domain\Contracts\PaymentProviderContract;
 use App\Modules\Payment\Domain\Exceptions\PaymentProviderException;
 use App\Modules\Payment\Infrastructure\Models\Payment;
 use App\Modules\Payment\Infrastructure\Models\Refund;
+use App\Modules\Payment\Infrastructure\Services\EsewaProvider;
 use App\Modules\Platform\Infrastructure\Models\Setting;
 use App\Modules\Shared\Domain\Enums\DeliveryStatus;
+use App\Modules\Shared\Domain\Enums\CommissionStatus;
 use App\Modules\Shared\Domain\Enums\OrderPaymentStatus;
 use App\Modules\Shared\Domain\Enums\OrderStatus;
 use App\Modules\Shared\Domain\Enums\PaymentMethod;
@@ -41,12 +43,14 @@ use App\Modules\Shipping\Infrastructure\Models\DeliveryPartner;
 use App\Modules\Vendor\Infrastructure\Models\Store;
 use App\Modules\Vendor\Infrastructure\Models\Vendor;
 use App\Modules\Wallet\Application\Services\WalletService;
+use App\Modules\Wallet\Infrastructure\Models\Commission;
 use App\Modules\Wallet\Infrastructure\Models\Settlement;
 use App\Modules\Wallet\Infrastructure\Models\VendorWallet;
 use App\Modules\Wallet\Infrastructure\Models\WalletTransaction;
 use Carbon\Carbon;
 use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use Tests\TestCase;
@@ -1268,11 +1272,13 @@ class OrderConfirmationRulesTest extends TestCase
             ->postJson("/api/v1/admin/orders/returns/{$return->uuid}/refund", [
                 'method' => 'cod',
                 'amount' => '321.50',
+                'refund_type' => 'partial',
                 'notes' => 'Refund verified by admin',
             ]);
 
         $response->assertOk()
-            ->assertJsonPath('data.amount', '321.50');
+            ->assertJsonPath('data.amount', '321.50')
+            ->assertJsonPath('data.refund_type', 'partial');
         $this->assertDatabaseHas('refunds', [
             'return_request_id' => $return->id,
             'order_item_id' => $item->id,
@@ -1280,6 +1286,55 @@ class OrderConfirmationRulesTest extends TestCase
         ]);
         $this->assertSame('321.50', $return->fresh()->refund_amount);
         $this->assertSame(ReturnStatus::REFUND_PENDING, $return->fresh()->status);
+
+        $this->actingAs($this->adminUser)
+            ->postJson("/api/v1/admin/orders/returns/{$return->uuid}/refund", [
+                'method' => 'cod',
+                'amount' => '878.50',
+                'refund_type' => 'full',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.amount', '878.50')
+            ->assertJsonPath('data.refund_type', 'full');
+        $this->assertSame('1200.00', $return->fresh()->refund_amount);
+
+        $this->actingAs($this->adminUser)
+            ->getJson("/api/v1/admin/orders/returns/{$return->uuid}")
+            ->assertOk()
+            ->assertJsonPath('data.refunds.0.refund_type', 'partial')
+            ->assertJsonPath('data.refunds.1.refund_type', 'full');
+    }
+
+    public function test_esewa_refund_initiation_is_reported_as_unsupported(): void
+    {
+        [$order, $vendorOrder, $customer] = $this->createOrder(OrderStatus::DELIVERED, isCod: false);
+        $payment = Payment::create([
+            'payment_number' => 'PAY-'.strtoupper(Str::random(10)),
+            'order_id' => $order->id,
+            'vendor_order_id' => $vendorOrder->id,
+            'user_id' => $customer->id,
+            'amount' => $order->grand_total,
+            'currency' => 'NPR',
+            'method' => 'esewa',
+            'provider' => 'esewa',
+            'status' => PaymentStatus::PAID,
+            'initiated_at' => now(),
+            'verified_at' => now(),
+        ]);
+        $service = (new PaymentService())->setProvider('esewa', new EsewaProvider(
+            'test-secret',
+            'EPAYTEST',
+            'https://rc-epay.esewa.com.np/api/epay/main/v2/form',
+            'https://rc.esewa.com.np/api/epay/transaction/status/',
+            'https://example.test/success',
+            'https://example.test/failure',
+        ));
+
+        $result = $service->esewaRefund($payment, 100);
+
+        $this->assertFalse($result['success']);
+        $this->assertSame(501, $result['http_status']);
+        $this->assertStringContainsString('does not document refund initiation through its API', $result['message']);
     }
 
     public function test_completed_refunds_reduce_vendor_settlement_and_pending_wallet_balance(): void
@@ -1465,6 +1520,17 @@ class OrderConfirmationRulesTest extends TestCase
     public function test_completed_refund_is_deducted_once_from_pending_then_available_wallet_balance(): void
     {
         [$order, $vendorOrder, $customer] = $this->createOrder(OrderStatus::DELIVERED, isCod: false);
+        $vendorOrder->update([
+            'status' => OrderStatus::DELIVERED,
+            'delivery_status' => DeliveryStatus::DELIVERED,
+            'vendor_payable' => 1200,
+        ]);
+        Commission::query()->create([
+            'vendor_order_id' => $vendorOrder->id,
+            'order_id' => $order->id,
+            'vendor_id' => $this->vendor->id,
+            'status' => CommissionStatus::EARNED,
+        ]);
         $payment = Payment::create([
             'payment_number' => 'PAY-'.strtoupper(Str::random(10)),
             'order_id' => $order->id,
@@ -1508,5 +1574,138 @@ class OrderConfirmationRulesTest extends TestCase
             ->where('reference_type', 'refund')
             ->where('reference_id', $refund->id)
             ->count());
+    }
+
+    public function test_refund_credits_delivered_order_earnings_before_deducting_refund(): void
+    {
+        [$order, $vendorOrder, $customer] = $this->createOrder(OrderStatus::DELIVERED, isCod: false);
+        $vendorOrder->update([
+            'status' => OrderStatus::DELIVERED,
+            'delivery_status' => DeliveryStatus::DELIVERED,
+            'grand_total' => 2114,
+            'commission_rate' => 6,
+            'commission_amount' => 126.84,
+            'vendor_payable' => 1987.16,
+        ]);
+        $payment = Payment::create([
+            'payment_number' => 'PAY-'.strtoupper(Str::random(10)),
+            'order_id' => $order->id,
+            'vendor_order_id' => $vendorOrder->id,
+            'user_id' => $customer->id,
+            'amount' => 2500,
+            'currency' => 'NPR',
+            'method' => 'esewa',
+            'provider' => 'esewa',
+            'status' => PaymentStatus::PAID,
+            'initiated_at' => now(),
+            'verified_at' => now(),
+        ]);
+        $refund = Refund::create([
+            'refund_number' => 'REF-'.strtoupper(Str::random(8)),
+            'payment_id' => $payment->id,
+            'order_id' => $order->id,
+            'vendor_order_id' => $vendorOrder->id,
+            'amount' => 1800,
+            'status' => RefundStatus::REFUNDED,
+            'completed_at' => now(),
+        ]);
+
+        app(WalletService::class)->debitRefund($refund);
+
+        $wallet = app(WalletService::class)->walletForVendor($this->vendor);
+        $transactions = WalletTransaction::query()
+            ->where('wallet_id', $wallet->id)
+            ->orderBy('id')
+            ->get();
+
+        $this->assertSame('187.16', $wallet->fresh()->balance);
+        $this->assertSame('187.16', $wallet->fresh()->pending_balance);
+        $this->assertSame('0.00', $wallet->fresh()->available_balance);
+        $this->assertCount(2, $transactions);
+        $this->assertSame('credit_earnings', $transactions[0]->transaction_type->value);
+        $this->assertSame('0.00', $transactions[0]->balance_before);
+        $this->assertSame('1987.16', $transactions[0]->balance_after);
+        $this->assertSame('debit_refund', $transactions[1]->transaction_type->value);
+        $this->assertSame('1800.00', $transactions[1]->amount);
+        $this->assertSame('187.16', $transactions[1]->balance_after);
+    }
+
+    public function test_refund_debit_is_capped_at_the_delivered_order_vendor_payable(): void
+    {
+        [$order, $vendorOrder, $customer] = $this->createOrder(OrderStatus::DELIVERED, isCod: false);
+        $vendorOrder->update([
+            'status' => OrderStatus::DELIVERED,
+            'delivery_status' => DeliveryStatus::DELIVERED,
+            'commission_rate' => 10,
+            'vendor_payable' => 1000,
+        ]);
+        $payment = Payment::create([
+            'payment_number' => 'PAY-'.strtoupper(Str::random(10)),
+            'order_id' => $order->id,
+            'vendor_order_id' => $vendorOrder->id,
+            'user_id' => $customer->id,
+            'amount' => 2500,
+            'currency' => 'NPR',
+            'method' => 'esewa',
+            'provider' => 'esewa',
+            'status' => PaymentStatus::PAID,
+            'initiated_at' => now(),
+            'verified_at' => now(),
+        ]);
+        $refund = Refund::create([
+            'refund_number' => 'REF-'.strtoupper(Str::random(8)),
+            'payment_id' => $payment->id,
+            'order_id' => $order->id,
+            'vendor_order_id' => $vendorOrder->id,
+            'amount' => 1800,
+            'status' => RefundStatus::REFUNDED,
+            'completed_at' => now(),
+        ]);
+
+        app(WalletService::class)->debitRefund($refund);
+
+        $wallet = app(WalletService::class)->walletForVendor($this->vendor);
+        $refundDebit = WalletTransaction::query()
+            ->where('wallet_id', $wallet->id)
+            ->where('transaction_type', 'debit_refund')
+            ->firstOrFail();
+
+        $this->assertSame('0.00', $wallet->fresh()->balance);
+        $this->assertSame('0.00', $wallet->fresh()->pending_balance);
+        $this->assertSame('1000.00', $refundDebit->amount);
+    }
+
+    public function test_refund_for_undelivered_order_does_not_debit_vendor_earnings(): void
+    {
+        [$order, $vendorOrder, $customer] = $this->createOrder(OrderStatus::CANCELLED, isCod: false);
+        $vendorOrder->update(['vendor_payable' => 2000]);
+        $payment = Payment::create([
+            'payment_number' => 'PAY-'.strtoupper(Str::random(10)),
+            'order_id' => $order->id,
+            'vendor_order_id' => $vendorOrder->id,
+            'user_id' => $customer->id,
+            'amount' => 2500,
+            'currency' => 'NPR',
+            'method' => 'esewa',
+            'provider' => 'esewa',
+            'status' => PaymentStatus::PAID,
+            'initiated_at' => now(),
+            'verified_at' => now(),
+        ]);
+        $refund = Refund::create([
+            'refund_number' => 'REF-'.strtoupper(Str::random(8)),
+            'payment_id' => $payment->id,
+            'order_id' => $order->id,
+            'vendor_order_id' => $vendorOrder->id,
+            'amount' => 1800,
+            'status' => RefundStatus::REFUNDED,
+            'completed_at' => now(),
+        ]);
+
+        app(WalletService::class)->debitRefund($refund);
+
+        $wallet = app(WalletService::class)->walletForVendor($this->vendor);
+        $this->assertSame('0.00', $wallet->fresh()->balance);
+        $this->assertDatabaseCount('wallet_transactions', 0);
     }
 }

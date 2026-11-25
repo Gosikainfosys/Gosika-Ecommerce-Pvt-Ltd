@@ -43,18 +43,15 @@ class AdminRefundController extends Controller
     }
 
     /**
-     * Trigger an eSewa refund directly via their Refund API, then mark the refund as REFUNDED.
-     *
      * POST /admin/orders/returns/{return}/refunds/{refund}/esewa-process
      *
-     * Optional body: { amount: float }  — override the stored refund amount for partial payouts.
+     * Verifies the refund status at eSewa and, when eSewa confirms the refund
+     * is complete, marks the local record as REFUNDED. If eSewa cannot be reached
+     * or has not yet processed the refund, returns an actionable error so the
+     * admin can either retry later or use the manual-override flow.
      */
     public function processEsewaRefund(Request $request, string $returnId, string $refundId): JsonResponse
     {
-        $request->validate([
-            'amount' => ['nullable', 'numeric', 'min:0.01'],
-        ]);
-
         $return = ReturnRequest::where('uuid', $returnId)
             ->when(ctype_digit($returnId), fn ($q) => $q->orWhere('id', (int) $returnId))
             ->firstOrFail();
@@ -87,51 +84,58 @@ class AdminRefundController extends Controller
             return Response::error('This refund is not linked to an eSewa payment.', [], 422);
         }
 
-        // Use caller-supplied amount for partial payouts; otherwise use the stored refund amount.
-        $refundAmount = $request->filled('amount')
-            ? (float) $request->input('amount')
-            : (float) $refund->amount;
+        // Check the current status of this transaction at eSewa.
+        $check = $this->paymentService->esewaRefundCheck($payment);
 
-        if ($refundAmount <= 0 || $refundAmount > round((float) $refund->amount + 0.001, 2)) {
+        if (! ($check['available'] ?? false)) {
             return Response::error(
-                'Refund amount must be between 0.01 and '.number_format((float) $refund->amount, 2).'.',
-                ['max' => (float) $refund->amount],
+                'Could not reach the eSewa status API — process the refund in the eSewa Merchant Portal and use the manual override to mark it complete.',
+                ['reason' => $check['reason'] ?? 'unavailable', 'hint' => 'manual_override'],
+                502
+            );
+        }
+
+        $gatewayStatus = strtoupper((string) ($check['status'] ?? ''));
+
+        // eSewa reports refund confirmed.
+        if (in_array($gatewayStatus, ['FULL_REFUND', 'PARTIAL_REFUND'], true)) {
+            $providerResponse = ['esewa_process' => $check['raw'] ?? $check];
+
+            try {
+                $refund = $this->refundService->updateStatus(
+                    $request->user(),
+                    $refund,
+                    RefundStatus::REFUNDED,
+                    ($check['ref_id'] ?? '') !== '' ? (string) $check['ref_id'] : $refund->provider_refund_id,
+                    $providerResponse
+                );
+            } catch (DomainException $e) {
+                return Response::error($e->getMessage(), $e->getErrors(), $e->getStatusCode());
+            }
+
+            $typeLabel = $gatewayStatus === 'PARTIAL_REFUND' ? 'Partial refund' : 'Full refund';
+
+            return Response::success(
+                new AdminRefundResource($refund->load('payment', 'order', 'orderItem')),
+                $typeLabel.' of NPR '.number_format((float) $refund->amount, 2)
+                .' verified and synced via eSewa (ref: '.(($check['ref_id'] ?? '') ?: 'N/A').').'
+            );
+        }
+
+        // Payment has not been refunded at eSewa yet.
+        if ($gatewayStatus === 'COMPLETE') {
+            return Response::error(
+                'eSewa confirms this payment is not yet refunded (status: COMPLETE). '
+                .'Open the eSewa Merchant Portal to process the refund, then click this button again.',
+                ['gateway_status' => 'COMPLETE', 'merchant_portal' => 'https://merchant.esewa.com.np/'],
                 422
             );
         }
 
-        // Call the eSewa Refund API
-        $result = $this->paymentService->esewaRefund($payment, $refundAmount);
-
-        if (! ($result['success'] ?? false)) {
-            return Response::error(
-                $result['message'] ?? 'eSewa refund failed.',
-                ['esewa_response' => $result['raw'] ?? null],
-                422
-            );
-        }
-
-        $esewaStatus = $result['status']; // 'FULL_REFUND' or 'PARTIAL_REFUND'
-
-        // Mark the refund as REFUNDED and store the eSewa ref_id and raw response
-        try {
-            $refund = $this->refundService->updateStatus(
-                $request->user(),
-                $refund,
-                RefundStatus::REFUNDED,
-                $result['ref_id'] !== '' ? $result['ref_id'] : null,
-                ['esewa_refund' => $result['raw'], 'esewa_refund_type' => $esewaStatus]
-            );
-        } catch (DomainException $e) {
-            return Response::error($e->getMessage(), $e->getErrors(), $e->getStatusCode());
-        }
-
-        $typeLabel = $esewaStatus === 'PARTIAL_REFUND' ? 'Partial refund' : 'Full refund';
-
-        return Response::success(
-            new AdminRefundResource($refund->load('payment', 'order', 'orderItem')),
-            $typeLabel.' of NPR '.number_format($refundAmount, 2).' processed via eSewa'
-                .' (ref: '.($result['ref_id'] ?: 'N/A').').'
+        return Response::error(
+            'Unexpected eSewa status "'.$gatewayStatus.'". Open the eSewa Merchant Portal to verify the refund manually.',
+            ['gateway_status' => $gatewayStatus, 'merchant_portal' => 'https://merchant.esewa.com.np/'],
+            422
         );
     }
 
@@ -167,7 +171,7 @@ class AdminRefundController extends Controller
                     $message = 'Refund finalized — verified at eSewa (status: '.$gatewayStatus.').';
                 } elseif ($gatewayStatus === 'COMPLETE') {
                     return Response::error(
-                        'eSewa reports this payment as not yet refunded (status: COMPLETE). Use "Process via eSewa" to trigger the refund directly, or confirm the payout from the eSewa merchant dashboard before marking as refunded.',
+                        'eSewa reports this payment as not yet refunded (status: COMPLETE). Process the refund in the eSewa Merchant Portal, then verify and sync it here.',
                         ['gateway_status' => 'COMPLETE'],
                         422
                     );

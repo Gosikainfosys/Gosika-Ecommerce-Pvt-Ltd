@@ -857,7 +857,19 @@ class WalletService
         }
 
         DB::transaction(function () use ($refund, $vendorOrder) {
+            $vendorOrder = VendorOrder::query()
+                ->whereKey($vendorOrder->getKey())
+                ->lockForUpdate()
+                ->first();
+
+            if (! $vendorOrder || ! $vendorOrder->vendor_id) {
+                return;
+            }
+
             $wallet = $this->lockWallet($vendorOrder->vendor_id);
+            if (! $this->creditRefundOrderEarnings($wallet, $vendorOrder)) {
+                return;
+            }
 
             $alreadyDebited = WalletTransaction::query()
                 ->where('wallet_id', $wallet->id)
@@ -870,7 +882,21 @@ class WalletService
                 return; // Idempotent — already applied
             }
 
-            $amount = (float) $refund->amount;
+            $alreadyDebitedForOrder = WalletTransaction::query()
+                ->where('wallet_id', $wallet->id)
+                ->where('transaction_type', WalletTransactionType::DEBIT_REFUND->value)
+                ->where('reference_type', 'refund')
+                ->whereIn('reference_id', Refund::query()
+                    ->select('id')
+                    ->where('vendor_order_id', $vendorOrder->id)
+                    ->where('status', 'refunded'))
+                ->sum('amount');
+            $remainingVendorPayable = max(0, (float) $vendorOrder->vendor_payable - (float) $alreadyDebitedForOrder);
+            $amount = min((float) $refund->amount, $remainingVendorPayable);
+
+            if ($amount <= 0) {
+                return;
+            }
 
             $this->mutate($wallet, function (VendorWallet $wallet) use ($amount) {
                 $this->deductRefundBalances($wallet, $amount);
@@ -882,6 +908,65 @@ class WalletService
                 'description'    => 'Customer return refund '.$refund->refund_number,
             ]);
         });
+    }
+
+    protected function creditRefundOrderEarnings(VendorWallet $wallet, VendorOrder $vendorOrder): bool
+    {
+        $order = $vendorOrder->order;
+        if (! $order
+            || $vendorOrder->delivery_status !== DeliveryStatus::DELIVERED
+            || ! in_array($vendorOrder->status, [
+                OrderStatus::DELIVERED,
+                OrderStatus::COMPLETED,
+                OrderStatus::RETURNED,
+            ], true)
+            || ! in_array($order->payment_status, [
+                OrderPaymentStatus::PAID,
+                OrderPaymentStatus::PARTIALLY_REFUNDED,
+                OrderPaymentStatus::REFUNDED,
+            ], true)) {
+            return false;
+        }
+
+        $commission = $this->recordCommission($vendorOrder);
+        if ($commission->status === CommissionStatus::EARNED) {
+            return true;
+        }
+
+        $earningsAlreadyCredited = WalletTransaction::query()
+            ->where('wallet_id', $wallet->id)
+            ->where('transaction_type', WalletTransactionType::CREDIT_EARNINGS->value)
+            ->where('reference_type', 'vendor_order')
+            ->where('reference_id', $vendorOrder->id)
+            ->exists();
+
+        if ($earningsAlreadyCredited) {
+            $commission->status = CommissionStatus::EARNED;
+            $commission->save();
+
+            return true;
+        }
+
+        $amount = max(0, (float) $vendorOrder->vendor_payable);
+        if ($amount <= 0) {
+            return false;
+        }
+
+        $this->mutate($wallet, function (VendorWallet $wallet) use ($amount) {
+            $wallet->balance = round((float) $wallet->balance + $amount, 2);
+            $wallet->pending_balance = round((float) $wallet->pending_balance + $amount, 2);
+        });
+
+        $this->ledger($wallet, WalletTransactionType::CREDIT_EARNINGS, $amount, [
+            'reference_type' => 'vendor_order',
+            'reference_id' => $vendorOrder->id,
+            'description' => 'Earnings credited before refund for order '.$order->order_number,
+        ]);
+
+        $commission->status = CommissionStatus::EARNED;
+        $commission->save();
+
+        return true;
     }
 
     protected function deductRefundBalances(VendorWallet $wallet, float $amount): void

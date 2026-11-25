@@ -63,11 +63,8 @@ class PaymentService
     }
 
     /**
-     * Initiate a refund directly via the eSewa Refund API.
-     *
-     * Returns an array:
-     *   ['success' => true, 'status' => 'FULL_REFUND'|'PARTIAL_REFUND', 'ref_id' => '...', 'raw' => [...]]
-     *   ['success' => false, 'message' => '...']
+     * ePay exposes refund status lookup but does not document a refund-initiation API.
+     * Keep this method for existing callers and direct administrators to the merchant portal.
      */
     public function esewaRefund(Payment $payment, float $amount): array
     {
@@ -83,34 +80,10 @@ class PaymentService
             return ['success' => false, 'message' => 'No eSewa transaction reference available on this payment.'];
         }
 
-        try {
-            $data = $provider->refund($transactionUuid, $amount);
-        } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::error('eSewa refund call failed', [
-                'payment_id'       => $payment->id,
-                'transaction_uuid' => $transactionUuid,
-                'amount'           => $amount,
-                'error'            => $e->getMessage(),
-            ]);
-            return ['success' => false, 'message' => $e->getMessage()];
-        }
-
-        $status = strtoupper((string) ($data['status'] ?? ''));
-
-        if (! in_array($status, ['FULL_REFUND', 'PARTIAL_REFUND'], true)) {
-            return [
-                'success' => false,
-                'message' => 'eSewa returned unexpected refund status: '.$status,
-                'status' => $status,
-                'raw' => $data,
-            ];
-        }
-
         return [
-            'success' => true,
-            'status'  => $status,
-            'ref_id'  => (string) ($data['ref_id'] ?? ''),
-            'raw'     => $data,
+            'success' => false,
+            'message' => 'eSewa ePay does not document refund initiation through its API. Process the refund in the eSewa Merchant Portal, then verify and sync the result here.',
+            'http_status' => 501,
         ];
     }
 
