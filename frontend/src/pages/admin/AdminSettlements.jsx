@@ -240,7 +240,11 @@ export default function AdminSettlements() {
               ) : summary.length === 0 ? (
                 <tr>
                   <td colSpan={8} style={{ padding: 40, textAlign: 'center', color: 'var(--muted)' }}>
-                    No settlement summaries found.
+                    <div style={{ fontWeight: 700, color: 'var(--ink)' }}>No settlement summaries found.</div>
+                    <div style={{ maxWidth: 620, margin: '6px auto 0', fontSize: 12 }}>
+                      Paid, delivered orders appear after the return window and vendor settlement cycle have elapsed.
+                      The scheduled order processor must be running to generate matured settlements automatically.
+                    </div>
                   </td>
                 </tr>
               ) : summary.map(s => (

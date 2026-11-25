@@ -503,6 +503,41 @@ class OrderConfirmationRulesTest extends TestCase
         $this->assertSame(OrderStatus::OUT_FOR_DELIVERY, $vendorOrder->fresh()->status);
     }
 
+    public function test_admin_delivered_status_syncs_delivery_and_generates_matured_settlement(): void
+    {
+        Setting::set('return.window_days', 7, 'return', 'integer', true);
+        $this->vendor->update(['meta' => ['settlement_cycle_days' => 14]]);
+        $deliveredAt = Carbon::now()->subDays(15);
+        Carbon::setTestNow($deliveredAt);
+        [$order, $vendorOrder] = $this->createOrder(OrderStatus::PENDING, false);
+        $vendorOrder->update([
+            'grand_total' => 2500,
+            'commission_rate' => 10,
+            'commission_amount' => 250,
+            'vendor_payable' => 2250,
+        ]);
+
+        $this->actingAs($this->adminUser)
+            ->patchJson("/api/v1/admin/orders/{$order->uuid}/status", [
+                'status' => OrderStatus::DELIVERED->value,
+                'reason' => 'Delivery verified by admin.',
+            ])
+            ->assertOk();
+
+        $this->assertSame(DeliveryStatus::DELIVERED, $vendorOrder->fresh()->delivery_status);
+        $this->assertSame(DeliveryStatus::DELIVERED, $vendorOrder->items()->firstOrFail()->fresh()->delivery_status);
+
+        Carbon::setTestNow($deliveredAt->copy()->addDays(15));
+        app(OrderConfirmationSchedulerService::class)->run();
+
+        $settlement = Settlement::query()->firstOrFail();
+        $this->assertSame('2250.00', $settlement->net_payable);
+        $this->actingAs($this->adminUser)
+            ->getJson('/api/v1/admin/wallet/settlements?group_by_vendor=1')
+            ->assertOk()
+            ->assertJsonPath('data.0.vendor_id', $this->vendor->uuid);
+    }
+
     // ── 6. Customer cancellation blocked once order is confirmed ────────
 
     public function test_customer_cancellation_blocked_after_order_is_confirmed(): void

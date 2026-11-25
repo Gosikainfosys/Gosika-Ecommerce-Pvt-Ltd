@@ -21,6 +21,7 @@ Route::prefix('v1/vendor/wallet')->middleware(['auth:sanctum', 'ensure:vendor'])
 
 Route::prefix('v1/admin/wallet')->middleware(['auth:sanctum', 'ensure:admin'])->group(function () {
     Route::get('wallets', [AdminWalletController::class, 'wallets']);
+    Route::get('payout-profiles', [AdminWalletController::class, 'payoutProfiles']);
     Route::get('payouts', [AdminWalletController::class, 'allPayouts']);
     Route::get('settlements', [AdminWalletController::class, 'allSettlements']);
 

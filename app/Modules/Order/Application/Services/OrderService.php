@@ -13,6 +13,7 @@ use App\Modules\Order\Infrastructure\Models\OrderItem;
 use App\Modules\Order\Infrastructure\Models\OrderStatusHistory;
 use App\Modules\Order\Infrastructure\Models\VendorOrder;
 use App\Modules\Platform\Infrastructure\Models\Setting;
+use App\Modules\Shared\Domain\Enums\DeliveryStatus;
 use App\Modules\Shared\Domain\Enums\OrderPaymentStatus;
 use App\Modules\Shared\Domain\Enums\OrderStatus;
 use App\Modules\Shared\Domain\Exceptions\DomainException;
@@ -230,15 +231,13 @@ class OrderService
 
         return DB::transaction(function () use ($order, $actor, $status, $reason) {
             $order = Order::query()->whereKey($order->getKey())->lockForUpdate()->firstOrFail();
-            if ($order->status === $status) {
-                return $order;
-            }
-            if (in_array($order->status, [OrderStatus::CANCELLED, OrderStatus::FAILED, OrderStatus::RETURNED, OrderStatus::REFUNDED], true)) {
+            $statusChanged = $order->status !== $status;
+            if ($statusChanged && in_array($order->status, [OrderStatus::CANCELLED, OrderStatus::FAILED, OrderStatus::RETURNED, OrderStatus::REFUNDED], true)) {
                 throw new DomainException('Terminal orders cannot be reopened through a status update.', 422);
             }
 
             $from = $order->status->value;
-            $updates = ['status' => $status];
+            $updates = $statusChanged ? ['status' => $status] : [];
             if (in_array($status, [
                 OrderStatus::CONFIRMED,
                 OrderStatus::ACCEPTED,
@@ -255,12 +254,35 @@ class OrderService
             if (in_array($status, [OrderStatus::DELIVERED, OrderStatus::COMPLETED], true)) {
                 $updates['completed_at'] = $order->completed_at ?? now();
             }
-            $order->update($updates);
+            if ($updates !== []) {
+                $order->update($updates);
+            }
+
+            $deliveryStatus = match ($status) {
+                OrderStatus::PICKED_UP => DeliveryStatus::PICKED_UP,
+                OrderStatus::OUT_FOR_DELIVERY => DeliveryStatus::OUT_FOR_DELIVERY,
+                OrderStatus::DELIVERED, OrderStatus::COMPLETED => DeliveryStatus::DELIVERED,
+                OrderStatus::REJECTED => DeliveryStatus::FAILED,
+                default => null,
+            };
 
             foreach ($order->vendorOrders()->lockForUpdate()->get() as $vendorOrder) {
                 $vendorFrom = $vendorOrder->status->value;
-                if ($vendorOrder->status !== $status) {
-                    $vendorOrder->update(['status' => $status]);
+                $vendorStatusChanged = $vendorOrder->status !== $status;
+                $deliveryFrom = $vendorOrder->delivery_status->value;
+                $deliveryStatusChanged = $deliveryStatus && $vendorOrder->delivery_status !== $deliveryStatus;
+                $vendorUpdates = [];
+                if ($vendorStatusChanged) {
+                    $vendorUpdates['status'] = $status;
+                }
+                if ($deliveryStatusChanged) {
+                    $vendorUpdates['delivery_status'] = $deliveryStatus;
+                }
+                if ($vendorUpdates !== []) {
+                    $vendorOrder->update($vendorUpdates);
+                }
+
+                if ($vendorStatusChanged) {
                     OrderStatusHistory::create([
                         'trackable_type' => VendorOrder::class,
                         'trackable_id' => $vendorOrder->id,
@@ -270,16 +292,33 @@ class OrderService
                         'actor_user_id' => $actor->id,
                     ]);
                 }
+                if ($deliveryStatusChanged) {
+                    OrderStatusHistory::create([
+                        'trackable_type' => VendorOrder::class,
+                        'trackable_id' => $vendorOrder->id,
+                        'from_status' => $deliveryFrom,
+                        'to_status' => $deliveryStatus->value,
+                        'reason' => $reason ?: 'Delivery status updated by administrator.',
+                        'actor_user_id' => $actor->id,
+                    ]);
+                }
+                if ($deliveryStatus) {
+                    $vendorOrder->items()
+                        ->where('delivery_status', '!=', $deliveryStatus->value)
+                        ->update(['delivery_status' => $deliveryStatus->value]);
+                }
             }
 
-            OrderStatusHistory::create([
-                'trackable_type' => Order::class,
-                'trackable_id' => $order->id,
-                'from_status' => $from,
-                'to_status' => $status->value,
-                'reason' => $reason,
-                'actor_user_id' => $actor->id,
-            ]);
+            if ($statusChanged) {
+                OrderStatusHistory::create([
+                    'trackable_type' => Order::class,
+                    'trackable_id' => $order->id,
+                    'from_status' => $from,
+                    'to_status' => $status->value,
+                    'reason' => $reason,
+                    'actor_user_id' => $actor->id,
+                ]);
+            }
 
             return $order->fresh(['user', 'items', 'vendorOrders.items', 'payments', 'shippingAddress']);
         });

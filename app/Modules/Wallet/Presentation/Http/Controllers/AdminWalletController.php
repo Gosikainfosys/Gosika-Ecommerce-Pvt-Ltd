@@ -6,6 +6,7 @@ use App\Modules\Administration\Application\Services\AuditLogService;
 use App\Modules\Identity\Domain\Permissions;
 use App\Modules\Order\Infrastructure\Models\VendorOrder;
 use App\Modules\Payment\Infrastructure\Models\Refund;
+use App\Modules\Platform\Infrastructure\Models\Setting;
 use App\Modules\Shared\Domain\Enums\PayoutStatus;
 use App\Modules\Shared\Domain\Enums\SettlementStatus;
 use App\Modules\Shared\Domain\Exceptions\DomainException;
@@ -142,6 +143,122 @@ class AdminWalletController extends Controller
                 'last_page' => $payouts->lastPage(),
             ]]
         );
+    }
+
+    public function payoutProfiles(Request $request): JsonResponse
+    {
+        $filters = $request->validate([
+            'search' => ['nullable', 'string', 'max:120'],
+            'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
+        ]);
+        $search = trim((string) ($filters['search'] ?? ''));
+
+        $vendors = Vendor::query()
+            ->with([
+                'wallet',
+                'stores' => fn ($query) => $query->orderBy('name'),
+                'bankAccounts' => fn ($query) => $query
+                    ->orderByDesc('is_default')
+                    ->orderByDesc('is_verified')
+                    ->orderByDesc('id'),
+            ])
+            ->addSelect([
+                'settlements_count' => Settlement::query()
+                    ->selectRaw('COUNT(*)')
+                    ->whereColumn('settlements.vendor_id', 'vendors.id'),
+                'open_settlement_total' => Settlement::query()
+                    ->selectRaw('COALESCE(SUM(net_payable), 0)')
+                    ->whereColumn('settlements.vendor_id', 'vendors.id')
+                    ->whereIn('status', [
+                        SettlementStatus::ELIGIBLE->value,
+                        SettlementStatus::PROCESSING->value,
+                    ]),
+                'held_settlement_total' => Settlement::query()
+                    ->selectRaw('COALESCE(SUM(net_payable), 0)')
+                    ->whereColumn('settlements.vendor_id', 'vendors.id')
+                    ->where('status', SettlementStatus::HOLD->value),
+                'paid_settlement_total' => Settlement::query()
+                    ->selectRaw('COALESCE(SUM(net_payable), 0)')
+                    ->whereColumn('settlements.vendor_id', 'vendors.id')
+                    ->where('status', SettlementStatus::PAID->value),
+                'payout_requests_count' => PayoutRequest::query()
+                    ->selectRaw('COUNT(*)')
+                    ->whereColumn('payout_requests.vendor_id', 'vendors.id'),
+                'open_payout_total' => PayoutRequest::query()
+                    ->selectRaw('COALESCE(SUM(amount), 0)')
+                    ->whereColumn('payout_requests.vendor_id', 'vendors.id')
+                    ->whereIn('status', [
+                        PayoutStatus::PENDING->value,
+                        PayoutStatus::APPROVED->value,
+                        PayoutStatus::PROCESSING->value,
+                    ]),
+                'paid_payout_total' => PayoutRequest::query()
+                    ->selectRaw('COALESCE(SUM(amount), 0)')
+                    ->whereColumn('payout_requests.vendor_id', 'vendors.id')
+                    ->where('status', PayoutStatus::PAID->value),
+            ])
+            ->when($search !== '', function ($query) use ($search) {
+                $query->where(function ($inner) use ($search) {
+                    $inner->where('company_name', 'like', "%{$search}%")
+                        ->orWhere('pan_vat', 'like', "%{$search}%")
+                        ->orWhereHas('stores', fn ($stores) => $stores->where('name', 'like', "%{$search}%"));
+                });
+            })
+            ->orderBy('company_name')
+            ->paginate(min(max((int) ($filters['per_page'] ?? 50), 1), 100))
+            ->withQueryString();
+
+        $returnWindowDays = max(1, (int) Setting::get('return.window_days', 7));
+        $profiles = $vendors->getCollection()->map(function (Vendor $vendor) use ($returnWindowDays) {
+            $settlementCycleDays = max(1, (int) ($vendor->meta['settlement_cycle_days'] ?? 14));
+            $wallet = $vendor->wallet;
+
+            return [
+                'vendor_id' => $vendor->uuid,
+                'vendor_name' => $vendor->company_name,
+                'vendor_status' => $vendor->status?->value,
+                'pan_vat' => $vendor->pan_vat,
+                'stores' => $vendor->stores->map(fn ($store) => [
+                    'id' => $store->uuid,
+                    'name' => $store->name,
+                    'status' => $store->status?->value,
+                ])->values(),
+                'wallet' => [
+                    'balance' => number_format((float) ($wallet?->balance ?? 0), 2, '.', ''),
+                    'available_balance' => number_format((float) ($wallet?->available_balance ?? 0), 2, '.', ''),
+                    'pending_balance' => number_format((float) ($wallet?->pending_balance ?? 0), 2, '.', ''),
+                    'currency' => $wallet?->currency ?? 'NPR',
+                ],
+                'bank_accounts' => $vendor->bankAccounts->map(fn ($account) => [
+                    'id' => $account->uuid,
+                    'bank_name' => $account->bank_name,
+                    'branch_name' => $account->branch_name,
+                    'account_name' => $account->account_name,
+                    'account_number' => $account->account_number,
+                    'account_type' => $account->account_type,
+                    'is_default' => (bool) $account->is_default,
+                    'is_verified' => (bool) $account->is_verified,
+                ])->values(),
+                'settlement_cycle_days' => $settlementCycleDays,
+                'earnings_maturity_days' => max($returnWindowDays, $settlementCycleDays),
+                'settlements_count' => (int) $vendor->settlements_count,
+                'open_settlement_total' => number_format((float) $vendor->open_settlement_total, 2, '.', ''),
+                'held_settlement_total' => number_format((float) $vendor->held_settlement_total, 2, '.', ''),
+                'paid_settlement_total' => number_format((float) $vendor->paid_settlement_total, 2, '.', ''),
+                'payout_requests_count' => (int) $vendor->payout_requests_count,
+                'open_payout_total' => number_format((float) $vendor->open_payout_total, 2, '.', ''),
+                'paid_payout_total' => number_format((float) $vendor->paid_payout_total, 2, '.', ''),
+            ];
+        })->values();
+
+        return Response::success($profiles, 'Vendor payout financial profiles retrieved.', [
+            'pagination' => [
+                'total' => $vendors->total(),
+                'per_page' => $vendors->perPage(),
+                'current_page' => $vendors->currentPage(),
+                'last_page' => $vendors->lastPage(),
+            ],
+        ]);
     }
 
     public function allSettlements(Request $request): JsonResponse

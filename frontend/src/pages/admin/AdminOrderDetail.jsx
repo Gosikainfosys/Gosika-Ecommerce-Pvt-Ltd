@@ -300,6 +300,29 @@ export default function AdminOrderDetail() {
     loadOrder()
   }, [id])
 
+  const handleStatusUpdate = async (event) => {
+    event.preventDefault()
+    if (statusDraft === 'rejected' && !statusReason.trim()) {
+      toast.error('Please provide a reason for rejecting this order.')
+      return
+    }
+
+    setStatusSaving(true)
+    try {
+      await api.patch(`/admin/orders/${order.uuid || order.id}/status`, {
+        status: statusDraft,
+        reason: statusReason.trim() || undefined,
+      })
+      toast.success('Order status updated.')
+      setStatusReason('')
+      await loadOrder()
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to update order status.')
+    } finally {
+      setStatusSaving(false)
+    }
+  }
+
   const handleConfirmAction = async (reason) => {
     const { action } = dialogState
     setDialogState(prev => ({ ...prev, loading: true }))
@@ -309,29 +332,6 @@ export default function AdminOrderDetail() {
       if (action === 'cancel') {
         await api.post(`/admin/orders/${targetId}/cancel`, { reason })
         toast.success(`Order #${order.order_number || order.id} has been cancelled.`)
-      }
-
-      const handleStatusUpdate = async (event) => {
-        event.preventDefault()
-        if (statusDraft === 'rejected' && !statusReason.trim()) {
-          toast.error('Please provide a reason for rejecting this order.')
-          return
-        }
-
-        setStatusSaving(true)
-        try {
-          await api.patch(`/admin/orders/${order.uuid || order.id}/status`, {
-            status: statusDraft,
-            reason: statusReason.trim() || undefined,
-          })
-          toast.success('Order status updated.')
-          setStatusReason('')
-          await loadOrder()
-        } catch (err) {
-          toast.error(err.response?.data?.message || 'Failed to update order status.')
-        } finally {
-          setStatusSaving(false)
-        }
       }
 
       setDialogState({ isOpen: false, action: null, loading: false })

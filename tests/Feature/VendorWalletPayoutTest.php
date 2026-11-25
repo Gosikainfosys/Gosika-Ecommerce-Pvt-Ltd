@@ -6,6 +6,7 @@ use App\Modules\Identity\Domain\Roles;
 use App\Modules\Identity\Infrastructure\Models\User;
 use App\Modules\Shared\Domain\Enums\VendorStatus;
 use App\Modules\Vendor\Infrastructure\Models\BankAccount;
+use App\Modules\Vendor\Infrastructure\Models\Store;
 use App\Modules\Vendor\Infrastructure\Models\Vendor;
 use App\Modules\Wallet\Application\Services\WalletService;
 use App\Modules\Wallet\Infrastructure\Models\PayoutRequest;
@@ -91,6 +92,39 @@ class VendorWalletPayoutTest extends TestCase
         $this->assertDatabaseCount('payout_requests', 0);
         $this->assertSame('5000.00', $wallet->fresh()->balance);
         $this->assertSame('5000.00', $wallet->fresh()->available_balance);
+    }
+
+    public function test_admin_payout_profiles_always_include_vendors_with_wallet_and_bank_details(): void
+    {
+        [, $vendor, $bankAccount] = $this->createVendorWallet(5000, 3500, 1500);
+        $store = Store::query()->create([
+            'vendor_id' => $vendor->id,
+            'name' => 'Wallet Profile Store',
+            'slug' => 'wallet-profile-store-'.$vendor->id,
+        ]);
+
+        $noWalletUser = User::factory()->create();
+        $noWalletVendor = Vendor::query()->create([
+            'user_id' => $noWalletUser->id,
+            'company_name' => 'Z Vendor Without Wallet',
+            'business_email' => 'no-wallet-'.$noWalletUser->id.'@example.test',
+            'status' => VendorStatus::APPROVED,
+        ]);
+        $admin = User::factory()->create();
+        $admin->assignRole(Roles::SUPER_ADMIN);
+
+        $response = $this->actingAs($admin)
+            ->getJson('/api/v1/admin/wallet/payout-profiles?per_page=100')
+            ->assertOk()
+            ->assertJsonCount(2, 'data')
+            ->assertJsonPath('data.0.vendor_id', $vendor->uuid)
+            ->assertJsonPath('data.0.stores.0.name', $store->name)
+            ->assertJsonPath('data.0.wallet.available_balance', '3500.00')
+            ->assertJsonPath('data.0.bank_accounts.0.account_number', $bankAccount->account_number)
+            ->assertJsonPath('data.1.vendor_id', $noWalletVendor->uuid)
+            ->assertJsonPath('data.1.wallet.balance', '0.00');
+
+        $response->assertJsonPath('data.1.bank_accounts', []);
     }
 
     private function createVendorWallet(float $balance, float $available, float $pending): array
