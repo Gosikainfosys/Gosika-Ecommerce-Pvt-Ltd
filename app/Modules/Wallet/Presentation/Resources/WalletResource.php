@@ -3,6 +3,7 @@
 namespace App\Modules\Wallet\Presentation\Resources;
 
 use App\Modules\Platform\Infrastructure\Models\Setting;
+use App\Modules\Wallet\Application\Services\PayoutSchedule;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -15,6 +16,7 @@ class WalletResource extends JsonResource
         $settlementHoldingDays = max(0, (int) Setting::get('settlement.waiting_days', 7));
         $requiresManualApproval = Setting::get('settlement.require_manual_payout_approval', true);
         $payoutsEnabled = Setting::get('commission.vendor_payouts_enabled', true);
+        $payoutFrequency = (string) Setting::get('settlement.payout_frequency', 'weekly');
 
         return [
             'id' => $this->uuid,
@@ -24,7 +26,9 @@ class WalletResource extends JsonResource
             'available_balance' => number_format((float) $this->available_balance, 2, '.', ''),
             'pending_balance' => number_format((float) $this->pending_balance, 2, '.', ''),
             'minimum_payout_amount' => number_format((float) Setting::get('settlement.min_payout_amount', 1000), 2, '.', ''),
-            'payout_frequency' => (string) Setting::get('settlement.payout_frequency', 'weekly'),
+            'payout_frequency' => $payoutFrequency,
+            'payout_request_window_open' => PayoutSchedule::allowsRequest($payoutFrequency),
+            'payout_request_window_label' => PayoutSchedule::requestWindowLabel($payoutFrequency),
             'requires_manual_payout_approval' => in_array($requiresManualApproval, [true, 1, '1', 'true'], true),
             'vendor_payouts_enabled' => in_array($payoutsEnabled, [true, 1, '1', 'true'], true),
             'settlement_holding_days' => $settlementHoldingDays,

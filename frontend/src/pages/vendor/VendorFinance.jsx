@@ -387,6 +387,8 @@ export default function VendorFinance() {
   const availableBalance = Number(wallet?.available_balance || 0)
   const minimumPayout = Number(wallet?.minimum_payout_amount || DEFAULT_MIN_PAYOUT)
   const payoutsEnabled = wallet?.vendor_payouts_enabled !== false
+  const payoutRequestWindowOpen = wallet?.payout_request_window_open !== false
+  const payoutRequestWindowLabel = wallet?.payout_request_window_label || 'the next scheduled payout day'
   const payoutFrequency = wallet?.payout_frequency || 'weekly'
   const payoutFrequencyLabel = {
     manual: 'Manual on-demand',
@@ -715,7 +717,7 @@ export default function VendorFinance() {
               setPayoutAmount(availableBalance.toFixed(2))
               setPayoutOpen(true)
             }}
-            disabled={!payoutsEnabled || availableBalance < minimumPayout}
+            disabled={!payoutsEnabled || !payoutRequestWindowOpen || availableBalance < minimumPayout}
           >
             Withdraw available balance
           </Button>
@@ -1165,7 +1167,9 @@ export default function VendorFinance() {
       {activePage === 'wallet' && (
         <div className="alert alert-info" style={{ marginBottom: 0 }}>
           {payoutsEnabled
-            ? <>Withdrawals can only be requested from your available balance. Paid, delivered orders become withdrawable after the admin-configured {wallet?.settlement_holding_days ?? 'holding'}-day holding period. Payout schedule: {payoutFrequencyLabel}.</>
+            ? <>{payoutRequestWindowOpen
+              ? <>Withdrawals can only be requested from your available balance. Paid, delivered orders become withdrawable after the admin-configured {wallet?.settlement_holding_days ?? 'holding'}-day holding period. Payout schedule: {payoutFrequencyLabel}.</>
+              : <>Payout requests are closed. Requests are accepted on {payoutRequestWindowLabel} (Nepal time). Your available balance remains in your wallet until then.</>}</>
             : 'Vendor payouts are currently disabled by the administrator.'}
         </div>
       )}

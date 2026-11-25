@@ -42,6 +42,7 @@ use App\Modules\Shipping\Infrastructure\Models\DeliveryAssignment;
 use App\Modules\Shipping\Infrastructure\Models\DeliveryPartner;
 use App\Modules\Vendor\Infrastructure\Models\Store;
 use App\Modules\Vendor\Infrastructure\Models\Vendor;
+use App\Modules\Wallet\Application\Services\PayoutSchedule;
 use App\Modules\Wallet\Application\Services\WalletService;
 use App\Modules\Wallet\Infrastructure\Models\Commission;
 use App\Modules\Wallet\Infrastructure\Models\Settlement;
@@ -1479,6 +1480,45 @@ class OrderConfirmationRulesTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.available_balance', '810.00')
             ->assertJsonPath('data.pending_balance', '0.00');
+    }
+
+    public function test_weekly_payout_requests_are_only_available_on_sunday_nepal_time(): void
+    {
+        Setting::set('settlement.payout_frequency', 'weekly', 'settlement', 'string', true);
+        Carbon::setTestNow(Carbon::parse('2026-11-25 12:00:00', 'Asia/Kathmandu'));
+
+        $this->actingAs($this->vendorUser)
+            ->getJson('/api/v1/vendor/wallet')
+            ->assertOk()
+            ->assertJsonPath('data.payout_request_window_open', false)
+            ->assertJsonPath('data.payout_request_window_label', 'Sunday');
+
+        $this->expectException(DomainException::class);
+        $this->expectExceptionMessage('Payout requests are only accepted on Sunday (Nepal time).');
+
+        app(WalletService::class)->requestAvailableBalancePayout($this->vendor, 100, null, $this->vendorUser);
+    }
+
+    public function test_payout_schedule_windows_follow_nepal_calendar_dates(): void
+    {
+        $scheduleDates = [
+            ['weekly', '2026-11-29 12:00:00', true],
+            ['weekly', '2026-11-28 12:00:00', false],
+            ['biweekly', '2026-12-15 12:00:00', true],
+            ['biweekly', '2026-12-14 12:00:00', false],
+            ['monthly', '2026-12-01 12:00:00', true],
+            ['monthly', '2026-12-02 12:00:00', false],
+            ['daily', '2026-12-02 12:00:00', true],
+            ['manual', '2026-12-02 12:00:00', true],
+        ];
+
+        foreach ($scheduleDates as [$frequency, $date, $expected]) {
+            $this->assertSame(
+                $expected,
+                PayoutSchedule::allowsRequest($frequency, Carbon::parse($date, 'Asia/Kathmandu')),
+                "{$frequency} schedule on {$date}"
+            );
+        }
     }
 
     public function test_vendor_analytics_excludes_rejected_orders_from_projected_earnings(): void

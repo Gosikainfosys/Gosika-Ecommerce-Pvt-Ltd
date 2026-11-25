@@ -428,6 +428,7 @@ class WalletService
     public function requestPayout(Settlement $settlement, ?int $bankAccountId, User $user): PayoutRequest
     {
         $this->assertPayoutsEnabled();
+        $this->assertPayoutScheduleOpen();
 
         if (! $this->isRequestable($settlement)) {
             throw new DomainException('Only eligible settlements with a completed cycle can be requested for payout.', 422);
@@ -505,6 +506,7 @@ class WalletService
         User $user
     ): PayoutRequest {
         $this->assertPayoutsEnabled();
+        $this->assertPayoutScheduleOpen();
 
         $amount = round($requestedAmount, 2);
         $minimumAmount = (float) Setting::get('settlement.min_payout_amount', 1000);
@@ -568,6 +570,14 @@ class WalletService
         $enabled = Setting::get('commission.vendor_payouts_enabled', true);
         if (! in_array($enabled, [true, 1, '1', 'true'], true)) {
             throw new DomainException('Vendor payouts are currently disabled.', 422);
+        }
+    }
+
+    protected function assertPayoutScheduleOpen(): void
+    {
+        $frequency = (string) Setting::get('settlement.payout_frequency', 'weekly');
+        if (! PayoutSchedule::allowsRequest($frequency)) {
+            throw new DomainException(PayoutSchedule::closedMessage($frequency), 422);
         }
     }
 
