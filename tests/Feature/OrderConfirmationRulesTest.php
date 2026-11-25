@@ -1542,6 +1542,72 @@ class OrderConfirmationRulesTest extends TestCase
             ->assertJsonPath('data.net_earnings', '1800.00');
     }
 
+    public function test_admin_can_manually_create_a_product_for_an_approved_vendor_store(): void
+    {
+        $response = $this->actingAs($this->adminUser)
+            ->postJson('/api/v1/admin/products', [
+                'vendor_id' => $this->vendor->uuid,
+                'store_id' => $this->store->uuid,
+                'name' => 'Admin-created product',
+                'price' => 750,
+                'quantity' => 6,
+                'status' => 'published',
+            ])
+            ->assertCreated()
+            ->assertJsonPath('data.name', 'Admin-created product')
+            ->assertJsonPath('data.status', 'published');
+
+        $this->assertDatabaseHas('products', [
+            'uuid' => $response->json('data.id'),
+            'vendor_id' => $this->vendor->id,
+            'store_id' => $this->store->id,
+            'quantity' => 6,
+            'price' => 750,
+        ]);
+    }
+
+    public function test_admin_can_manually_create_an_order_for_a_customer(): void
+    {
+        $customer = User::create([
+            'uuid' => (string) Str::uuid(),
+            'first_name' => 'Manual',
+            'last_name' => 'Order Customer',
+            'email' => 'manual_order_'.Str::random(8).'@gosika.com',
+            'phone' => '9800000020',
+            'password' => bcrypt('password'),
+            'status' => UserStatus::ACTIVE,
+        ]);
+        $customer->assignRole(Roles::CUSTOMER);
+
+        $response = $this->actingAs($this->adminUser)
+            ->postJson('/api/v1/admin/orders', [
+                'customer_id' => $customer->uuid,
+                'payment_method' => 'cod',
+                'payment_status' => 'pending',
+                'shipping_address' => [
+                    'full_name' => 'Manual Order Customer',
+                    'phone' => '9800000020',
+                    'address_line_1' => '1 Market Road',
+                ],
+                'items' => [[
+                    'product_id' => $this->product->uuid,
+                    'quantity' => 1,
+                    'unit_price' => 1200,
+                ]],
+                'delivery_charge' => 80,
+            ])
+            ->assertCreated()
+            ->assertJsonPath('data.customer.id', $customer->uuid)
+            ->assertJsonPath('data.grand_total', '1280.00');
+
+        $this->assertDatabaseHas('orders', [
+            'uuid' => $response->json('data.id'),
+            'user_id' => $customer->id,
+            'status' => OrderStatus::CONFIRMED->value,
+            'grand_total' => 1280,
+        ]);
+    }
+
     public function test_matured_earnings_require_paid_and_delivered_order_status(): void
     {
         Setting::set('return.window_days', 7, 'return', 'integer', true);

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
-  Package, Check, X, Eye, RefreshCw, Download,
+  Package, Check, X, Eye, RefreshCw, Download, Plus,
   CheckCircle2, AlertTriangle, ShieldAlert, ArrowRight
 } from 'lucide-react'
 import api from '../../api/client'
@@ -17,7 +17,7 @@ import { useAuth } from '../../context/AuthContext'
 import { exportReportFromRows, companyFromBranding, personLabel } from '../../utils/reportExport'
 
 export default function AdminProducts({ initialStatus = 'all', title, description }) {
-  const { user } = useAuth()
+  const { user, hasPermission } = useAuth()
   const branding = useBranding()
   const toast = useToast()
   const navigate = useNavigate()
@@ -346,6 +346,16 @@ export default function AdminProducts({ initialStatus = 'all', title, descriptio
         ]}
         actions={
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {(hasPermission('products.create') || hasPermission('products.approve')) && (
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() => navigate('/admin/marketplace/products/new')}
+                style={{ display: 'flex', alignItems: 'center', gap: 6, borderRadius: 8 }}
+              >
+                <Plus size={14} /> Add Product
+              </button>
+            )}
             <button
               type="button"
               className="btn btn-outline btn-sm"

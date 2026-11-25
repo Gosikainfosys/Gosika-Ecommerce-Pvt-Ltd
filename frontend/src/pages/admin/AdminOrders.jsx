@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   ShoppingBag, Search, Eye, Download, Clock,
-  RefreshCw, CheckCircle2, XCircle, Truck, Store,
+  RefreshCw, CheckCircle2, XCircle, Truck, Store, Plus,
   CreditCard, ArrowRight, Trash2
 } from 'lucide-react'
 import api from '../../api/client'
@@ -20,7 +20,7 @@ import { useToast } from '../../context/ToastContext'
 export default function AdminOrders() {
   const toast = useToast()
   const navigate = useNavigate()
-  const { user } = useAuth()
+  const { user, hasPermission } = useAuth()
   const branding = useBranding()
 
   const [orders, setOrders] = useState([])
@@ -326,6 +326,16 @@ export default function AdminOrders() {
         ]}
         actions={
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {hasPermission('orders.manage') && (
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() => navigate('/admin/orders/new')}
+                style={{ display: 'flex', alignItems: 'center', gap: 6, borderRadius: 8 }}
+              >
+                <Plus size={14} /> Create Order
+              </button>
+            )}
             <button
               type="button"
               className="btn btn-outline btn-sm"

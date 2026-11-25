@@ -40,6 +40,7 @@ Route::prefix('v1/vendor')->middleware(['auth:sanctum', 'ensure:vendor'])->group
 
 Route::prefix('v1/admin')->middleware(['auth:sanctum', 'ensure:admin'])->group(function () {
     Route::get('products', [AdminCatalogController::class, 'products']);
+    Route::post('products', [AdminCatalogController::class, 'storeProduct']);
     Route::get('products/{product}', [AdminCatalogController::class, 'showProduct']);
     Route::get('products/{product}/delivered-orders', [AdminCatalogController::class, 'deliveredOrders']);
     Route::post('products/{product}/approve', [AdminCatalogController::class, 'approveProduct']);

@@ -32,6 +32,15 @@ class CatalogService
         $vendor = $this->vendorFor($user);
         $store = $this->storeForProductListing($vendor);
 
+        return $this->createProductForStore($vendor, $store, $dto);
+    }
+
+    public function createProductForStore(Vendor $vendor, Store $store, ProductDTO $dto): Product
+    {
+        if ((int) $store->vendor_id !== (int) $vendor->id) {
+            throw new DomainException('The selected store does not belong to this vendor.', 422);
+        }
+
         return DB::transaction(function () use ($vendor, $store, $dto) {
             $categoryId = $this->resolveId(Category::class, $dto->category_id);
             $taxRate = $dto->tax_rate ?? (Category::query()->find($categoryId)?->tax_rate ?? 0);

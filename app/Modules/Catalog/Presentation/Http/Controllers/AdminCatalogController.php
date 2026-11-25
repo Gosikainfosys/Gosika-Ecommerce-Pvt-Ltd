@@ -2,6 +2,7 @@
 
 namespace App\Modules\Catalog\Presentation\Http\Controllers;
 
+use App\Modules\Catalog\Application\DataTransferObjects\ProductDTO;
 use App\Modules\Catalog\Application\Services\CatalogService;
 use App\Modules\Catalog\Infrastructure\Models\Brand;
 use App\Modules\Catalog\Infrastructure\Models\BrandRequest;
@@ -16,15 +17,19 @@ use App\Modules\Catalog\Presentation\Resources\ProductResource;
 use App\Modules\Order\Infrastructure\Models\OrderItem;
 use App\Modules\Shared\Domain\Enums\DeliveryStatus;
 use App\Modules\Shared\Domain\Enums\ProductStatus;
+use App\Modules\Shared\Domain\Enums\StoreStatus;
+use App\Modules\Shared\Domain\Enums\VendorStatus;
 use App\Modules\Shared\Domain\Exceptions\DomainException;
 use App\Modules\Shared\Presentation\Http\Filters\ListingDateRange;
 use App\Modules\Shared\Presentation\Http\Response;
+use App\Modules\Vendor\Infrastructure\Models\Store;
 use App\Modules\Vendor\Infrastructure\Models\Vendor;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class AdminCatalogController extends Controller
 {
@@ -32,7 +37,8 @@ class AdminCatalogController extends Controller
     {
         $this->middleware('auth:sanctum');
         $this->middleware('admin');
-        $this->middleware('permission:products.approve|products.view|categories.manage|brands.manage');
+        $this->middleware('permission:products.approve|products.view|categories.manage|brands.manage')->except('storeProduct');
+        $this->middleware('permission:products.create|products.approve')->only('storeProduct');
     }
 
     public function products(Request $request): JsonResponse
@@ -80,6 +86,62 @@ class AdminCatalogController extends Controller
             'total' => $products->total(),
             'last_page' => $products->lastPage(),
         ]);
+    }
+
+    public function storeProduct(Request $request): JsonResponse
+    {
+        $vendorId = Vendor::query()->where('uuid', $request->input('vendor_id'))->value('id');
+        $data = $request->validate([
+            'vendor_id' => ['required', 'string', 'exists:vendors,uuid'],
+            'store_id' => ['required', 'string', 'exists:stores,uuid'],
+            'name' => ['required', 'string', 'max:200'],
+            'description' => ['nullable', 'string'],
+            'category_id' => ['nullable', 'string', 'exists:categories,uuid'],
+            'sku' => [
+                'nullable',
+                'string',
+                'max:80',
+                Rule::unique('products', 'sku')->where(fn ($query) => $query->where('vendor_id', $vendorId)),
+            ],
+            'price' => ['required', 'numeric', 'min:0'],
+            'compare_at_price' => ['nullable', 'numeric', 'min:0'],
+            'quantity' => ['required', 'integer', 'min:0'],
+            'low_stock_threshold' => ['nullable', 'integer', 'min:0'],
+            'tax_rate' => ['nullable', 'integer', 'min:0', 'max:100'],
+            'status' => ['nullable', Rule::enum(ProductStatus::class)],
+            'image_url' => ['nullable', 'url', 'max:2048'],
+        ]);
+
+        $vendor = Vendor::query()->where('uuid', $data['vendor_id'])->firstOrFail();
+        if ($vendor->status !== VendorStatus::APPROVED) {
+            throw new DomainException('Products can only be added to an approved vendor.', 422);
+        }
+
+        $store = Store::query()
+            ->where('uuid', $data['store_id'])
+            ->where('vendor_id', $vendor->id)
+            ->first();
+
+        if (! $store || $store->status !== StoreStatus::ACTIVE) {
+            throw ValidationException::withMessages([
+                'store_id' => 'Select an active store belonging to the selected vendor.',
+            ]);
+        }
+
+        $imageUrl = $data['image_url'] ?? null;
+        unset($data['vendor_id'], $data['store_id'], $data['image_url']);
+        $data['image_urls'] = $imageUrl ? [$imageUrl] : [];
+        $data['primary_image_url'] = $imageUrl;
+        $data['status'] ??= ProductStatus::PUBLISHED->value;
+
+        $product = $this->service->createProductForStore(
+            $vendor,
+            $store,
+            ProductDTO::fromArray($data)
+        );
+        $product->load(['vendor', 'store', 'category', 'brand', 'variants', 'images', 'primaryImage']);
+
+        return Response::created(new ProductResource($product), 'Product created.');
     }
 
     public function showProduct(string $productId): JsonResponse

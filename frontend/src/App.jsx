@@ -82,10 +82,12 @@ import VendorVerification from './pages/vendor/VendorVerification'
 
 import AdminDashboard from './pages/admin/AdminDashboard'
 import AdminOrders from './pages/admin/AdminOrders'
+import AdminManualOrderForm from './pages/admin/AdminManualOrderForm'
 import AdminOrderDetail from './pages/admin/AdminOrderDetail'
 import AdminReturns from './pages/admin/AdminReturns'
 import AdminReturnDetail from './pages/admin/AdminReturnDetail'
 import AdminProducts from './pages/admin/AdminProducts'
+import AdminProductForm from './pages/admin/AdminProductForm'
 import AdminProductDetail from './pages/admin/AdminProductDetail'
 import AdminKyc from './pages/admin/AdminKyc'
 import AdminStores from './pages/admin/AdminStores'
@@ -394,6 +396,7 @@ export default function App() {
         <Route path="marketplace/kyc" element={<PermissionGuard path="/admin/marketplace/kyc"><AdminKyc /></PermissionGuard>} />
         <Route path="marketplace/stores" element={<PermissionGuard path="/admin/marketplace/stores"><AdminStores /></PermissionGuard>} />
         <Route path="marketplace/products" element={<PermissionGuard path="/admin/marketplace/products"><AdminProducts /></PermissionGuard>} />
+        <Route path="marketplace/products/new" element={<PermissionGuard path="/admin/marketplace/products"><AdminProductForm /></PermissionGuard>} />
         <Route path="marketplace/products/:id" element={<PermissionGuard path="/admin/marketplace/products"><AdminProductDetail /></PermissionGuard>} />
         <Route path="marketplace/categories" element={<PermissionGuard path="/admin/marketplace/categories"><AdminCategories /></PermissionGuard>} />
         <Route path="marketplace/categories/new" element={<PermissionGuard path="/admin/marketplace/categories"><AdminCategoryForm /></PermissionGuard>} />
@@ -410,6 +413,7 @@ export default function App() {
 
         {/* Orders & Service */}
         <Route path="orders" element={<PermissionGuard path="/admin/orders"><AdminOrders /></PermissionGuard>} />
+        <Route path="orders/new" element={<PermissionGuard path="/admin/orders"><AdminManualOrderForm /></PermissionGuard>} />
         <Route path="orders/:id" element={<PermissionGuard path="/admin/orders"><AdminOrderDetail /></PermissionGuard>} />
         <Route path="orders/returns" element={<PermissionGuard path="/admin/orders/returns"><AdminReturns /></PermissionGuard>} />
         <Route path="orders/returns/:id" element={<PermissionGuard path="/admin/orders/returns"><AdminReturnDetail /></PermissionGuard>} />
