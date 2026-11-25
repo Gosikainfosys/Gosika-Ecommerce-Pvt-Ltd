@@ -281,7 +281,7 @@ export default function AdminPayouts() {
           <div style={{ fontSize: 11, color: '#b45309' }}>Held: {money(item.held_settlement_total)}</div>
           <div style={{ fontSize: 11, color: '#15803d' }}>Paid: {money(item.paid_settlement_total)}</div>
           <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-            {item.payout_requests_count} payout request(s) · {item.settlement_cycle_days}-day cycle
+            {item.payout_requests_count} payout request(s) · {item.earnings_maturity_days}-day holding period
           </div>
         </div>
       ) : (

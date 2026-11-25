@@ -151,6 +151,7 @@ class AdminWalletController extends Controller
             'search' => ['nullable', 'string', 'max:120'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
         ]);
+        $this->service->releaseMaturedVendorEarnings();
         $search = trim((string) ($filters['search'] ?? ''));
 
         $vendors = Vendor::query()
@@ -208,8 +209,8 @@ class AdminWalletController extends Controller
             ->paginate(min(max((int) ($filters['per_page'] ?? 50), 1), 100))
             ->withQueryString();
 
-        $returnWindowDays = max(1, (int) Setting::get('return.window_days', 7));
-        $profiles = $vendors->getCollection()->map(function (Vendor $vendor) use ($returnWindowDays) {
+        $holdingDays = max(0, (int) Setting::get('settlement.waiting_days', 7));
+        $profiles = $vendors->getCollection()->map(function (Vendor $vendor) use ($holdingDays) {
             $settlementCycleDays = max(1, (int) ($vendor->meta['settlement_cycle_days'] ?? 14));
             $wallet = $vendor->wallet;
 
@@ -240,7 +241,7 @@ class AdminWalletController extends Controller
                     'is_verified' => (bool) $account->is_verified,
                 ])->values(),
                 'settlement_cycle_days' => $settlementCycleDays,
-                'earnings_maturity_days' => max($returnWindowDays, $settlementCycleDays),
+                'earnings_maturity_days' => $holdingDays,
                 'settlements_count' => (int) $vendor->settlements_count,
                 'open_settlement_total' => number_format((float) $vendor->open_settlement_total, 2, '.', ''),
                 'held_settlement_total' => number_format((float) $vendor->held_settlement_total, 2, '.', ''),

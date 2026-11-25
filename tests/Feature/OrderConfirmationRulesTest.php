@@ -1939,9 +1939,11 @@ class OrderConfirmationRulesTest extends TestCase
             ->count());
     }
 
-    public function test_refund_credits_delivered_order_earnings_before_deducting_refund(): void
+    public function test_payout_page_releases_the_non_refunded_balance_after_a_completed_refund(): void
     {
         [$order, $vendorOrder, $customer] = $this->createOrder(OrderStatus::DELIVERED, isCod: false);
+        Setting::set('settlement.waiting_days', 0, 'settlement', 'integer', true);
+        $order->update(['completed_at' => now()->subDay()]);
         $vendorOrder->update([
             'status' => OrderStatus::DELIVERED,
             'delivery_status' => DeliveryStatus::DELIVERED,
@@ -1991,6 +1993,14 @@ class OrderConfirmationRulesTest extends TestCase
         $this->assertSame('debit_refund', $transactions[1]->transaction_type->value);
         $this->assertSame('1800.00', $transactions[1]->amount);
         $this->assertSame('187.16', $transactions[1]->balance_after);
+
+        $this->actingAs($this->adminUser)
+            ->getJson('/api/v1/admin/wallet/payout-profiles?per_page=100')
+            ->assertOk()
+            ->assertJsonPath('data.0.wallet.balance', '187.16')
+            ->assertJsonPath('data.0.wallet.available_balance', '187.16')
+            ->assertJsonPath('data.0.wallet.pending_balance', '0.00')
+            ->assertJsonPath('data.0.earnings_maturity_days', 0);
     }
 
     public function test_refund_debit_records_the_exact_refund_above_vendor_payable(): void
