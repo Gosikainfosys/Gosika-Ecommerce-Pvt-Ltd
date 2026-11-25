@@ -87,13 +87,14 @@ function RefundPanel({ returnItem, onRefunded, onApprove, onReject }) {
     : 0
   const paidAmount = Number(returnItem?.paid_amount ?? fallbackPaidAmount)
   const fallbackFullRefundAmount = Math.max(0, paidAmount - reservedRefunds(returnItem?.refunds))
-  const remaining = Math.max(0, Number(returnItem?.full_refund_amount ?? fallbackFullRefundAmount))
-  const previouslyRefundedOrReserved = Math.max(0, paidAmount - remaining)
+  const orderRemaining = Math.max(0, Number(returnItem?.full_refund_amount ?? fallbackFullRefundAmount))
   const refunds = returnItem?.refunds || []
 
   /* create-refund form */
   const [type, setType] = useState('full')
   const [partialAmt, setPartialAmt] = useState('')
+  const [includeTax, setIncludeTax] = useState(false)
+  const [includeDelivery, setIncludeDelivery] = useState(false)
   const [notes, setNotes] = useState('')
   const [creating, setCreating] = useState(false)
 
@@ -102,23 +103,32 @@ function RefundPanel({ returnItem, onRefunded, onApprove, onReject }) {
   const [savingId, setSavingId] = useState(null)
   const [processingEsewaId, setProcessingEsewaId] = useState(null)
 
-  const effectiveAmt = type === 'full' ? remaining : Number(partialAmt || 0)
+  const orderSubtotal = Number(order?.subtotal || 0)
+  const chargeShare = orderSubtotal > 0 ? Math.min(1, maxAmt / orderSubtotal) : 0
+  const taxShare = Math.round(Number(order?.tax || 0) * chargeShare * 100) / 100
+  const deliveryShare = Math.round(Number(order?.delivery_charge || 0) * chargeShare * 100) / 100
+  const selectedCharges = (includeTax ? taxShare : 0) + (includeDelivery ? deliveryShare : 0)
+  const fullItemRefundAmount = Math.min(orderRemaining, Math.max(0, partialRemaining + selectedCharges))
+  const effectiveAmt = type === 'full' ? fullItemRefundAmount : Number(partialAmt || 0)
   const invalid = type === 'full'
-    ? remaining <= 0
+    ? fullItemRefundAmount <= 0
     : effectiveAmt <= 0 || effectiveAmt > partialRemaining + 0.001
 
   const canRefund = (!returnItem?.request_type || returnItem?.request_type === 'return_refund')
     && ['collected', 'inspected', 'approved'].includes(returnItem?.status)
-    && remaining > 0.001
+    && fullItemRefundAmount > 0.001
 
   const createRefund = async () => {
     if (invalid) return
     setCreating(true)
     try {
+      const refundsEntireOrder = type === 'full' && effectiveAmt >= orderRemaining - 0.001
       await api.post(`/admin/orders/returns/${returnItem.uuid || returnItem.id}/refund`, {
         method: returnItem?.order?.payment_method || 'esewa',
         amount: effectiveAmt,
-        refund_type: type,
+        refund_type: refundsEntireOrder ? 'full' : 'partial',
+        include_tax: type === 'full' && includeTax,
+        include_delivery: type === 'full' && includeDelivery,
         notes: notes || null,
       })
       toast.success(`${type === 'full' ? 'Full' : 'Partial'} refund of ${money(effectiveAmt)} created.`)
@@ -181,11 +191,11 @@ function RefundPanel({ returnItem, onRefunded, onApprove, onReject }) {
           </div>
         )}
         <div style={{ flex: 1, textAlign: 'right' }}>
-          <div style={{ fontSize: 11, color: remaining < 0.01 ? '#15803d' : '#dc2626', fontWeight: 700, textTransform: 'uppercase' }}>
-            {remaining < 0.01 ? 'Fully Refunded' : 'Remaining'}
+          <div style={{ fontSize: 11, color: fullItemRefundAmount < 0.01 ? '#15803d' : '#dc2626', fontWeight: 700, textTransform: 'uppercase' }}>
+            {fullItemRefundAmount < 0.01 ? 'Fully Refunded' : 'Refundable with options'}
           </div>
-          <div style={{ fontSize: 22, fontWeight: 900, color: remaining < 0.01 ? '#15803d' : '#dc2626' }}>
-            {money(remaining)}
+          <div style={{ fontSize: 22, fontWeight: 900, color: fullItemRefundAmount < 0.01 ? '#15803d' : '#dc2626' }}>
+            {money(fullItemRefundAmount)}
           </div>
         </div>
       </div>
@@ -200,7 +210,7 @@ function RefundPanel({ returnItem, onRefunded, onApprove, onReject }) {
           {/* Type toggle */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
             {[
-              { value: 'full', label: 'Full Refund', sub: money(remaining), icon: '↩', active: '#16a34a', light: '#f0fdf4' },
+              { value: 'full', label: 'Full Refund', sub: money(fullItemRefundAmount), icon: '↩', active: '#16a34a', light: '#f0fdf4' },
               { value: 'partial', label: 'Partial Refund', sub: 'Enter amount', icon: '↪', active: '#d97706', light: '#fffbeb' },
             ].map(opt => (
               <button
@@ -225,32 +235,34 @@ function RefundPanel({ returnItem, onRefunded, onApprove, onReject }) {
           {type === 'full' && (
             <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '12px 16px', marginBottom: 14 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: 13, color: '#15803d', fontWeight: 600 }}>Full order amount to refund</span>
-                <span style={{ fontSize: 20, fontWeight: 900, color: '#15803d' }}>{money(remaining)}</span>
+                <span style={{ fontSize: 13, color: '#15803d', fontWeight: 600 }}>Refund amount for this returned item</span>
+                <span style={{ fontSize: 20, fontWeight: 900, color: '#15803d' }}>{money(fullItemRefundAmount)}</span>
               </div>
               <div style={{ display: 'grid', gap: 5, marginTop: 10, paddingTop: 9, borderTop: '1px solid #bbf7d0', fontSize: 12, color: '#166534' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span>Items subtotal</span><strong>{money(order?.subtotal || 0)}</strong>
+                  <span>Returned item amount</span><strong>{money(partialRemaining)}</strong>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span>Delivery charge included</span><strong>{money(order?.delivery_charge || 0)}</strong>
+              </div>
+              <div style={{ display: 'grid', gap: 9, marginTop: 12, fontSize: 12, color: '#166534' }}>
+                <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, cursor: taxShare > 0 ? 'pointer' : 'not-allowed' }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <input type="checkbox" checked={includeTax} disabled={taxShare <= 0 || creating} onChange={event => setIncludeTax(event.target.checked)} />
+                    Include allocated tax share
+                  </span>
+                  <strong>{money(taxShare)}</strong>
+                </label>
+                <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, cursor: deliveryShare > 0 ? 'pointer' : 'not-allowed' }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <input type="checkbox" checked={includeDelivery} disabled={deliveryShare <= 0 || creating} onChange={event => setIncludeDelivery(event.target.checked)} />
+                    Include allocated delivery charge
+                  </span>
+                  <strong>{money(deliveryShare)}</strong>
+                </label>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, borderTop: '1px solid #bbf7d0', paddingTop: 8 }}>
+                  <span>Refund now</span><strong>{money(fullItemRefundAmount)}</strong>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span>Tax included</span><strong>{money(order?.tax || 0)}</strong>
-                </div>
-                {Number(order?.discount || 0) > 0 && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span>Discount</span><strong>−{money(order.discount)}</strong>
-                  </div>
-                )}
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}>
-                  <span>Total paid amount</span><strong>{money(paidAmount)}</strong>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span>Previously refunded or reserved</span><strong>−{money(previouslyRefundedOrReserved)}</strong>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800 }}>
-                  <span>Refund now</span><strong>{money(remaining)}</strong>
+                <div style={{ fontSize: 11, lineHeight: 1.5, color: '#4b755f' }}>
+                  Only this returned item is included by default. Tax and delivery shares are prorated by its portion of the order subtotal; select either option to add it.
                 </div>
               </div>
             </div>
@@ -304,7 +316,7 @@ function RefundPanel({ returnItem, onRefunded, onApprove, onReject }) {
           <div style={{ fontSize: 12, color: 'var(--muted)', background: '#f8fafc', padding: '8px 12px', borderRadius: 8, lineHeight: 1.6, borderLeft: `3px solid ${isEsewa ? '#60bb46' : 'var(--border)'}`, marginBottom: 14 }}>
             {isEsewa
               ? <>Creates a <strong>{type === 'full' ? 'Full' : 'Partial'}</strong> refund record of <strong>{money(effectiveAmt)}</strong>. Use <strong style={{ color: '#16a34a' }}>⚡ Process via eSewa</strong> below on the created record to trigger the payout instantly.</>
-              : <>Creates a <strong>{type === 'full' ? 'Full' : 'Partial'}</strong> refund of <strong>{money(effectiveAmt)}</strong> via <strong>{(order?.payment_method || 'gateway').toUpperCase()}</strong>{type === 'full' ? ', including the order total, delivery, and tax' : ''}. Finalize it in the refund records below.</>
+              : <>Creates a <strong>{type === 'full' ? 'Full' : 'Partial'}</strong> refund of <strong>{money(effectiveAmt)}</strong> via <strong>{(order?.payment_method || 'gateway').toUpperCase()}</strong>. Finalize it in the refund records below.</>
             }
           </div>
 
@@ -315,7 +327,7 @@ function RefundPanel({ returnItem, onRefunded, onApprove, onReject }) {
             onClick={createRefund}
             style={{ width: '100%', fontWeight: 800, fontSize: 14, background: type === 'full' ? '#16a34a' : '#d97706', color: '#fff', border: 'none', opacity: invalid ? 0.5 : 1, borderRadius: 10, padding: '10px 0' }}
           >
-            {creating ? 'Creating…' : type === 'full' ? `↩ Create Full Refund · ${money(remaining)}` : `↪ Create Partial Refund · ${money(effectiveAmt)}`}
+            {creating ? 'Creating…' : type === 'full' ? `↩ Create Full Refund · ${money(fullItemRefundAmount)}` : `↪ Create Partial Refund · ${money(effectiveAmt)}`}
           </button>
         </div>
       )}

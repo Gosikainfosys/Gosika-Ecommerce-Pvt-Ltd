@@ -333,6 +333,8 @@ class AdminOrderController extends Controller
             'method' => ['required', Rule::in(['esewa', 'khalti', 'fonepay', 'cod'])],
             'amount' => ['nullable', 'numeric', 'min:0.01'],
             'refund_type' => ['nullable', Rule::in(['full', 'partial'])],
+            'include_tax' => ['sometimes', 'boolean'],
+            'include_delivery' => ['sometimes', 'boolean'],
             'notes' => ['nullable', 'string', 'max:1000'],
         ]);
 
@@ -382,6 +384,11 @@ class AdminOrderController extends Controller
         }
 
         $refundType = $request->input('refund_type');
+        $refundComponents = $this->returnRefundComponents(
+            $return,
+            $request->boolean('include_tax'),
+            $request->boolean('include_delivery')
+        );
         $amount = $refundType === 'full'
             ? $this->refundService->remainingRefundableAmount($payment)
             : round((float) ($request->input('amount') ?? $return->refund_amount), 2);
@@ -416,7 +423,8 @@ class AdminOrderController extends Controller
                 $request->input('notes') ?? "Refund for return {$return->return_number}",
                 $gateway,
                 $return,
-                $refundType
+                $refundType,
+                $refundComponents
             );
         } catch (DomainException $e) {
             return Response::error($e->getMessage(), $e->getErrors(), $e->getStatusCode());
@@ -440,6 +448,22 @@ class AdminOrderController extends Controller
             (int) $payment->vendor_order_id === (int) $return->vendor_order_id
             && $payment->isPaid()
         ) ?? $payments->first(fn (Payment $payment) => $payment->isPaid());
+    }
+
+    private function returnRefundComponents(ReturnRequest $return, bool $includeTax, bool $includeDelivery): array
+    {
+        $item = $return->orderItem;
+        $quantity = max(1, (int) $item?->quantity);
+        $returnedQuantity = min($quantity, max(1, (int) $return->quantity));
+        $itemAmount = round(((float) ($item?->line_total ?? 0) / $quantity) * $returnedQuantity, 2);
+        $subtotal = (float) ($return->order?->subtotal ?? 0);
+        $share = $subtotal > 0 ? min(1, $itemAmount / $subtotal) : 0;
+
+        return [
+            'item_amount' => $itemAmount,
+            'tax_amount' => $includeTax ? round((float) ($return->order?->tax ?? 0) * $share, 2) : 0,
+            'delivery_amount' => $includeDelivery ? round((float) ($return->order?->delivery_charge ?? 0) * $share, 2) : 0,
+        ];
     }
 
     // ─── Admin: Dispatch exchange ──────────────────────────────────────────

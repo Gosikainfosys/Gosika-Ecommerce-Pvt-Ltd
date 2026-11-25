@@ -43,10 +43,11 @@ class RefundService
         ?string $reason,
         ?array $gateway = null,
         ?ReturnRequest $returnRequest = null,
-        ?string $refundType = null
+        ?string $refundType = null,
+        ?array $refundComponents = null
     ): Refund
     {
-        return DB::transaction(function () use ($payment, $actor, $amount, $reason, $gateway, $returnRequest, $refundType) {
+        return DB::transaction(function () use ($payment, $actor, $amount, $reason, $gateway, $returnRequest, $refundType, $refundComponents) {
             // Lock the payment row so concurrent refund creations cannot both pass
             // the outstanding-sum cap check and over-refund the payment.
             $payment = Payment::query()->whereKey($payment->getKey())->lockForUpdate()->firstOrFail();
@@ -91,6 +92,21 @@ class RefundService
                 }
 
                 if ($refundType !== 'full') {
+                    $selectedCharges = round(
+                        max(0, (float) ($refundComponents['tax_amount'] ?? 0))
+                        + max(0, (float) ($refundComponents['delivery_amount'] ?? 0)),
+                        2
+                    );
+                    $order = Order::query()->find($returnRequest->order_id);
+                    $orderSubtotal = (float) ($order?->subtotal ?? 0);
+                    $itemShare = $orderSubtotal > 0
+                        ? min(1, (float) $orderItem->line_total / $orderSubtotal)
+                        : 0;
+                    $itemChargeLimit = round(
+                        ((float) ($order?->tax ?? 0) + (float) ($order?->delivery_charge ?? 0)) * $itemShare,
+                        2
+                    );
+                    $itemRefundLimit = round((float) $orderItem->line_total + $itemChargeLimit, 2);
                     $itemRefunds = Refund::query()
                         ->where('order_item_id', $returnRequest->order_item_id)
                         ->whereIn('status', [
@@ -101,9 +117,9 @@ class RefundService
                         ])
                         ->sum('amount');
 
-                    if (round((float) $itemRefunds, 2) + round($amount, 2) > round((float) $orderItem->line_total, 2)
-                        || round((float) $returnRefunds, 2) + round($amount, 2) > $returnLimit) {
-                        throw new DomainException('Partial refund amount exceeds the refundable value for this returned item.', 422);
+                    if (round((float) $itemRefunds, 2) + round($amount, 2) > $itemRefundLimit
+                        || round((float) $returnRefunds, 2) + round($amount, 2) > round($returnLimit + $selectedCharges, 2)) {
+                        throw new DomainException('Partial refund amount exceeds the returned item value and selected tax or delivery share.', 422);
                     }
                 }
             }
@@ -136,6 +152,9 @@ class RefundService
             $providerResponse = $gateway['provider_response'] ?? [];
             if ($returnRequest && $refundType !== null) {
                 $providerResponse['refund_type'] = $refundType;
+            }
+            if ($returnRequest && $refundComponents !== null) {
+                $providerResponse['return_refund_limits'] = $refundComponents;
             }
             if ($providerResponse !== []) {
                 $refund->provider_response = $providerResponse;

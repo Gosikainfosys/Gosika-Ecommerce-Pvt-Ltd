@@ -1308,6 +1308,47 @@ class OrderConfirmationRulesTest extends TestCase
             ->assertJsonPath('data.full_refund_amount', '0.00');
     }
 
+    public function test_admin_can_select_prorated_tax_and_delivery_for_a_return_refund(): void
+    {
+        [$order, $vendorOrder, $customer] = $this->createOrder(OrderStatus::DELIVERED, isCod: true);
+        $order->update([
+            'tax' => 100,
+            'grand_total' => 2600,
+        ]);
+        $item = $order->items()->firstOrFail();
+        $return = ReturnRequest::create([
+            'return_number' => 'RTN-'.strtoupper(Str::random(8)),
+            'user_id' => $customer->id,
+            'order_id' => $order->id,
+            'vendor_order_id' => $vendorOrder->id,
+            'order_item_id' => $item->id,
+            'store_id' => $this->store->id,
+            'vendor_id' => $this->vendor->id,
+            'reason_type' => 'damaged',
+            'reason' => 'Item arrived damaged',
+            'quantity' => 1,
+            'refund_amount' => 1200,
+            'status' => ReturnStatus::APPROVED,
+        ]);
+
+        $this->actingAs($this->adminUser)
+            ->postJson("/api/v1/admin/orders/returns/{$return->uuid}/refund", [
+                'method' => 'cod',
+                'amount' => '1300.00',
+                'refund_type' => 'partial',
+                'include_tax' => true,
+                'include_delivery' => true,
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.amount', '1300.00')
+            ->assertJsonPath('data.refund_type', 'partial');
+
+        $refund = Refund::query()->where('return_request_id', $return->id)->firstOrFail();
+        $this->assertSame(1200.0, (float) data_get($refund->provider_response, 'return_refund_limits.item_amount'));
+        $this->assertSame(50.0, (float) data_get($refund->provider_response, 'return_refund_limits.tax_amount'));
+        $this->assertSame(50.0, (float) data_get($refund->provider_response, 'return_refund_limits.delivery_amount'));
+    }
+
     public function test_admin_can_start_an_approved_exchange_from_order_detail(): void
     {
         [$order, $vendorOrder, $customer] = $this->createOrder(OrderStatus::DELIVERED);
