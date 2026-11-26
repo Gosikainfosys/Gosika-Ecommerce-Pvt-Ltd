@@ -2,6 +2,12 @@
 # Run this on the production server after git pull
 set -e
 
+echo "==> Installing frontend dependencies..."
+npm --prefix frontend ci
+
+echo "==> Building frontend assets..."
+npm --prefix frontend run build
+
 echo "==> Clearing Laravel caches..."
 php artisan route:clear
 php artisan config:clear
