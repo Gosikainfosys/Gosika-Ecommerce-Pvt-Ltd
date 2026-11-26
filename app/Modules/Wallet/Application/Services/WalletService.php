@@ -26,9 +26,12 @@ use App\Modules\Wallet\Infrastructure\Models\Settlement;
 use App\Modules\Wallet\Infrastructure\Models\VendorWallet;
 use App\Modules\Wallet\Infrastructure\Models\WalletTransaction;
 use App\Modules\Marketing\Application\Services\NotificationDispatcher;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Throwable;
 
 class WalletService
 {
@@ -469,89 +472,105 @@ class WalletService
         });
     }
 
-    public function distributeSettlement(Settlement $settlement, ?User $user = null): Settlement
-    {
-        return DB::transaction(function () use ($settlement, $user) {
-            $settlement = Settlement::query()
-                ->whereKey($settlement->getKey())
-                ->lockForUpdate()
-                ->firstOrFail();
-            $status = $settlement->status->value;
-            $noticeEvent = 'distributed';
+    public function distributeSettlement(
+        Settlement $settlement,
+        ?User $user = null,
+        ?string $providerReference = null,
+        ?string $notes = null,
+        array $proofFiles = []
+    ): Settlement {
+        $storedProofPaths = [];
 
-            if (! in_array($status, [SettlementStatus::ELIGIBLE->value, SettlementStatus::PROCESSING->value], true)) {
-                throw new DomainException('Only eligible or processing settlements can be distributed.', 422);
-            }
+        try {
+            return DB::transaction(function () use ($settlement, $user, $providerReference, $notes, $proofFiles, &$storedProofPaths) {
+                $settlement = Settlement::query()
+                    ->whereKey($settlement->getKey())
+                    ->lockForUpdate()
+                    ->firstOrFail();
+                $status = $settlement->status->value;
+                $noticeEvent = 'distributed';
 
-            if ($status === SettlementStatus::ELIGIBLE->value) {
-                $hasOpenPayout = $settlement->payoutRequests()
-                    ->whereIn('status', [
-                        PayoutStatus::PENDING->value,
-                        PayoutStatus::APPROVED->value,
-                        PayoutStatus::PROCESSING->value,
-                    ])
-                    ->exists();
-
-                if ($hasOpenPayout) {
-                    throw new DomainException('Settlement has an active payout request. Approve and distribute it via the payout, or reject the payout first.', 422);
+                if (! in_array($status, [SettlementStatus::ELIGIBLE->value, SettlementStatus::PROCESSING->value], true)) {
+                    throw new DomainException('Only eligible or processing settlements can be distributed.', 422);
                 }
 
-                $wallet = $this->lockWallet($settlement->vendor_id);
-                $amount = round((float) $settlement->net_payable, 2);
+                if ($status === SettlementStatus::ELIGIBLE->value) {
+                    $hasOpenPayout = $settlement->payoutRequests()
+                        ->whereIn('status', [
+                            PayoutStatus::PENDING->value,
+                            PayoutStatus::APPROVED->value,
+                            PayoutStatus::PROCESSING->value,
+                        ])
+                        ->exists();
 
-                $this->mutate($wallet, function (VendorWallet $wallet) use ($amount) {
-                    $wallet->pending_balance = round((float) $wallet->pending_balance - $amount, 2);
-                    $wallet->available_balance = round((float) $wallet->available_balance + $amount, 2);
-                });
+                    if ($hasOpenPayout) {
+                        throw new DomainException('Settlement has an active payout request. Approve and distribute it via the payout, or reject the payout first.', 422);
+                    }
 
-                $this->ledger($wallet, WalletTransactionType::CREDIT_SETTLEMENT, $amount, [
-                    'reference_type' => 'settlement',
-                    'reference_id' => $settlement->id,
-                    'description' => 'Distributed settlement '.$settlement->settlement_number.' to available balance',
-                ]);
-                $noticeEvent = 'released_to_wallet';
-            } else {
-                $payout = $settlement->payoutRequests()
-                    ->whereIn('status', [
-                        PayoutStatus::PENDING->value,
-                        PayoutStatus::APPROVED->value,
-                        PayoutStatus::PROCESSING->value,
-                    ])
-                    ->orderBy('id')
-                    ->first();
+                    $wallet = $this->lockWallet($settlement->vendor_id);
+                    $amount = round((float) $settlement->net_payable, 2);
 
-                if ($payout) {
+                    $this->mutate($wallet, function (VendorWallet $wallet) use ($amount) {
+                        $wallet->pending_balance = round((float) $wallet->pending_balance - $amount, 2);
+                        $wallet->available_balance = round((float) $wallet->available_balance + $amount, 2);
+                    });
+
+                    $this->ledger($wallet, WalletTransactionType::CREDIT_SETTLEMENT, $amount, [
+                        'reference_type' => 'settlement',
+                        'reference_id' => $settlement->id,
+                        'description' => 'Distributed settlement '.$settlement->settlement_number.' to available balance',
+                    ]);
+                    $noticeEvent = 'released_to_wallet';
+                } else {
+                    $payout = $settlement->payoutRequests()
+                        ->whereIn('status', [
+                            PayoutStatus::PENDING->value,
+                            PayoutStatus::APPROVED->value,
+                            PayoutStatus::PROCESSING->value,
+                        ])
+                        ->orderBy('id')
+                        ->first();
+
+                    if (! $payout) {
+                        throw new DomainException('No active payout request is available to mark as paid.', 422);
+                    }
                     if (! $user) {
                         throw new DomainException('A user is required to distribute a settlement with an active payout.', 422);
                     }
+                    $this->assertPayoutEvidenceProvided($providerReference, $proofFiles);
 
-                    $record = new PayoutRecord();
-                    $record->payout_request_id = $payout->id;
-                    $record->provider_reference = null;
-                    $record->amount = (float) $payout->amount;
-                    $record->fee = 0.00;
-                    $record->net_amount = (float) $payout->amount;
-                    $record->status = 'paid';
-                    $record->paid_at = now();
-                    $record->created_by = $user->id;
-                    $record->save();
+                    $this->createPayoutRecord(
+                        $payout,
+                        $user,
+                        $providerReference,
+                        0,
+                        $notes,
+                        $proofFiles,
+                        $storedProofPaths
+                    );
 
                     $payout->status = PayoutStatus::PAID;
                     $payout->paid_at = now();
                     $payout->updated_by = $user->id;
                     $payout->save();
                 }
+
+                $settlement->status = SettlementStatus::PAID;
+                $settlement->paid_at = now();
+                $settlement->updated_by = $user?->id;
+                $settlement->save();
+
+                $this->dispatcher->settlementNotice($settlement, $noticeEvent);
+
+                return $settlement->fresh(['vendor']);
+            });
+        } catch (Throwable $exception) {
+            if ($storedProofPaths !== []) {
+                Storage::disk('local')->delete($storedProofPaths);
             }
 
-            $settlement->status = SettlementStatus::PAID;
-            $settlement->paid_at = now();
-            $settlement->updated_by = $user?->id;
-            $settlement->save();
-
-            $this->dispatcher->settlementNotice($settlement, $noticeEvent);
-
-            return $settlement->fresh(['vendor']);
-        });
+            throw $exception;
+        }
     }
 
     public function eligibleSettlementsFor(Vendor $vendor): Collection
@@ -710,9 +729,13 @@ class WalletService
         Vendor $vendor,
         float $requestedAmount,
         int $bankAccountId,
-        User $admin
+        User $admin,
+        ?string $providerReference = null,
+        ?string $notes = null,
+        array $proofFiles = []
     ): PayoutRequest {
         $this->assertPayoutsEnabled();
+        $this->assertPayoutEvidenceProvided($providerReference, $proofFiles);
         $this->releaseMaturedVendorEarnings($vendor);
 
         $amount = round($requestedAmount, 2);
@@ -720,67 +743,77 @@ class WalletService
             throw new DomainException('Payout amount must be greater than zero.', 422);
         }
 
-        return DB::transaction(function () use ($vendor, $amount, $bankAccountId, $admin) {
-            $wallet = $this->lockWallet($vendor->id);
-            $bankAccount = BankAccount::query()
-                ->where('vendor_id', $vendor->id)
-                ->whereKey($bankAccountId)
-                ->where('is_verified', true)
-                ->lockForUpdate()
-                ->first();
+        $storedProofPaths = [];
 
-            if (! $bankAccount) {
-                throw new DomainException('Select a verified bank account belonging to this vendor.', 422);
-            }
+        try {
+            return DB::transaction(function () use ($vendor, $amount, $bankAccountId, $admin, $providerReference, $notes, $proofFiles, &$storedProofPaths) {
+                $wallet = $this->lockWallet($vendor->id);
+                $bankAccount = BankAccount::query()
+                    ->where('vendor_id', $vendor->id)
+                    ->whereKey($bankAccountId)
+                    ->where('is_verified', true)
+                    ->lockForUpdate()
+                    ->first();
 
-            if ($amount > (float) $wallet->available_balance) {
-                throw new DomainException('Payout amount exceeds the available wallet balance.', 422);
-            }
+                if (! $bankAccount) {
+                    throw new DomainException('Select a verified bank account belonging to this vendor.', 422);
+                }
 
-            $payout = new PayoutRequest();
-            $payout->payout_number = ReferenceNumber::unique('PO');
-            $payout->vendor_id = $vendor->id;
-            $payout->settlement_id = null;
-            $payout->funding_source = PayoutRequest::FUNDING_SOURCE_AVAILABLE_BALANCE;
-            $payout->wallet_id = $wallet->id;
-            $payout->bank_account_id = $bankAccount->id;
-            $payout->amount = $amount;
-            $payout->status = PayoutStatus::PAID;
-            $payout->requested_at = now();
-            $payout->approved_by = $admin->id;
-            $payout->approved_at = now();
-            $payout->paid_at = now();
-            $payout->created_by = $admin->id;
-            $payout->meta = ['initiated_by_admin' => true];
-            $payout->save();
+                if ($amount > (float) $wallet->available_balance) {
+                    throw new DomainException('Payout amount exceeds the available wallet balance.', 422);
+                }
 
-            $this->mutate($wallet, function (VendorWallet $wallet) use ($amount) {
-                $wallet->available_balance = round((float) $wallet->available_balance - $amount, 2);
-                $wallet->balance = round((float) $wallet->balance - $amount, 2);
+                $payout = new PayoutRequest();
+                $payout->payout_number = ReferenceNumber::unique('PO');
+                $payout->vendor_id = $vendor->id;
+                $payout->settlement_id = null;
+                $payout->funding_source = PayoutRequest::FUNDING_SOURCE_AVAILABLE_BALANCE;
+                $payout->wallet_id = $wallet->id;
+                $payout->bank_account_id = $bankAccount->id;
+                $payout->amount = $amount;
+                $payout->status = PayoutStatus::PAID;
+                $payout->requested_at = now();
+                $payout->approved_by = $admin->id;
+                $payout->approved_at = now();
+                $payout->paid_at = now();
+                $payout->created_by = $admin->id;
+                $payout->meta = ['initiated_by_admin' => true];
+                $payout->save();
+
+                $this->mutate($wallet, function (VendorWallet $wallet) use ($amount) {
+                    $wallet->available_balance = round((float) $wallet->available_balance - $amount, 2);
+                    $wallet->balance = round((float) $wallet->balance - $amount, 2);
+                });
+
+                $this->ledger($wallet, WalletTransactionType::DEBIT_WITHDRAWAL, $amount, [
+                    'reference_type' => 'payout_request',
+                    'reference_id' => $payout->id,
+                    'description' => 'Admin initiated payout '.$payout->payout_number.' (reserved from available balance)',
+                    'status' => 'held',
+                    'actor_user_id' => $admin->id,
+                ]);
+
+                $this->createPayoutRecord(
+                    $payout,
+                    $admin,
+                    $providerReference,
+                    0,
+                    $notes,
+                    $proofFiles,
+                    $storedProofPaths
+                );
+
+                $this->dispatcher->payoutUpdated($payout, 'paid');
+
+                return $payout->fresh(['bankAccount', 'settlement', 'records']);
             });
+        } catch (Throwable $exception) {
+            if ($storedProofPaths !== []) {
+                Storage::disk('local')->delete($storedProofPaths);
+            }
 
-            $this->ledger($wallet, WalletTransactionType::DEBIT_WITHDRAWAL, $amount, [
-                'reference_type' => 'payout_request',
-                'reference_id' => $payout->id,
-                'description' => 'Admin initiated payout '.$payout->payout_number.' (reserved from available balance)',
-                'status' => 'held',
-                'actor_user_id' => $admin->id,
-            ]);
-
-            $record = new PayoutRecord();
-            $record->payout_request_id = $payout->id;
-            $record->amount = $amount;
-            $record->fee = 0;
-            $record->net_amount = $amount;
-            $record->status = 'paid';
-            $record->paid_at = $payout->paid_at;
-            $record->created_by = $admin->id;
-            $record->save();
-
-            $this->dispatcher->payoutUpdated($payout, 'paid');
-
-            return $payout->fresh(['bankAccount', 'settlement']);
-        });
+            throw $exception;
+        }
     }
 
     protected function assertPayoutsEnabled(): void
@@ -870,37 +903,109 @@ class WalletService
         });
     }
 
-    public function markPayoutPaid(PayoutRequest $payout, User $user, ?string $providerReference = null, float $fee = 0.0): PayoutRequest
+    public function markPayoutPaid(
+        PayoutRequest $payout,
+        User $user,
+        ?string $providerReference = null,
+        float $fee = 0.0,
+        ?string $notes = null,
+        array $proofFiles = []
+    ): PayoutRequest
     {
         $this->assertStatus($payout, PayoutStatus::APPROVED, 'Only approved payouts can be marked paid.');
+        $this->assertPayoutEvidenceProvided($providerReference, $proofFiles);
 
-        return DB::transaction(function () use ($payout, $user, $providerReference, $fee) {
-            $record = new PayoutRecord();
-            $record->payout_request_id = $payout->id;
-            $record->provider_reference = $providerReference;
-            $record->amount = $payout->amount;
-            $record->fee = round($fee, 2);
-            $record->net_amount = round((float) $payout->amount - (float) $fee, 2);
-            $record->status = 'paid';
-            $record->paid_at = now();
-            $record->created_by = $user->id;
-            $record->save();
+        $storedProofPaths = [];
 
-            $payout->status = PayoutStatus::PAID;
-            $payout->paid_at = now();
-            $payout->updated_by = $user->id;
-            $payout->save();
+        try {
+            return DB::transaction(function () use ($payout, $user, $providerReference, $fee, $notes, $proofFiles, &$storedProofPaths) {
+                $this->createPayoutRecord(
+                    $payout,
+                    $user,
+                    $providerReference,
+                    $fee,
+                    $notes,
+                    $proofFiles,
+                    $storedProofPaths
+                );
 
-            if ($payout->settlement && $payout->settlement->status->value === SettlementStatus::PROCESSING->value) {
-                $payout->settlement->status = SettlementStatus::PAID;
-                $payout->settlement->paid_at = now();
-                $payout->settlement->save();
+                $payout->status = PayoutStatus::PAID;
+                $payout->paid_at = now();
+                $payout->updated_by = $user->id;
+                $payout->save();
+
+                if ($payout->settlement && $payout->settlement->status->value === SettlementStatus::PROCESSING->value) {
+                    $payout->settlement->status = SettlementStatus::PAID;
+                    $payout->settlement->paid_at = now();
+                    $payout->settlement->save();
+                }
+
+                $this->dispatcher->payoutUpdated($payout, 'paid');
+
+                return $payout->fresh(['bankAccount', 'settlement', 'records']);
+            });
+        } catch (Throwable $exception) {
+            if ($storedProofPaths !== []) {
+                Storage::disk('local')->delete($storedProofPaths);
             }
 
-            $this->dispatcher->payoutUpdated($payout, 'paid');
+            throw $exception;
+        }
+    }
 
-            return $payout->fresh(['bankAccount', 'settlement', 'records']);
-        });
+    protected function assertPayoutEvidenceProvided(?string $providerReference, array $proofFiles): void
+    {
+        if (trim((string) $providerReference) === '' && $proofFiles === []) {
+            throw new DomainException('Provide a transfer reference or upload at least one receipt or screenshot.', 422);
+        }
+    }
+
+    protected function createPayoutRecord(
+        PayoutRequest $payout,
+        User $user,
+        ?string $providerReference,
+        float $fee,
+        ?string $notes,
+        array $proofFiles,
+        array &$storedProofPaths
+    ): PayoutRecord {
+        $proofs = [];
+
+        foreach ($proofFiles as $file) {
+            if (! $file instanceof UploadedFile) {
+                throw new DomainException('A payout proof upload is invalid.', 422);
+            }
+
+            $path = $file->store('payout-proofs/'.$payout->uuid, 'local');
+            if (! $path) {
+                throw new DomainException('A payout proof could not be stored. Please try again.', 500);
+            }
+
+            $storedProofPaths[] = $path;
+            $proofs[] = [
+                'path' => $path,
+                'name' => $file->getClientOriginalName(),
+                'mime_type' => $file->getMimeType() ?? 'application/octet-stream',
+                'size' => $file->getSize(),
+            ];
+        }
+
+        $record = new PayoutRecord();
+        $record->payout_request_id = $payout->id;
+        $record->provider_reference = $providerReference;
+        $record->amount = $payout->amount;
+        $record->fee = round($fee, 2);
+        $record->net_amount = round((float) $payout->amount - (float) $fee, 2);
+        $record->status = 'paid';
+        $record->paid_at = now();
+        $record->created_by = $user->id;
+        $record->meta = array_filter([
+            'notes' => $notes !== null && trim($notes) !== '' ? trim($notes) : null,
+            'proofs' => $proofs !== [] ? $proofs : null,
+        ]);
+        $record->save();
+
+        return $record;
     }
 
     public function cancelPayout(PayoutRequest $payout, User $user, ?string $reason = null): PayoutRequest

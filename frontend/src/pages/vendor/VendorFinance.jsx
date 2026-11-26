@@ -32,6 +32,7 @@ import { useBranding } from '../../context/BrandingContext'
 import { useToast } from '../../context/ToastContext'
 import { errorMessage, formatDateTime, money } from '../../utils/format'
 import { companyFromBranding, exportReportFromRows, personLabel } from '../../utils/reportExport'
+import { downloadPayoutProof } from '../../utils/payoutProofs'
 
 const DEFAULT_MIN_PAYOUT = 1000
 const PAGE_SIZE = 25
@@ -1112,6 +1113,23 @@ export default function VendorFinance() {
                           Order total {money(row.grossAmount)} · Commission {money(row.commissionAmount)} · {row.walletStatus}
                         </div>
                       )}
+                      {row.payout?.records?.map((record) => (
+                        <div key={record.id} className="muted text-xs" style={{ marginTop: 4 }}>
+                          {record.provider_reference && <div>Transfer reference: {record.provider_reference}</div>}
+                          {record.notes && <div>{record.notes}</div>}
+                          {(record.proofs || []).map((proof) => (
+                            <button
+                              key={proof.index}
+                              type="button"
+                              className="btn btn-outline btn-xs"
+                              style={{ margin: '3px 4px 0 0' }}
+                              onClick={() => downloadPayoutProof('vendor', row.payout.id, record.id, proof, toast)}
+                            >
+                              {proof.name || 'Download payout proof'}
+                            </button>
+                          ))}
+                        </div>
+                      ))}
                     </td>
                     <td><StatusBadge status={row.status} /></td>
                     <td className="font-semibold" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>

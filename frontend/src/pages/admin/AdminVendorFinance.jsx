@@ -9,7 +9,10 @@ import {
 import api from '../../api/client'
 import PageHeader from '../../components/admin/PageHeader'
 import ConfirmDialog from '../../components/admin/ConfirmDialog'
+import PayoutProofDialog from '../../components/admin/PayoutProofDialog'
+import PayoutProofFields from '../../components/admin/PayoutProofFields'
 import { money, formatDate, formatDateTime, timeAgo, apiImage, getProductImage, handleImgError } from '../../utils/format'
+import { downloadPayoutProof } from '../../utils/payoutProofs'
 import { useToast } from '../../context/ToastContext'
 import { useBranding } from '../../context/BrandingContext'
 import { useAuth } from '../../context/AuthContext'
@@ -125,6 +128,11 @@ export default function AdminVendorFinance() {
   const [disburseAmount, setDisburseAmount] = useState('')
   const [disburseBankAccountId, setDisburseBankAccountId] = useState('')
   const [disbursing, setDisbursing] = useState(false)
+  const [disburseReference, setDisburseReference] = useState('')
+  const [disburseNotes, setDisburseNotes] = useState('')
+  const [disburseProofFiles, setDisburseProofFiles] = useState([])
+  const [proofDialog, setProofDialog] = useState(null)
+  const [proofSubmitting, setProofSubmitting] = useState(false)
 
   const [dialogState, setDialogState] = useState({
     isOpen: false,
@@ -204,26 +212,16 @@ export default function AdminVendorFinance() {
   }
 
   const handleSettlementAction = (action, settlement) => {
+    if (action === 'distribute' && settlement.status === 'processing') {
+      setProofDialog({ settlement })
+      return
+    }
+
     setDialogState({ isOpen: true, action, settlement, payout: null, loading: false })
   }
 
   const handleSettlementConfirm = async (reason) => {
-    const { action, settlement, payout } = dialogState
-    if (action === 'mark-paid' && payout) {
-      setDialogState(prev => ({ ...prev, loading: true }))
-      try {
-        await api.post(`/admin/wallet/payouts/${payout.id}/mark-paid`)
-        toast.success(`Payout ${payout.payout_number} marked as disbursed.`)
-        setDialogState({ isOpen: false, action: null, settlement: null, payout: null, loading: false })
-        loadLedger()
-      } catch (err) {
-        toast.error(err.response?.data?.message || 'Payout could not be marked as disbursed.')
-        setDialogState(prev => ({ ...prev, loading: false }))
-      }
-
-      return
-    }
-
+    const { action, settlement } = dialogState
     if (!settlement) return
 
     setDialogState(prev => ({ ...prev, loading: true }))
@@ -262,13 +260,24 @@ export default function AdminVendorFinance() {
       toast.error('Select a verified bank account.')
       return
     }
+    if (!disburseReference.trim() && disburseProofFiles.length === 0) {
+      toast.error('Enter a transfer reference or attach at least one receipt or screenshot.')
+      return
+    }
+    if (disburseProofFiles.length > 5) {
+      toast.error('Upload no more than 5 files.')
+      return
+    }
 
     setDisbursing(true)
     try {
-      await api.post(`/admin/wallet/vendors/${vendorId}/payouts`, {
-        amount,
-        bank_account_id: disburseBankAccountId,
-      })
+      const formData = new FormData()
+      formData.append('amount', String(amount))
+      formData.append('bank_account_id', disburseBankAccountId)
+      if (disburseReference.trim()) formData.append('provider_reference', disburseReference.trim())
+      if (disburseNotes.trim()) formData.append('notes', disburseNotes.trim())
+      disburseProofFiles.forEach((file) => formData.append('proof_files[]', file))
+      await api.post(`/admin/wallet/vendors/${vendorId}/payouts`, formData)
       toast.success('Available wallet balance disbursed and recorded as paid.')
       setDisburseOpen(false)
       setTab('settlements')
@@ -288,11 +297,39 @@ export default function AdminVendorFinance() {
 
     setDisburseAmount(availableBalance.toFixed(2))
     setDisburseBankAccountId(defaultAccount?.id || '')
+    setDisburseReference('')
+    setDisburseNotes('')
+    setDisburseProofFiles([])
     setDisburseOpen(true)
   }
 
   const handleMarkPayoutPaid = (payout) => {
-    setDialogState({ isOpen: true, action: 'mark-paid', settlement: null, payout, loading: false })
+    setProofDialog({ payout })
+  }
+
+  const submitPayoutProof = async ({ providerReference, notes, proofFiles }) => {
+    if (!proofDialog) return
+
+    const formData = new FormData()
+    if (providerReference.trim()) formData.append('provider_reference', providerReference.trim())
+    if (notes.trim()) formData.append('notes', notes.trim())
+    proofFiles.forEach((file) => formData.append('proof_files[]', file))
+
+    setProofSubmitting(true)
+    try {
+      if (proofDialog.payout) {
+        await api.post(`/admin/wallet/payouts/${proofDialog.payout.id}/mark-paid`, formData)
+      } else {
+        await api.post(`/admin/wallet/settlements/${proofDialog.settlement.id}/distribute`, formData)
+      }
+      toast.success('Payout marked as disbursed.')
+      setProofDialog(null)
+      loadLedger()
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Payout could not be marked as disbursed.')
+    } finally {
+      setProofSubmitting(false)
+    }
   }
 
   const txnDirection = (t) => (t.transaction_type || '').startsWith('debit_') ? 'debit' : 'credit'
@@ -916,13 +953,14 @@ export default function AdminVendorFinance() {
                     <th style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 800, color: 'var(--muted)' }}>Amount</th>
                     <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 800, color: 'var(--muted)' }}>Status</th>
                     <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 800, color: 'var(--muted)' }}>Date</th>
+                    <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 800, color: 'var(--muted)' }}>Transfer Evidence</th>
                     <th style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 800, color: 'var(--muted)' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {payouts.length === 0 && (
                     <tr>
-                      <td colSpan={7} style={{ padding: 28, textAlign: 'center', color: 'var(--muted)' }}>No payout requests for this store.</td>
+                      <td colSpan={8} style={{ padding: 28, textAlign: 'center', color: 'var(--muted)' }}>No payout requests for this store.</td>
                     </tr>
                   )}
                   {payouts.map(p => (
@@ -947,6 +985,26 @@ export default function AdminVendorFinance() {
                       <td style={{ padding: '10px 14px' }}><LocalBadge status={p.status} /></td>
                       <td style={{ padding: '10px 14px', color: 'var(--muted)', fontSize: 11.5, whiteSpace: 'nowrap' }}>
                         {p.paid_at ? formatDateTime(p.paid_at) : formatDateTime(p.requested_at)}
+                      </td>
+                      <td style={{ padding: '10px 14px', fontSize: 11 }}>
+                        {(p.records || []).map(record => (
+                          <div key={record.id} style={{ marginBottom: 5 }}>
+                            {record.provider_reference && <div style={{ fontWeight: 700 }}>Ref: {record.provider_reference}</div>}
+                            {record.notes && <div className="muted">{record.notes}</div>}
+                            {(record.proofs || []).map(proof => (
+                              <button
+                                key={proof.index}
+                                type="button"
+                                className="btn btn-outline btn-xs"
+                                style={{ margin: '3px 4px 0 0' }}
+                                onClick={() => downloadPayoutProof('admin', p.id, record.id, proof, toast)}
+                              >
+                                {proof.name || 'Download proof'}
+                              </button>
+                            ))}
+                          </div>
+                        ))}
+                        {!(p.records || []).length && <span className="muted">—</span>}
                       </td>
                       <td style={{ padding: '10px 14px', textAlign: 'right', whiteSpace: 'nowrap' }}>
                         {p.status === 'approved' && (
@@ -1236,6 +1294,15 @@ export default function AdminVendorFinance() {
                 )}
               </div>
 
+              <PayoutProofFields
+                providerReference={disburseReference}
+                onProviderReferenceChange={setDisburseReference}
+                notes={disburseNotes}
+                onNotesChange={setDisburseNotes}
+                proofFiles={disburseProofFiles}
+                onProofFilesChange={setDisburseProofFiles}
+              />
+
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
                 <button type="button" className="btn btn-outline btn-sm" onClick={() => setDisburseOpen(false)} disabled={disbursing}>Cancel</button>
                 <button type="submit" className="btn btn-primary btn-sm" disabled={disbursing || verifiedBankAccounts.length === 0}>
@@ -1247,24 +1314,29 @@ export default function AdminVendorFinance() {
         </div>
       )}
 
+      <PayoutProofDialog
+        isOpen={Boolean(proofDialog)}
+        onClose={() => setProofDialog(null)}
+        onSubmit={submitPayoutProof}
+        loading={proofSubmitting}
+        title={`Record transfer for ${proofDialog?.payout?.payout_number || proofDialog?.settlement?.settlement_number || 'payout'}?`}
+        message="Confirm the bank transfer and provide its reference or attach a receipt/screenshot. The evidence will be visible to this vendor."
+      />
+
       <ConfirmDialog
         isOpen={dialogState.isOpen}
         onClose={() => setDialogState({ isOpen: false, action: null, settlement: null, payout: null, loading: false })}
         onConfirm={handleSettlementConfirm}
         loading={dialogState.loading}
         title={
-          dialogState.action === 'mark-paid'
-            ? `Mark payout ${dialogState.payout?.payout_number || ''} as disbursed?`
-            : dialogState.action === 'distribute'
+          dialogState.action === 'distribute'
             ? `Distribute Settlement #${dialogState.settlement?.settlement_number || dialogState.settlement?.id}?`
             : dialogState.action === 'hold'
               ? `Hold Settlement #${dialogState.settlement?.settlement_number || dialogState.settlement?.id}?`
               : `Release Settlement #${dialogState.settlement?.settlement_number || dialogState.settlement?.id}?`
         }
         message={
-          dialogState.action === 'mark-paid'
-            ? 'Confirm only after the bank transfer has been completed. This records the payout as paid.'
-            : dialogState.action === 'distribute'
+          dialogState.action === 'distribute'
             ? dialogState.settlement?.status === 'processing'
               ? 'This marks the accepted payout request as paid to the store bank account.'
               : 'This releases the net payable into the store\'s available wallet balance. It does not mark a bank payout as paid.'
@@ -1272,8 +1344,8 @@ export default function AdminVendorFinance() {
               ? 'Holding keeps the funds pending until released. Please provide a reason for the hold.'
               : 'Releasing returns this settlement to eligible so the vendor can request a payout for it.'
         }
-        variant={dialogState.action === 'distribute' || dialogState.action === 'mark-paid' ? 'success' : (dialogState.action === 'hold' ? 'warning' : 'primary')}
-        confirmText={dialogState.action === 'mark-paid' ? 'Mark Disbursed' : (dialogState.action === 'distribute' ? 'Distribute' : (dialogState.action === 'hold' ? 'Place on Hold' : 'Release'))}
+        variant={dialogState.action === 'distribute' ? 'success' : (dialogState.action === 'hold' ? 'warning' : 'primary')}
+        confirmText={dialogState.action === 'distribute' ? 'Distribute' : (dialogState.action === 'hold' ? 'Place on Hold' : 'Release')}
         requireReason={dialogState.action === 'hold'}
         reasonPlaceholder="Specify reason for placing this settlement on hold..."
       />

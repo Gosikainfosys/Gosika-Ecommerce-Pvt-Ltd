@@ -20,12 +20,14 @@ use App\Modules\Vendor\Infrastructure\Models\Store;
 use App\Modules\Vendor\Infrastructure\Models\Vendor;
 use App\Modules\Vendor\Presentation\Resources\BankAccountResource;
 use App\Modules\Wallet\Application\Services\WalletService;
+use App\Modules\Wallet\Application\Services\PayoutProofDownload;
 use App\Modules\Wallet\Infrastructure\Models\PayoutRequest;
 use App\Modules\Wallet\Infrastructure\Models\Settlement;
 use App\Modules\Wallet\Infrastructure\Models\VendorWallet;
 use App\Modules\Wallet\Infrastructure\Models\WalletTransaction;
 use App\Modules\Wallet\Presentation\Http\Requests\AdjustBalanceRequest;
 use App\Modules\Wallet\Presentation\Http\Requests\GenerateSettlementRequest;
+use App\Modules\Wallet\Presentation\Http\Requests\InitiateAdminAvailableBalancePayoutRequest;
 use App\Modules\Wallet\Presentation\Http\Requests\MarkPayoutPaidRequest;
 use App\Modules\Wallet\Presentation\Http\Requests\RejectPayoutRequest;
 use App\Modules\Wallet\Presentation\Resources\CommissionResource;
@@ -37,10 +39,14 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Carbon;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class AdminWalletController extends Controller
 {
-    public function __construct(protected WalletService $service)
+    public function __construct(
+        protected WalletService $service,
+        protected PayoutProofDownload $payoutProofDownload
+    )
     {
         $this->middleware('auth:sanctum');
         $this->middleware('admin');
@@ -124,7 +130,7 @@ class AdminWalletController extends Controller
     public function allPayouts(Request $request): JsonResponse
     {
         $query = PayoutRequest::query()
-            ->with(['vendor', 'bankAccount', 'settlement'])
+            ->with(['vendor', 'bankAccount', 'settlement', 'records'])
             ->when($request->input('status'), fn ($q, $s) => $q->where('status', $s))
             ->when($request->input('search'), function ($q, $s) {
                 $q->where(function ($inner) use ($s) {
@@ -706,13 +712,10 @@ class AdminWalletController extends Controller
         );
     }
 
-    public function initiateAvailableBalancePayout(Request $request, string $vendorId): JsonResponse
+    public function initiateAvailableBalancePayout(InitiateAdminAvailableBalancePayoutRequest $request, string $vendorId): JsonResponse
     {
         $vendor = $this->vendor($vendorId);
-        $validated = $request->validate([
-            'amount' => ['required', 'numeric', 'gt:0'],
-            'bank_account_id' => ['required', 'string', 'max:64'],
-        ]);
+        $validated = $request->validated();
         $accountId = (string) $validated['bank_account_id'];
         $bankAccount = BankAccount::query()
             ->where('vendor_id', $vendor->id)
@@ -731,7 +734,10 @@ class AdminWalletController extends Controller
             $vendor,
             (float) $validated['amount'],
             $bankAccount->id,
-            $request->user()
+            $request->user(),
+            $validated['provider_reference'] ?? null,
+            $validated['notes'] ?? null,
+            $request->file('proof_files', [])
         );
 
         app(AuditLogService::class)->record(
@@ -773,12 +779,19 @@ class AdminWalletController extends Controller
             $payout,
             request()->user(),
             $request->input('provider_reference'),
-            (float) $request->input('fee', 0)
+            (float) $request->input('fee', 0),
+            $request->input('notes'),
+            $request->file('proof_files', [])
         );
 
         app(AuditLogService::class)->record(request()->user(), 'payout.marked_paid', 'payout', $payout->uuid, ['status' => 'approved'], ['status' => 'paid', 'provider_reference' => $request->input('provider_reference')]);
 
         return Response::success(new PayoutRequestResource($payout), 'Payout marked as paid.');
+    }
+
+    public function downloadPayoutProof(string $payoutId, string $recordId, int $proofIndex): StreamedResponse
+    {
+        return $this->payoutProofDownload->download($this->payout($payoutId), $recordId, $proofIndex);
     }
 
     public function cancelPayout(string $payoutId): JsonResponse
@@ -829,9 +842,21 @@ class AdminWalletController extends Controller
 
     public function distributeSettlement(string $settlementId): JsonResponse
     {
+        request()->validate([
+            'provider_reference' => ['nullable', 'string', 'max:120'],
+            'notes' => ['nullable', 'string', 'max:2000'],
+            'proof_files' => ['nullable', 'array', 'max:5'],
+            'proof_files.*' => ['file', 'mimes:jpg,jpeg,png,pdf', 'max:5120'],
+        ]);
         $settlement = $this->settlement($settlementId);
         $isPayoutDistribution = $settlement->status->value === SettlementStatus::PROCESSING->value;
-        $settlement = $this->service->distributeSettlement($settlement, request()->user());
+        $settlement = $this->service->distributeSettlement(
+            $settlement,
+            request()->user(),
+            request()->input('provider_reference'),
+            request()->input('notes'),
+            request()->file('proof_files', [])
+        );
 
         app(AuditLogService::class)->record(
             request()->user(),

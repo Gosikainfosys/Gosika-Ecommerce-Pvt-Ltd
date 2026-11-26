@@ -6,8 +6,10 @@ import PageHeader from '../../components/admin/PageHeader'
 import DataTable from '../../components/admin/DataTable'
 import FilterBar from '../../components/admin/FilterBar'
 import ConfirmDialog from '../../components/admin/ConfirmDialog'
+import PayoutProofDialog from '../../components/admin/PayoutProofDialog'
 import StatusBadge from '../../components/commerce/StatusBadge'
 import { money, formatDateTime, timeAgo } from '../../utils/format'
+import { downloadPayoutProof } from '../../utils/payoutProofs'
 import { useToast } from '../../context/ToastContext'
 import { useBranding } from '../../context/BrandingContext'
 import { useAuth } from '../../context/AuthContext'
@@ -26,6 +28,8 @@ export default function AdminPayouts() {
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
   const [appliedDates, setAppliedDates] = useState({ from: '', to: '' })
+  const [proofDialog, setProofDialog] = useState(null)
+  const [proofSubmitting, setProofSubmitting] = useState(false)
 
   const [dialogState, setDialogState] = useState({
     isOpen: false,
@@ -70,6 +74,11 @@ export default function AdminPayouts() {
   }, [page, statusFilter, search, appliedDates])
 
   const handleAction = (action, payout) => {
+    if (action === 'mark-paid') {
+      setProofDialog(payout)
+      return
+    }
+
     setDialogState({
       isOpen: true,
       action,
@@ -92,9 +101,6 @@ export default function AdminPayouts() {
       } else if (action === 'reject') {
         await api.post(`/admin/wallet/payouts/${targetId}/reject`, { reason })
         toast.success(`Payout request rejected. Funds returned to vendor pending balance.`)
-      } else if (action === 'mark-paid') {
-        await api.post(`/admin/wallet/payouts/${targetId}/mark-paid`)
-        toast.success(`Payout marked as paid / transferred.`)
       }
 
       setDialogState({ isOpen: false, action: null, payout: null, loading: false })
@@ -102,6 +108,28 @@ export default function AdminPayouts() {
     } catch (err) {
       toast.error(err.response?.data?.message || 'Payout operation failed.')
       setDialogState(prev => ({ ...prev, loading: false }))
+    }
+  }
+
+  const submitPayoutProof = async ({ providerReference, notes, proofFiles }) => {
+    if (!proofDialog) return
+
+    const formData = new FormData()
+    if (providerReference.trim()) formData.append('provider_reference', providerReference.trim())
+    if (notes.trim()) formData.append('notes', notes.trim())
+    proofFiles.forEach((file) => formData.append('proof_files[]', file))
+
+    setProofSubmitting(true)
+    try {
+      const targetId = proofDialog.uuid || proofDialog.id
+      await api.post(`/admin/wallet/payouts/${targetId}/mark-paid`, formData)
+      toast.success('Payout marked as paid / transferred.')
+      setProofDialog(null)
+      refreshFinance()
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Payout operation failed.')
+    } finally {
+      setProofSubmitting(false)
     }
   }
 
@@ -191,6 +219,30 @@ export default function AdminPayouts() {
           {item.settlement?.settlement_number && (
             <div style={{ fontSize: 11, color: 'var(--muted)' }}>{item.settlement.settlement_number}</div>
           )}
+        </div>
+      )
+    },
+    {
+      header: 'Transfer Evidence',
+      render: item => (
+        <div style={{ fontSize: 11, minWidth: 140 }}>
+          {(item.records || []).length === 0 ? <span style={{ color: 'var(--muted)' }}>—</span> : item.records.map(record => (
+            <div key={record.id} style={{ marginBottom: 5 }}>
+              {record.provider_reference && <div style={{ fontWeight: 700 }}>Ref: {record.provider_reference}</div>}
+              {record.notes && <div style={{ color: 'var(--muted)' }}>{record.notes}</div>}
+              {(record.proofs || []).map(proof => (
+                <button
+                  key={proof.index}
+                  type="button"
+                  className="btn btn-outline btn-xs"
+                  style={{ margin: '3px 4px 0 0' }}
+                  onClick={() => downloadPayoutProof('admin', item.id, record.id, proof, toast)}
+                >
+                  {proof.name || 'Download proof'}
+                </button>
+              ))}
+            </div>
+          ))}
         </div>
       )
     },
@@ -341,7 +393,15 @@ export default function AdminPayouts() {
         </div>
       )}
 
-      {/* Confirmation Dialog */}
+      <PayoutProofDialog
+        isOpen={Boolean(proofDialog)}
+        onClose={() => setProofDialog(null)}
+        onSubmit={submitPayoutProof}
+        loading={proofSubmitting}
+        title={`Record transfer for ${proofDialog?.payout_number || 'payout'}?`}
+        message="Confirm the bank transfer and provide its reference or attach a receipt/screenshot. The evidence will be visible to this vendor."
+      />
+
       <ConfirmDialog
         isOpen={dialogState.isOpen}
         onClose={() => setDialogState({ isOpen: false, action: null, payout: null, loading: false })}
@@ -352,18 +412,18 @@ export default function AdminPayouts() {
             ? `Approve Payout of ${money(dialogState.payout?.amount || 0)}?`
             : dialogState.action === 'reject'
             ? `Reject Payout Request #${dialogState.payout?.payout_number || dialogState.payout?.id}?`
-            : `Confirm Bank Transfer Completed for #${dialogState.payout?.payout_number || dialogState.payout?.id}?`
+            : ''
         }
         message={
           dialogState.action === 'approve'
             ? 'Approving promotes the linked settlement to processing and marks this withdrawal ready for treasury bank clearance.'
             : dialogState.action === 'reject'
             ? 'Rejecting will refund the reserved funds back to the vendor wallet pending balance and return the settlement to eligible.'
-            : 'Confirm that bank wire/transfer transaction has been executed.'
+            : ''
         }
         variant={dialogState.action === 'reject' ? 'danger' : 'success'}
         confirmText={
-          dialogState.action === 'approve' ? 'Approve Payout' : dialogState.action === 'reject' ? 'Reject Payout' : 'Confirm Disbursed'
+          dialogState.action === 'approve' ? 'Approve Payout' : 'Reject Payout'
         }
         requireReason={dialogState.action === 'reject'}
         reasonPlaceholder="Provide the administrative explanation for rejecting this payout..."

@@ -39,12 +39,22 @@ class PayoutRequestResource extends JsonResource
                 'is_default' => $this->bankAccount->is_default,
             ]),
             'records' => $this->whenLoaded('records', fn () => $this->records->map(fn ($r) => [
+                'id' => $r->uuid,
                 'provider_reference' => $r->provider_reference,
                 'amount' => number_format((float) $r->amount, 2, '.', ''),
                 'fee' => number_format((float) $r->fee, 2, '.', ''),
                 'net_amount' => number_format((float) $r->net_amount, 2, '.', ''),
                 'status' => $r->status,
                 'paid_at' => $r->paid_at?->toISOString(),
+                'notes' => data_get($r->meta, 'notes'),
+                'proofs' => collect(data_get($r->meta, 'proofs', []))
+                    ->values()
+                    ->map(fn (array $proof, int $index) => [
+                        'index' => $index,
+                        'name' => $proof['name'] ?? 'Payout proof',
+                        'mime_type' => $proof['mime_type'] ?? 'application/octet-stream',
+                        'size' => $proof['size'] ?? null,
+                    ]),
             ])),
         ];
     }

@@ -55,7 +55,9 @@ use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Http\UploadedFile;
 use Tests\TestCase;
 
 class OrderConfirmationRulesTest extends TestCase
@@ -1730,7 +1732,29 @@ class OrderConfirmationRulesTest extends TestCase
 
         $payout = $walletService->requestAvailableBalancePayout($this->vendor, 810, null, $this->vendorUser);
         $payout = $walletService->approvePayout($payout, $this->adminUser);
-        $walletService->markPayoutPaid($payout, $this->adminUser);
+        Storage::fake('local');
+        $this->actingAs($this->adminUser)
+            ->postJson("/api/v1/admin/wallet/payouts/{$payout->uuid}/mark-paid")
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('proof_files');
+        $this->assertSame('approved', $payout->fresh()->status->value);
+
+        $proof = UploadedFile::fake()->image('transfer-proof.png');
+        $this->actingAs($this->adminUser)
+            ->post("/api/v1/admin/wallet/payouts/{$payout->uuid}/mark-paid", [
+                'notes' => 'Transfer completed by bank wire.',
+                'proof_files' => [$proof],
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.records.0.notes', 'Transfer completed by bank wire.')
+            ->assertJsonPath('data.records.0.proofs.0.name', 'transfer-proof.png')
+            ->assertJsonMissingPath('data.records.0.proofs.0.path');
+
+        $record = $payout->fresh('records')->records->firstOrFail();
+        Storage::disk('local')->assertExists($record->meta['proofs'][0]['path']);
+        $this->actingAs($this->vendorUser)
+            ->get("/api/v1/vendor/wallet/payouts/{$payout->uuid}/records/{$record->uuid}/proofs/0")
+            ->assertOk();
         Setting::set('settlement.waiting_days', 7, 'settlement', 'integer', true);
         $walletService->releaseMaturedVendorEarnings();
         $wallet = $wallet->fresh();
@@ -1809,6 +1833,7 @@ class OrderConfirmationRulesTest extends TestCase
             ->postJson("/api/v1/admin/wallet/vendors/{$this->vendor->uuid}/payouts", [
                 'amount' => 1500,
                 'bank_account_id' => $unverifiedAccount->uuid,
+                'provider_reference' => 'TEST-REF-UNVERIFIED',
             ])
             ->assertUnprocessable();
 
@@ -1823,11 +1848,15 @@ class OrderConfirmationRulesTest extends TestCase
         $payoutResponse = $this->postJson("/api/v1/admin/wallet/vendors/{$this->vendor->uuid}/payouts", [
             'amount' => 1500,
             'bank_account_id' => $verifiedAccount->uuid,
+            'provider_reference' => 'TEST-ADMIN-DISTRIBUTION',
+            'notes' => 'Bank transfer completed.',
         ])
             ->assertCreated()
             ->assertJsonPath('data.status', 'paid')
             ->assertJsonPath('data.funding_source', 'available_balance')
-            ->assertJsonPath('data.bank_account.id', $verifiedAccount->uuid);
+            ->assertJsonPath('data.bank_account.id', $verifiedAccount->uuid)
+            ->assertJsonPath('data.records.0.provider_reference', 'TEST-ADMIN-DISTRIBUTION')
+            ->assertJsonPath('data.records.0.notes', 'Bank transfer completed.');
 
         $payoutId = $payoutResponse->json('data.id');
         $payoutRecordId = $payoutResponse->json('data.ledger_reference_id');
@@ -2047,6 +2076,49 @@ class OrderConfirmationRulesTest extends TestCase
         $vendorOrder->update(['delivery_status' => DeliveryStatus::DELIVERED]);
         $this->assertSame(1, $walletService->releaseMaturedVendorEarnings());
         $this->assertSame('810.00', $walletService->walletForVendor($this->vendor)->available_balance);
+    }
+
+    public function test_admin_available_balance_distribution_requires_and_records_transfer_evidence(): void
+    {
+        Setting::set('settlement.waiting_days', 0, 'settlement', 'integer', true);
+        [$order, $vendorOrder] = $this->createOrder(OrderStatus::COMPLETED, isCod: false);
+        $order->update(['completed_at' => now()->subDays(3)]);
+        $vendorOrder->update([
+            'status' => OrderStatus::COMPLETED,
+            'delivery_status' => DeliveryStatus::DELIVERED,
+            'vendor_payable' => 810,
+            'commission_rate' => 10,
+            'commission_amount' => 90,
+        ]);
+        app(WalletService::class)->releaseMaturedVendorEarnings();
+        $bankAccount = BankAccount::create([
+            'vendor_id' => $this->vendor->id,
+            'bank_name' => 'Test Bank',
+            'account_name' => 'Himalayan Handicrafts',
+            'account_number' => '1234567890',
+            'account_type' => 'savings',
+            'is_verified' => true,
+        ]);
+
+        $this->actingAs($this->adminUser)
+            ->postJson("/api/v1/admin/wallet/vendors/{$this->vendor->uuid}/payouts", [
+                'amount' => 100,
+                'bank_account_id' => $bankAccount->uuid,
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('proof_files');
+
+        $this->postJson("/api/v1/admin/wallet/vendors/{$this->vendor->uuid}/payouts", [
+            'amount' => 100,
+            'bank_account_id' => $bankAccount->uuid,
+            'provider_reference' => 'BANK-TRANSFER-100',
+            'notes' => 'Transfer confirmed.',
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.records.0.provider_reference', 'BANK-TRANSFER-100')
+            ->assertJsonPath('data.records.0.notes', 'Transfer confirmed.');
+
+        $this->assertSame('710.00', app(WalletService::class)->walletForVendor($this->vendor)->fresh()->available_balance);
     }
 
     public function test_matured_existing_settlement_is_distributed_to_available_balance(): void

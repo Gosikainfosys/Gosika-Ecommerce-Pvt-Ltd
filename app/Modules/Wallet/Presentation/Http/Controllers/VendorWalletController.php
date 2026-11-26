@@ -8,6 +8,8 @@ use App\Modules\Shared\Presentation\Http\Filters\ListingDateRange;
 use App\Modules\Shared\Presentation\Http\Response;
 use App\Modules\Vendor\Infrastructure\Models\Vendor;
 use App\Modules\Wallet\Application\Services\WalletService;
+use App\Modules\Wallet\Application\Services\PayoutProofDownload;
+use App\Modules\Wallet\Infrastructure\Models\PayoutRequest;
 use App\Modules\Wallet\Infrastructure\Models\Settlement;
 use App\Modules\Wallet\Infrastructure\Models\WalletTransaction;
 use App\Modules\Wallet\Presentation\Http\Requests\RequestPayoutRequest;
@@ -18,10 +20,14 @@ use App\Modules\Wallet\Presentation\Resources\WalletTransactionResource;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class VendorWalletController extends Controller
 {
-    public function __construct(protected WalletService $service)
+    public function __construct(
+        protected WalletService $service,
+        protected PayoutProofDownload $payoutProofDownload
+    )
     {
         $this->middleware('auth:sanctum');
         $this->middleware('role:'.Roles::VENDOR_ADMIN);
@@ -96,6 +102,17 @@ class VendorWalletController extends Controller
             PayoutRequestResource::collection($this->service->payoutsFor($vendor)),
             'Payout requests retrieved.'
         );
+    }
+
+    public function downloadPayoutProof(Request $request, string $payoutId, string $recordId, int $proofIndex): StreamedResponse
+    {
+        $vendor = $this->vendorFor($request);
+        $payout = PayoutRequest::query()
+            ->where('vendor_id', $vendor->id)
+            ->where('uuid', $payoutId)
+            ->firstOrFail();
+
+        return $this->payoutProofDownload->download($payout, $recordId, $proofIndex);
     }
 
     public function settlements(Request $request): JsonResponse

@@ -16,6 +16,7 @@ Route::prefix('v1/vendor/wallet')->middleware(['auth:sanctum', 'ensure:vendor'])
     Route::post('release-matured', [VendorWalletController::class, 'releaseMaturedEarnings']);
     Route::get('transactions', [VendorWalletController::class, 'transactions']);
     Route::get('payouts', [VendorWalletController::class, 'payouts']);
+    Route::get('payouts/{payout}/records/{record}/proofs/{proof}', [VendorWalletController::class, 'downloadPayoutProof']);
     Route::get('settlements', [VendorWalletController::class, 'settlements']);
     Route::post('payouts', [VendorWalletController::class, 'requestPayout']);
 });
@@ -24,6 +25,7 @@ Route::prefix('v1/admin/wallet')->middleware(['auth:sanctum', 'ensure:admin'])->
     Route::get('wallets', [AdminWalletController::class, 'wallets']);
     Route::get('payout-profiles', [AdminWalletController::class, 'payoutProfiles']);
     Route::get('payouts', [AdminWalletController::class, 'allPayouts']);
+    Route::get('payouts/{payout}/records/{record}/proofs/{proof}', [AdminWalletController::class, 'downloadPayoutProof']);
     Route::get('settlements', [AdminWalletController::class, 'allSettlements']);
 
     Route::get('vendors/{vendor}/wallet', [AdminWalletController::class, 'wallet']);
