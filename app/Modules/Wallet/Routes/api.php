@@ -46,5 +46,6 @@ Route::prefix('v1/admin/wallet')->middleware(['auth:sanctum', 'ensure:admin'])->
     Route::post('payouts/{payout}/approve', [AdminWalletController::class, 'approvePayout']);
     Route::post('payouts/{payout}/reject', [AdminWalletController::class, 'rejectPayout']);
     Route::post('payouts/{payout}/mark-paid', [AdminWalletController::class, 'markPayoutPaid']);
+    Route::post('payouts/{payout}/transfer-details', [AdminWalletController::class, 'addPaidPayoutTransferDetails']);
     Route::post('payouts/{payout}/cancel', [AdminWalletController::class, 'cancelPayout']);
 });

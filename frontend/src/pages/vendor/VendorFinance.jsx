@@ -33,6 +33,7 @@ import { useToast } from '../../context/ToastContext'
 import { errorMessage, formatDateTime, money } from '../../utils/format'
 import { companyFromBranding, exportReportFromRows, personLabel } from '../../utils/reportExport'
 import { downloadPayoutProof } from '../../utils/payoutProofs'
+import { printPayoutReceipt } from '../../utils/payoutReceipt'
 
 const DEFAULT_MIN_PAYOUT = 1000
 const PAGE_SIZE = 25
@@ -1151,7 +1152,15 @@ export default function VendorFinance() {
                         className="icon-btn btn-sm"
                         title="Print record"
                         aria-label={`Print ${row.categoryLabel} ${row.reference || ''}`}
-                        onClick={() => printRow(row)}
+                        onClick={() => {
+                          if (row.payout) {
+                            if (!printPayoutReceipt(row.payout, user?.vendor?.company_name || user?.company_name)) {
+                              toast.error('Allow pop-ups to print the payout receipt.')
+                            }
+                          } else {
+                            printRow(row)
+                          }
+                        }}
                       >
                         <Printer size={15} />
                       </button>

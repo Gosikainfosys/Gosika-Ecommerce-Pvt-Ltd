@@ -46,6 +46,7 @@ use App\Modules\Vendor\Infrastructure\Models\Vendor;
 use App\Modules\Wallet\Application\Services\PayoutSchedule;
 use App\Modules\Wallet\Application\Services\WalletService;
 use App\Modules\Wallet\Infrastructure\Models\Commission;
+use App\Modules\Wallet\Infrastructure\Models\PayoutRecord;
 use App\Modules\Wallet\Infrastructure\Models\Settlement;
 use App\Modules\Wallet\Infrastructure\Models\VendorWallet;
 use App\Modules\Wallet\Infrastructure\Models\WalletTransaction;
@@ -1880,7 +1881,54 @@ class OrderConfirmationRulesTest extends TestCase
         $this->assertSame('800.00', $wallet->balance);
         $this->assertSame('800.00', $wallet->available_balance);
 
-        $this->getJson("/api/v1/admin/wallet/vendors/{$this->vendor->uuid}/ledger")
+        Storage::fake('local');
+        $proof = UploadedFile::fake()->image('after-distribution.png');
+        $this->actingAs($this->adminUser)
+            ->post("/api/v1/admin/wallet/payouts/{$payoutId}/transfer-details", [
+                'provider_reference' => 'TEST-POST-DISTRIBUTION-REF',
+                'notes' => 'Receipt uploaded after distribution.',
+                'proof_files' => [$proof],
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'paid')
+            ->assertJsonPath('data.records.0.provider_reference', 'TEST-POST-DISTRIBUTION-REF')
+            ->assertJsonPath('data.records.0.notes', "Bank transfer completed.\nReceipt uploaded after distribution.")
+            ->assertJsonPath('data.records.0.proofs.0.name', 'after-distribution.png');
+
+        $record = PayoutRecord::query()->where('payout_request_id', $payoutRecordId)->firstOrFail();
+        Storage::disk('local')->assertExists($record->meta['proofs'][0]['path']);
+        $this->actingAs($this->vendorUser)
+            ->get("/api/v1/vendor/wallet/payouts/{$payoutId}/records/{$record->uuid}/proofs/0")
+            ->assertOk();
+
+        Storage::disk('local')->delete($record->meta['proofs'][0]['path']);
+        $record->delete();
+        $legacyProof = UploadedFile::fake()->image('legacy-payout-receipt.png');
+        $this->actingAs($this->adminUser)
+            ->post("/api/v1/admin/wallet/payouts/{$payoutId}/transfer-details", [
+                'provider_reference' => 'TEST-LEGACY-PAYOUT-REF',
+                'proof_files' => [$legacyProof],
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'paid')
+            ->assertJsonPath('data.records.0.amount', '1500.00')
+            ->assertJsonPath('data.records.0.provider_reference', 'TEST-LEGACY-PAYOUT-REF')
+            ->assertJsonPath('data.records.0.proofs.0.name', 'legacy-payout-receipt.png');
+
+        $legacyRecord = PayoutRecord::query()->where('payout_request_id', $payoutRecordId)->firstOrFail();
+        $this->actingAs($this->vendorUser)
+            ->getJson('/api/v1/vendor/wallet/payouts')
+            ->assertOk()
+            ->assertJsonPath('data.0.id', $payoutId)
+            ->assertJsonPath('data.0.records.0.provider_reference', 'TEST-LEGACY-PAYOUT-REF')
+            ->assertJsonPath('data.0.records.0.proofs.0.name', 'legacy-payout-receipt.png');
+        $this->get("/api/v1/vendor/wallet/payouts/{$payoutId}/records/{$legacyRecord->uuid}/proofs/0")
+            ->assertOk();
+
+        $this->assertSame('800.00', $wallet->fresh()->balance);
+        $this->assertSame('800.00', $wallet->fresh()->available_balance);
+        $this->actingAs($this->adminUser)
+            ->getJson("/api/v1/admin/wallet/vendors/{$this->vendor->uuid}/ledger")
             ->assertOk()
             ->assertJsonPath('data.stats.total_released_to_wallet', '800.00')
             ->assertJsonPath('data.stats.total_withdrawn', '1500.00');

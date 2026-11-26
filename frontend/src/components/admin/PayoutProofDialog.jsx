@@ -9,6 +9,7 @@ export default function PayoutProofDialog({
   title,
   message,
   confirmText = 'Mark Disbursed',
+  requireEvidence = true,
 }) {
   const [providerReference, setProviderReference] = useState('')
   const [notes, setNotes] = useState('')
@@ -28,8 +29,12 @@ export default function PayoutProofDialog({
 
   const submit = (event) => {
     event.preventDefault()
-    if (!providerReference.trim() && proofFiles.length === 0) {
+    if (requireEvidence && !providerReference.trim() && proofFiles.length === 0) {
       setError('Enter a transfer reference or attach at least one receipt or screenshot.')
+      return
+    }
+    if (!requireEvidence && !providerReference.trim() && !notes.trim() && proofFiles.length === 0) {
+      setError('Enter transfer details or attach at least one receipt or screenshot.')
       return
     }
     if (proofFiles.length > 5) {

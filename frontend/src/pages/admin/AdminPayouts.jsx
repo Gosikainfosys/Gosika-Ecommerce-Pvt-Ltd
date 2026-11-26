@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { Check, X, RefreshCw, Download } from 'lucide-react'
+import { Check, X, RefreshCw, Download, Printer } from 'lucide-react'
 import api from '../../api/client'
 import PageHeader from '../../components/admin/PageHeader'
 import DataTable from '../../components/admin/DataTable'
@@ -10,6 +10,7 @@ import PayoutProofDialog from '../../components/admin/PayoutProofDialog'
 import StatusBadge from '../../components/commerce/StatusBadge'
 import { money, formatDateTime, timeAgo } from '../../utils/format'
 import { downloadPayoutProof } from '../../utils/payoutProofs'
+import { printPayoutReceipt } from '../../utils/payoutReceipt'
 import { useToast } from '../../context/ToastContext'
 import { useBranding } from '../../context/BrandingContext'
 import { useAuth } from '../../context/AuthContext'
@@ -74,8 +75,8 @@ export default function AdminPayouts() {
   }, [page, statusFilter, search, appliedDates])
 
   const handleAction = (action, payout) => {
-    if (action === 'mark-paid') {
-      setProofDialog(payout)
+    if (action === 'mark-paid' || action === 'add-details') {
+      setProofDialog({ payout, mode: action })
       return
     }
 
@@ -121,9 +122,10 @@ export default function AdminPayouts() {
 
     setProofSubmitting(true)
     try {
-      const targetId = proofDialog.uuid || proofDialog.id
-      await api.post(`/admin/wallet/payouts/${targetId}/mark-paid`, formData)
-      toast.success('Payout marked as paid / transferred.')
+      const targetId = proofDialog.payout.uuid || proofDialog.payout.id
+      const action = proofDialog.mode === 'add-details' ? 'transfer-details' : 'mark-paid'
+      await api.post(`/admin/wallet/payouts/${targetId}/${action}`, formData)
+      toast.success(proofDialog.mode === 'add-details' ? 'Payout transfer details saved.' : 'Payout marked as paid / transferred.')
       setProofDialog(null)
       refreshFinance()
     } catch (err) {
@@ -256,9 +258,32 @@ export default function AdminPayouts() {
       render: item => {
         const isPending = item.status === 'pending'
         const isApproved = item.status === 'approved'
+        const isPaid = item.status === 'paid'
 
         return (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
+            {isPaid && (
+              <>
+                <button
+                  type="button"
+                  className="btn btn-outline btn-xs"
+                  onClick={() => handleAction('add-details', item)}
+                >
+                  Add Transfer Details
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-outline btn-xs"
+                  onClick={() => {
+                    if (!printPayoutReceipt(item)) toast.error('Allow pop-ups to print the payout receipt.')
+                  }}
+                  title="Print payout receipt"
+                  aria-label={`Print receipt for ${item.payout_number}`}
+                >
+                  <Printer size={12} />
+                </button>
+              </>
+            )}
             {isPending && (
               <>
                 <button
@@ -398,8 +423,14 @@ export default function AdminPayouts() {
         onClose={() => setProofDialog(null)}
         onSubmit={submitPayoutProof}
         loading={proofSubmitting}
-        title={`Record transfer for ${proofDialog?.payout_number || 'payout'}?`}
-        message="Confirm the bank transfer and provide its reference or attach a receipt/screenshot. The evidence will be visible to this vendor."
+        title={proofDialog?.mode === 'add-details'
+          ? `Add transfer details for ${proofDialog?.payout?.payout_number || 'payout'}`
+          : `Record transfer for ${proofDialog?.payout?.payout_number || 'payout'}?`}
+        message={proofDialog?.mode === 'add-details'
+          ? 'This payout is already marked paid. Add or update its transfer reference, notes, or receipts; this will not change the balance.'
+          : 'Confirm the bank transfer and provide its reference or attach a receipt/screenshot. The evidence will be visible to this vendor.'}
+        confirmText={proofDialog?.mode === 'add-details' ? 'Save Details' : 'Mark Disbursed'}
+        requireEvidence={proofDialog?.mode !== 'add-details'}
       />
 
       <ConfirmDialog

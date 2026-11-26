@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import {
   Wallet, DollarSign, Download, RefreshCw, Search,
-  SlidersHorizontal, Plus, Minus,
+  SlidersHorizontal, Plus, Minus, Printer,
   TrendingUp, TrendingDown, ChevronDown, ChevronUp,
   CheckCircle2, Clock, XCircle, Store, Landmark, PauseCircle, PlayCircle, RotateCcw
 } from 'lucide-react'
@@ -13,6 +13,7 @@ import PayoutProofDialog from '../../components/admin/PayoutProofDialog'
 import PayoutProofFields from '../../components/admin/PayoutProofFields'
 import { money, formatDate, formatDateTime, timeAgo, apiImage, getProductImage, handleImgError } from '../../utils/format'
 import { downloadPayoutProof } from '../../utils/payoutProofs'
+import { printPayoutReceipt } from '../../utils/payoutReceipt'
 import { useToast } from '../../context/ToastContext'
 import { useBranding } from '../../context/BrandingContext'
 import { useAuth } from '../../context/AuthContext'
@@ -300,7 +301,11 @@ export default function AdminVendorFinance() {
   }
 
   const handleMarkPayoutPaid = (payout) => {
-    setProofDialog({ payout })
+    setProofDialog({ payout, mode: 'mark-paid' })
+  }
+
+  const handleAddPaidPayoutDetails = (payout) => {
+    setProofDialog({ payout, mode: 'add-details' })
   }
 
   const submitPayoutProof = async ({ providerReference, notes, proofFiles }) => {
@@ -314,11 +319,12 @@ export default function AdminVendorFinance() {
     setProofSubmitting(true)
     try {
       if (proofDialog.payout) {
-        await api.post(`/admin/wallet/payouts/${proofDialog.payout.id}/mark-paid`, formData)
+        const action = proofDialog.mode === 'add-details' ? 'transfer-details' : 'mark-paid'
+        await api.post(`/admin/wallet/payouts/${proofDialog.payout.id}/${action}`, formData)
       } else {
         await api.post(`/admin/wallet/settlements/${proofDialog.settlement.id}/distribute`, formData)
       }
-      toast.success('Payout marked as disbursed.')
+      toast.success(proofDialog.mode === 'add-details' ? 'Payout transfer details saved.' : 'Payout marked as disbursed.')
       setProofDialog(null)
       loadLedger()
     } catch (err) {
@@ -1062,6 +1068,29 @@ export default function AdminVendorFinance() {
                         {!(p.records || []).length && <span className="muted">—</span>}
                       </td>
                       <td style={{ padding: '10px 14px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        {p.status === 'paid' && (
+                          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 5 }}>
+                            <button
+                              type="button"
+                              className="btn btn-outline btn-xs"
+                              onClick={() => handleAddPaidPayoutDetails(p)}
+                              title="Add transfer reference, notes, or receipt after distribution"
+                            >
+                              Add Transfer Details
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-outline btn-xs"
+                              onClick={() => {
+                                if (!printPayoutReceipt(p, vendor.company_name)) toast.error('Allow pop-ups to print the payout receipt.')
+                              }}
+                              title="Print payout receipt"
+                              aria-label={`Print receipt for ${p.payout_number}`}
+                            >
+                              <Printer size={12} />
+                            </button>
+                          </div>
+                        )}
                         {p.status === 'approved' && (
                           <button
                             type="button"
@@ -1376,8 +1405,14 @@ export default function AdminVendorFinance() {
         onClose={() => setProofDialog(null)}
         onSubmit={submitPayoutProof}
         loading={proofSubmitting}
-        title={`Record transfer for ${proofDialog?.payout?.payout_number || proofDialog?.settlement?.settlement_number || 'payout'}?`}
-        message="Confirm the bank transfer and provide its reference or attach a receipt/screenshot. The evidence will be visible to this vendor."
+        title={proofDialog?.mode === 'add-details'
+          ? `Add transfer details for ${proofDialog?.payout?.payout_number || 'payout'}`
+          : `Record transfer for ${proofDialog?.payout?.payout_number || proofDialog?.settlement?.settlement_number || 'payout'}?`}
+        message={proofDialog?.mode === 'add-details'
+          ? 'This payout is already marked paid. Add or update its transfer reference, notes, or receipts; this will not change the balance.'
+          : 'Confirm the bank transfer and provide its reference or attach a receipt/screenshot. The evidence will be visible to this vendor.'}
+        confirmText={proofDialog?.mode === 'add-details' ? 'Save Details' : 'Mark Disbursed'}
+        requireEvidence={proofDialog?.mode !== 'add-details'}
       />
 
       <ConfirmDialog

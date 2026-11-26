@@ -25,6 +25,7 @@ use App\Modules\Wallet\Infrastructure\Models\PayoutRequest;
 use App\Modules\Wallet\Infrastructure\Models\Settlement;
 use App\Modules\Wallet\Infrastructure\Models\VendorWallet;
 use App\Modules\Wallet\Infrastructure\Models\WalletTransaction;
+use App\Modules\Wallet\Presentation\Http\Requests\AddPaidPayoutTransferDetailsRequest;
 use App\Modules\Wallet\Presentation\Http\Requests\AdjustBalanceRequest;
 use App\Modules\Wallet\Presentation\Http\Requests\GenerateSettlementRequest;
 use App\Modules\Wallet\Presentation\Http\Requests\InitiateAdminAvailableBalancePayoutRequest;
@@ -56,6 +57,7 @@ class AdminWalletController extends Controller
             'approvePayout',
             'rejectPayout',
             'markPayoutPaid',
+            'addPaidPayoutTransferDetails',
             'cancelPayout',
         ]);
         $this->middleware('permission:'.Permissions::SETTLEMENTS_MANAGE)->only([
@@ -790,6 +792,33 @@ class AdminWalletController extends Controller
         app(AuditLogService::class)->record(request()->user(), 'payout.marked_paid', 'payout', $payout->uuid, ['status' => 'approved'], ['status' => 'paid', 'provider_reference' => $request->input('provider_reference')]);
 
         return Response::success(new PayoutRequestResource($payout), 'Payout marked as paid.');
+    }
+
+    public function addPaidPayoutTransferDetails(AddPaidPayoutTransferDetailsRequest $request, string $payoutId): JsonResponse
+    {
+        $payout = $this->payout($payoutId);
+        $payout = $this->service->addPaidPayoutTransferDetails(
+            $payout,
+            request()->user(),
+            $request->input('provider_reference'),
+            $request->input('notes'),
+            $request->file('proof_files', [])
+        );
+
+        app(AuditLogService::class)->record(
+            request()->user(),
+            'payout.transfer_details_updated',
+            'payout',
+            $payout->uuid,
+            null,
+            [
+                'provider_reference' => $request->input('provider_reference'),
+                'notes_provided' => filled($request->input('notes')),
+                'proof_count' => count((array) $request->file('proof_files', [])),
+            ]
+        );
+
+        return Response::success(new PayoutRequestResource($payout), 'Paid payout transfer details updated.');
     }
 
     public function downloadPayoutProof(string $payoutId, string $recordId, int $proofIndex): StreamedResponse

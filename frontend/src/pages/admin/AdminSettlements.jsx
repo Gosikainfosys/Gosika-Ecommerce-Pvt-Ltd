@@ -220,37 +220,31 @@ export default function AdminSettlements() {
                 <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 11.5, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>
                   Store / Vendor
                 </th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 11.5, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>
-                  Statement Period
+                <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: 11.5, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>
+                  Gross Sales / Total Earned
                 </th>
                 <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: 11.5, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>
-                  Gross Sales
+                  Available Balance
                 </th>
                 <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: 11.5, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>
-                  Platform Commission
-                </th>
-                <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: 11.5, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>
-                  Net Earned / Wallet
+                  Commission Earned
                 </th>
                 <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 11.5, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>
                   Status
                 </th>
-                <th style={{ padding: '12px 16px', textAlign: 'center', fontSize: 11.5, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>
-                  Cycle (Days)
-                </th>
                 <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: 11.5, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                  Actions
+                  View Details
                 </th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 Array.from({ length: 4 }).map((_, i) => (
-                  <tr key={i}><td colSpan={8} style={{ padding: '18px 16px', textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>Loading settlement summaries...</td></tr>
+                  <tr key={i}><td colSpan={6} style={{ padding: '18px 16px', textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>Loading settlement summaries...</td></tr>
                 ))
               ) : summary.length === 0 ? (
                 <tr>
-                  <td colSpan={8} style={{ padding: 40, textAlign: 'center', color: 'var(--muted)' }}>
+                  <td colSpan={6} style={{ padding: 40, textAlign: 'center', color: 'var(--muted)' }}>
                     <div style={{ fontWeight: 700, color: 'var(--ink)' }}>No vendor profiles found.</div>
                     <div style={{ maxWidth: 620, margin: '6px auto 0', fontSize: 12 }}>
                       Vendors and their stores appear here even before they have a settlement or earned orders.
@@ -282,57 +276,43 @@ export default function AdminSettlements() {
                         <div style={{ fontSize: 11, color: 'var(--muted)' }}>
                           {s.earning_orders_count} earning order(s) · {s.settlements_count} settlement period(s)
                         </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 4, fontSize: 10.5, color: 'var(--muted)' }}>
+                          Cycle
+                          <input
+                            type="number"
+                            min={1}
+                            max={120}
+                            className="input"
+                            aria-label={`Settlement cycle days for ${s.vendor_name}`}
+                            value={cycleValues[s.vendor_id] ?? s.settlement_cycle_days ?? ''}
+                            onChange={e => setCycleValues(prev => ({ ...prev, [s.vendor_id]: e.target.value }))}
+                            onBlur={() => saveCycle(s.vendor_id)}
+                            onKeyDown={e => { if (e.key === 'Enter') e.target.blur() }}
+                            disabled={cycleSaving[s.vendor_id]}
+                            title="Settlement cycle length in days (saved on blur or Enter)"
+                            style={{ width: 52, height: 24, padding: '2px 4px', fontSize: 10.5, fontWeight: 700, textAlign: 'center' }}
+                          />
+                          days
+                        </div>
                       </div>
                     </div>
-                  </td>
-                  <td style={{ padding: '12px 16px', fontSize: 12, color: 'var(--muted)', fontWeight: 600, whiteSpace: 'nowrap' }}>
-                    {formatDate(s.period_start)} → {formatDate(s.period_end)}
                   </td>
                   <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 700, fontSize: 13 }}>
                     {money(s.gross_sales || 0)}
                   </td>
-                  <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 700, color: 'var(--primary)', fontSize: 13 }}>
-                    - {money(s.commission_total || 0)}
+                  <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 800, color: '#16a34a', fontSize: 13 }}>
+                    {money(s.available_balance || 0)}
                   </td>
-                  <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 900, color: '#16a34a', fontSize: 14 }}>
-                    <div>{money(s.earned_total || 0)}</div>
-                    <div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>
-                      Wallet: {money(s.net_payable || 0)}
-                    </div>
-                    <div style={{ fontSize: 10.5, color: 'var(--muted)', fontWeight: 500 }}>
-                      Available {money(s.available_balance || 0)} · Pending {money(s.pending_balance || 0)}
-                    </div>
-                    <div style={{ fontSize: 10.5, color: '#b45309', fontWeight: 600 }}>
-                      Awaiting settlement {money(s.unsettled_balance || 0)}
-                    </div>
+                  <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 700, color: 'var(--primary)', fontSize: 13 }}>
+                    {money(s.commission_total || 0)}
                   </td>
                   <td style={{ padding: '12px 16px' }}>
                     {s.settlements_count > 0
                       ? <StatusBadge status={s.status} />
                       : <span style={{ fontSize: 11, color: 'var(--muted)' }}>Not generated</span>}
                   </td>
-                  <td style={{ padding: '12px 16px', textAlign: 'center', whiteSpace: 'nowrap' }}>
-                    <input
-                      type="number"
-                      min={1}
-                      max={120}
-                      className="input"
-                      value={cycleValues[s.vendor_id] ?? s.settlement_cycle_days ?? ''}
-                      onChange={e => setCycleValues(prev => ({ ...prev, [s.vendor_id]: e.target.value }))}
-                      onBlur={() => saveCycle(s.vendor_id)}
-                      onKeyDown={e => { if (e.key === 'Enter') e.target.blur() }}
-                      disabled={cycleSaving[s.vendor_id]}
-                      title="Settlement cycle length in days (saved on blur or Enter)"
-                      style={{ width: 70, height: 30, fontSize: 12, fontWeight: 700, textAlign: 'center' }}
-                    />
-                  </td>
                   <td style={{ padding: '12px 16px', textAlign: 'right', whiteSpace: 'nowrap' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
-                      {s.open_count > 0 && (
-                        <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>
-                          {s.open_count} open
-                        </span>
-                      )}
                       <Link
                         to={`/admin/finance/settlements/vendors/${s.vendor_id}`}
                         className="btn btn-outline btn-xs"

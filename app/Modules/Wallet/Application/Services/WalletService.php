@@ -956,6 +956,95 @@ class WalletService
         }
     }
 
+    public function addPaidPayoutTransferDetails(
+        PayoutRequest $payout,
+        User $user,
+        ?string $providerReference = null,
+        ?string $notes = null,
+        array $proofFiles = []
+    ): PayoutRequest {
+        $storedProofPaths = [];
+
+        try {
+            return DB::transaction(function () use ($payout, $user, $providerReference, $notes, $proofFiles, &$storedProofPaths) {
+                $lockedPayout = PayoutRequest::query()
+                    ->whereKey($payout->getKey())
+                    ->lockForUpdate()
+                    ->firstOrFail();
+
+                if ($lockedPayout->status->value !== PayoutStatus::PAID->value) {
+                    throw new DomainException('Transfer details can only be added to paid payouts.', 422);
+                }
+
+                $record = $lockedPayout->records()->lockForUpdate()->orderByDesc('id')->first();
+                $meta = $record?->meta ?? [];
+                $existingProofs = (array) ($meta['proofs'] ?? []);
+
+                if (count($existingProofs) + count($proofFiles) > 5) {
+                    throw new DomainException('A payout can have no more than 5 proof files.', 422);
+                }
+
+                if (! $record) {
+                    $record = new PayoutRecord();
+                    $record->payout_request_id = $lockedPayout->id;
+                    $record->amount = $lockedPayout->amount;
+                    $record->fee = 0;
+                    $record->net_amount = $lockedPayout->amount;
+                    $record->created_by = $user->id;
+                }
+
+                foreach ($proofFiles as $file) {
+                    if (! $file instanceof UploadedFile) {
+                        throw new DomainException('A payout proof upload is invalid.', 422);
+                    }
+
+                    $path = $file->store('payout-proofs/'.$lockedPayout->uuid, 'local');
+                    if (! $path) {
+                        throw new DomainException('A payout proof could not be stored. Please try again.', 500);
+                    }
+
+                    $storedProofPaths[] = $path;
+                    $existingProofs[] = [
+                        'path' => $path,
+                        'name' => $file->getClientOriginalName(),
+                        'mime_type' => $file->getMimeType() ?? 'application/octet-stream',
+                        'size' => $file->getSize(),
+                    ];
+                }
+
+                if (trim((string) $providerReference) !== '') {
+                    $record->provider_reference = trim((string) $providerReference);
+                }
+
+                $notes = trim((string) $notes);
+                if ($notes !== '') {
+                    $existingNotes = trim((string) ($meta['notes'] ?? ''));
+                    $meta['notes'] = $existingNotes !== '' ? $existingNotes."\n".$notes : $notes;
+                }
+                if ($existingProofs !== []) {
+                    $meta['proofs'] = $existingProofs;
+                }
+
+                $record->status = PayoutStatus::PAID->value;
+                $record->paid_at ??= $lockedPayout->paid_at ?? now();
+                $record->updated_by = $user->id;
+                $record->meta = $meta;
+                $record->save();
+
+                $lockedPayout->updated_by = $user->id;
+                $lockedPayout->save();
+
+                return $lockedPayout->fresh(['bankAccount', 'settlement', 'records']);
+            });
+        } catch (Throwable $exception) {
+            if ($storedProofPaths !== []) {
+                Storage::disk('local')->delete($storedProofPaths);
+            }
+
+            throw $exception;
+        }
+    }
+
     protected function assertPayoutEvidenceProvided(?string $providerReference, array $proofFiles): void
     {
         if (trim((string) $providerReference) === '' && $proofFiles === []) {
