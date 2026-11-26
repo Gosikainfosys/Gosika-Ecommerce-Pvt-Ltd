@@ -1736,6 +1736,15 @@ class OrderConfirmationRulesTest extends TestCase
         $this->assertSame('0.00', $wallet->balance);
         $this->assertSame('0.00', $wallet->available_balance);
         $this->assertSame('0.00', $wallet->pending_balance);
+        $this->actingAs($this->adminUser)
+            ->getJson("/api/v1/admin/wallet/vendors/{$this->vendor->uuid}/ledger")
+            ->assertOk()
+            ->assertJsonPath('data.stats.total_released_to_wallet', '0.00')
+            ->assertJsonPath('data.stats.total_withdrawn', '810.00')
+            ->assertJsonPath('data.settlements.0.status', 'paid');
+        $this->getJson('/api/v1/admin/wallet/settlements?group_by_vendor=1')
+            ->assertOk()
+            ->assertJsonPath('data.0.status', 'paid');
     }
 
     public function test_settlement_payout_request_rechecks_current_holding_period(): void

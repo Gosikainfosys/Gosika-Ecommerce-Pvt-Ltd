@@ -2,6 +2,9 @@
 
 namespace App\Modules\Wallet\Presentation\Resources;
 
+use App\Modules\Shared\Domain\Enums\PayoutStatus;
+use App\Modules\Wallet\Infrastructure\Models\PayoutRequest;
+use App\Modules\Wallet\Infrastructure\Models\Settlement;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -16,7 +19,7 @@ class SettlementResource extends JsonResource
                 : $this->payoutRequests()->where('status', 'paid')->exists();
 
             if (! $hasPaidPayout) {
-                $status = 'released';
+                $status = $this->hasBeenWithdrawnFromAvailableBalance($request) ? 'paid' : 'released';
             }
         }
 
@@ -45,5 +48,42 @@ class SettlementResource extends JsonResource
                 'status' => $p->status->value,
             ])),
         ];
+    }
+
+    private function hasBeenWithdrawnFromAvailableBalance(Request $request): bool
+    {
+        $cacheKey = 'wallet.paid_available_balance_settlements.'.$this->vendor_id;
+        $withdrawnSettlementIds = $request->attributes->get($cacheKey);
+
+        if (! is_array($withdrawnSettlementIds)) {
+            $releasedSettlements = Settlement::query()
+                ->where('vendor_id', $this->vendor_id)
+                ->where('status', 'paid')
+                ->whereDoesntHave('payoutRequests', fn ($query) => $query
+                    ->where('status', PayoutStatus::PAID->value))
+                ->orderBy('id')
+                ->get(['id', 'net_payable']);
+            $remainingPaidPayouts = (float) PayoutRequest::query()
+                ->where('vendor_id', $this->vendor_id)
+                ->whereNull('settlement_id')
+                ->where('status', PayoutStatus::PAID->value)
+                ->sum('amount');
+            $withdrawnSettlementIds = [];
+
+            foreach ($releasedSettlements as $settlement) {
+                $settlementAmount = max(0, (float) $settlement->net_payable);
+
+                if ($remainingPaidPayouts + 0.001 < $settlementAmount) {
+                    break;
+                }
+
+                $withdrawnSettlementIds[] = (int) $settlement->id;
+                $remainingPaidPayouts -= $settlementAmount;
+            }
+
+            $request->attributes->set($cacheKey, $withdrawnSettlementIds);
+        }
+
+        return in_array((int) $this->getKey(), $withdrawnSettlementIds, true);
     }
 }

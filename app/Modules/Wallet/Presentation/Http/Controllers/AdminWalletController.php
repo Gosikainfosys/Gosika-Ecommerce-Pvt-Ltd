@@ -308,6 +308,14 @@ class AdminWalletController extends Controller
                 ->latest()
                 ->get()
                 ->groupBy('vendor_id');
+            $paidAvailablePayoutsByVendor = PayoutRequest::query()
+                ->whereIn('vendor_id', $vendors->modelKeys())
+                ->whereNull('settlement_id')
+                ->where('status', PayoutStatus::PAID->value)
+                ->selectRaw('vendor_id, COALESCE(SUM(amount), 0) as paid_total')
+                ->groupBy('vendor_id')
+                ->get()
+                ->mapWithKeys(fn ($row) => [(int) $row->vendor_id => (float) $row->paid_total]);
 
             $earningOrderStatuses = [
                 OrderStatus::DELIVERED->value,
@@ -349,11 +357,26 @@ class AdminWalletController extends Controller
                 'not_generated' => 5,
             ];
 
-            $grouped = $vendors->map(function (Vendor $vendor) use ($statusPriority, $settlementsByVendor, $earningsByVendor, $refundsByVendor, $unsettledByVendor) {
+            $grouped = $vendors->map(function (Vendor $vendor) use ($statusPriority, $settlementsByVendor, $paidAvailablePayoutsByVendor, $earningsByVendor, $refundsByVendor, $unsettledByVendor) {
                 $rows = $settlementsByVendor->get($vendor->id, collect());
                 $earnings = $earningsByVendor->get($vendor->id);
+                $remainingAvailablePayouts = (float) $paidAvailablePayoutsByVendor->get($vendor->id, 0);
+                $withdrawnSettlementIds = collect();
+                $rows
+                    ->filter(fn (Settlement $settlement) => $settlement->status->value === SettlementStatus::PAID->value
+                        && ! $settlement->payoutRequests->contains(fn ($payout) => $payout->status->value === PayoutStatus::PAID->value))
+                    ->sortBy('id')
+                    ->each(function (Settlement $settlement) use (&$remainingAvailablePayouts, $withdrawnSettlementIds) {
+                        $settlementAmount = max(0, (float) $settlement->net_payable);
+
+                        if ($remainingAvailablePayouts + 0.001 >= $settlementAmount) {
+                            $withdrawnSettlementIds->push((int) $settlement->id);
+                            $remainingAvailablePayouts -= $settlementAmount;
+                        }
+                    });
                 $displayStatus = fn (Settlement $settlement) => $settlement->status->value === SettlementStatus::PAID->value
                     && ! $settlement->payoutRequests->contains(fn ($payout) => $payout->status->value === PayoutStatus::PAID->value)
+                    && ! $withdrawnSettlementIds->contains($settlement->id)
                     ? 'released'
                     : $settlement->status->value;
                 $statuses = $rows->map($displayStatus);
@@ -461,6 +484,15 @@ class AdminWalletController extends Controller
                 ->whereHas('order', fn ($orders) => $orders->whereIn('payment_status', $earningPaymentStatuses)))
             ->where('status', 'refunded')
             ->sum('amount');
+        $releasedToWallet = (float) $settlementModels
+            ->filter(fn ($settlement) => $settlement->status->value === SettlementStatus::PAID->value
+                && ! $settlement->payoutRequests->contains(fn ($payout) => $payout->status->value === PayoutStatus::PAID->value))
+            ->sum(fn ($settlement) => (float) $settlement->net_payable);
+        $withdrawnFromAvailableBalance = (float) PayoutRequest::query()
+            ->where('vendor_id', $vendor->id)
+            ->whereNull('settlement_id')
+            ->where('status', PayoutStatus::PAID->value)
+            ->sum('amount');
         $stats = [
             'orders_count' => (clone $earningOrdersQuery)->count(),
             'total_gross' => number_format((float) (clone $earningOrdersQuery)->sum('grand_total'), 2, '.', ''),
@@ -471,10 +503,7 @@ class AdminWalletController extends Controller
             'unsettled_earnings' => number_format($unsettledEarnings, 2, '.', ''),
             'settlement_holding_days' => max(0, (int) Setting::get('settlement.waiting_days', 7)),
             'total_released_to_wallet' => number_format(
-                $settlementModels
-                    ->filter(fn ($settlement) => $settlement->status->value === SettlementStatus::PAID->value
-                        && ! $settlement->payoutRequests->contains(fn ($payout) => $payout->status->value === PayoutStatus::PAID->value))
-                    ->sum(fn ($settlement) => (float) $settlement->net_payable),
+                max(0, $releasedToWallet - $withdrawnFromAvailableBalance),
                 2,
                 '.',
                 ''
