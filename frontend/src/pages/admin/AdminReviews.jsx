@@ -254,6 +254,29 @@ function ReviewsTab() {
                 "{r.body}"
               </p>
 
+              {r.photos?.length > 0 && (
+                <div style={{ marginBottom: 12 }}>
+                  <div className="muted text-xs font-bold uppercase" style={{ marginBottom: 7 }}>Customer photos</div>
+                  <div className="flex items-center gap-2" style={{ flexWrap: 'wrap' }}>
+                    {r.photos.map((photo, index) => (
+                      <a
+                        key={`${r.id}-photo-${index}`}
+                        href={apiImage(photo)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label={`Open customer review photo ${index + 1}`}
+                      >
+                        <img
+                          src={apiImage(photo)}
+                          alt={`Customer review photo ${index + 1}`}
+                          style={{ width: 76, height: 76, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--border)' }}
+                        />
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="flex items-center justify-end gap-2 pt-2" style={{ borderTop: '1px solid var(--border)' }}>
                 {r.status !== 'approved' && (
                   <button

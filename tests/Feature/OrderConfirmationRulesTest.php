@@ -10,6 +10,7 @@ use App\Modules\Marketing\Application\Mail\OrderConfirmationMail;
 use App\Modules\Marketing\Application\Mail\OrderStatusMail;
 use App\Modules\Marketing\Application\Services\NotificationDispatcher;
 use App\Modules\Marketing\Infrastructure\Models\CustomerNotification;
+use App\Modules\Marketplace\Infrastructure\Models\ProductReview;
 use App\Modules\Order\Application\Services\OrderConfirmationSchedulerService;
 use App\Modules\Order\Infrastructure\Models\Order;
 use App\Modules\Order\Infrastructure\Models\OrderItem;
@@ -208,6 +209,44 @@ class OrderConfirmationRulesTest extends TestCase
         ]);
 
         return [$order, $vendorOrder, $customer];
+    }
+
+    public function test_customer_review_photos_can_be_uploaded_and_published_by_admin(): void
+    {
+        [, $vendorOrder, $customer] = $this->createOrder(OrderStatus::DELIVERED, isCod: false);
+        $vendorOrder->update(['delivery_status' => DeliveryStatus::DELIVERED]);
+        $orderItem = $vendorOrder->items()->firstOrFail();
+        Storage::fake('public');
+
+        $response = $this->actingAs($customer)->post(
+            "/api/v1/marketplace/products/{$this->product->uuid}/reviews",
+            [
+                'rating' => 5,
+                'title' => 'Great quality',
+                'body' => 'The product looks just like the listing.',
+                'order_item_id' => $orderItem->uuid,
+                'photos' => [UploadedFile::fake()->image('customer-review.png')],
+            ]
+        )
+            ->assertCreated()
+            ->assertJsonPath('data.status', 'pending')
+            ->assertJsonCount(1, 'data.photos');
+
+        $reviewId = $response->json('data.id');
+        $review = ProductReview::query()->where('uuid', $reviewId)->firstOrFail();
+        $this->assertCount(1, $review->photos);
+        Storage::disk('public')->assertExists($review->photos[0]);
+
+        $this->actingAs($this->adminUser)
+            ->postJson("/api/v1/admin/reviews/product/{$reviewId}/approve")
+            ->assertOk()
+            ->assertJsonPath('data.status', 'approved')
+            ->assertJsonCount(1, 'data.photos');
+
+        $this->getJson("/api/v1/marketplace/products/{$this->product->uuid}/reviews")
+            ->assertOk()
+            ->assertJsonPath('data.0.status', 'approved')
+            ->assertJsonCount(1, 'data.0.photos');
     }
 
     // ── 1. Customer cancellation succeeds during allowed window ─────────

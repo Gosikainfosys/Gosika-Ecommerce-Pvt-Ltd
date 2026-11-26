@@ -87,7 +87,7 @@ class AdminReviewController extends Controller
 
         app(AuditLogService::class)->record($request->user(), 'review.approved', 'review', $model->uuid, ['status' => 'pending'], ['status' => 'approved', 'type' => $type]);
 
-        return Response::success(new AdminReviewResource($model->load(['user', 'product.primaryImage', 'store'])), 'Review approved.');
+        return Response::success(new AdminReviewResource($model->load($this->reviewRelations($type))), 'Review approved.');
     }
 
     public function reject(Request $request, string $type, string $reviewId): JsonResponse
@@ -104,7 +104,7 @@ class AdminReviewController extends Controller
 
         app(AuditLogService::class)->record($request->user(), 'review.rejected', 'review', $model->uuid, ['status' => 'pending'], ['status' => 'rejected', 'reason' => $request->input('reason'), 'type' => $type]);
 
-        return Response::success(new AdminReviewResource($model->load(['user', 'product.primaryImage', 'store'])), 'Review rejected.');
+        return Response::success(new AdminReviewResource($model->load($this->reviewRelations($type))), 'Review rejected.');
     }
 
     public function destroy(Request $request, string $type, string $reviewId): JsonResponse
@@ -127,5 +127,12 @@ class AdminReviewController extends Controller
         }
 
         return $model;
+    }
+
+    protected function reviewRelations(string $type): array
+    {
+        return $type === 'store'
+            ? ['user', 'store']
+            : ['user', 'product.primaryImage'];
     }
 }
