@@ -280,7 +280,7 @@ export default function AdminVendorFinance() {
       await api.post(`/admin/wallet/vendors/${vendorId}/payouts`, formData)
       toast.success('Available wallet balance disbursed and recorded as paid.')
       setDisburseOpen(false)
-      setTab('settlements')
+      setTab('payouts')
       setPayoutsPage(1)
       loadLedger()
     } catch (err) {
@@ -411,6 +411,73 @@ export default function AdminVendorFinance() {
       company: companyFromBranding(branding),
     })
     toast.success('Orders exported.')
+  }
+
+  const exportSettlements = () => {
+    exportReportFromRows({
+      columns: [
+        { label: 'Settlement' },
+        { label: 'Period' },
+        { label: 'Gross Sales', align: 'right' },
+        { label: 'Commission', align: 'right' },
+        { label: 'Net Payable', align: 'right' },
+        { label: 'Status' },
+        { label: 'Generated At' },
+      ],
+      rows: settlements.map(settlement => [
+        settlement.settlement_number || settlement.id,
+        `${formatDate(settlement.period_start)} - ${formatDate(settlement.period_end)}`,
+        settlement.gross_sales || 0,
+        settlement.commission_total || 0,
+        settlement.net_payable || 0,
+        settlement.status || '',
+        formatDateTime(settlement.generated_at || settlement.created_at),
+      ]),
+      title: `Vendor Settlements — ${ledger?.vendor?.company_name || 'Vendor'}`,
+      subtitle: 'Settlement-cycle totals and payout eligibility.',
+      sectionLabel: 'Settlement Ledger',
+      fileName: `gosika_settlements_${vendorId?.slice(0, 8)}_${new Date().toISOString().slice(0, 10)}`,
+      preparedBy: personLabel(user),
+      company: companyFromBranding(branding),
+    })
+    toast.success('Settlements exported.')
+  }
+
+  const exportPayouts = () => {
+    exportReportFromRows({
+      columns: [
+        { label: 'Payout' },
+        { label: 'Funding Source' },
+        { label: 'Settlement' },
+        { label: 'Bank Account' },
+        { label: 'Amount', align: 'right' },
+        { label: 'Status' },
+        { label: 'Transfer Reference' },
+        { label: 'Notes' },
+        { label: 'Paid At' },
+      ],
+      rows: payouts.flatMap(payout => {
+        const records = payout.records?.length ? payout.records : [null]
+        return records.map(record => [
+          payout.payout_number || payout.id,
+          (payout.funding_source || '').replace(/_/g, ' '),
+          payout.settlement?.settlement_number || '',
+          [payout.bank_account?.bank_name, payout.bank_account?.account_number].filter(Boolean).join(' · '),
+          payout.amount || 0,
+          payout.status || '',
+          record?.provider_reference || '',
+          record?.notes || '',
+          formatDateTime(record?.paid_at || payout.paid_at || payout.requested_at),
+        ])
+      }),
+      title: `Vendor Payout Requests — ${ledger?.vendor?.company_name || 'Vendor'}`,
+      subtitle: 'Payout requests and their transfer references and notes.',
+      sectionLabel: 'Payout Ledger',
+      fileName: `gosika_payouts_${vendorId?.slice(0, 8)}_${new Date().toISOString().slice(0, 10)}`,
+      preparedBy: personLabel(user),
+      company: companyFromBranding(branding),
+    })
+    toast.success('Payout requests exported.')
   }
 
   if (loading && !ledger) {
@@ -641,7 +708,8 @@ export default function AdminVendorFinance() {
       <div style={{ display: 'flex', gap: 0, borderBottom: '2px solid var(--border, #e5e7eb)' }}>
         {[
           { key: 'orders', label: `Orders (${ordersTotal})` },
-          { key: 'settlements', label: `Settlements & Payouts (${settlementsTotal + payoutsTotal})` },
+          { key: 'settlements', label: `Settlements (${settlementsTotal})` },
+          { key: 'payouts', label: `Payout Requests (${payoutsTotal})` },
           { key: 'transactions', label: `Transactions (${txnsTotal})` },
         ].map(t => (
           <button
@@ -666,10 +734,15 @@ export default function AdminVendorFinance() {
         <div style={{ display: 'flex', alignItems: 'center', paddingRight: 4 }}>
           <button
             className="btn btn-outline btn-xs"
-            onClick={tab === 'transactions' ? exportTransactions : (tab === 'orders' ? exportOrders : exportTransactions)}
+            onClick={
+              tab === 'orders' ? exportOrders
+                : tab === 'settlements' ? exportSettlements
+                  : tab === 'payouts' ? exportPayouts
+                    : exportTransactions
+            }
             style={{ display: 'flex', alignItems: 'center', gap: 5 }}
           >
-            <Download size={12} /> Export {tab === 'transactions' ? 'Txns' : tab === 'orders' ? 'Orders' : 'Txns'}
+            <Download size={12} /> Export {tab === 'transactions' ? 'Txns' : tab === 'orders' ? 'Orders' : tab === 'settlements' ? 'Settlements' : 'Payouts'}
           </button>
         </div>
       </div>
@@ -829,11 +902,11 @@ export default function AdminVendorFinance() {
         </div>
       )}
 
-      {/* SETTLEMENTS & PAYOUTS TAB */}
-      {tab === 'settlements' && (
+      {/* SETTLEMENTS AND PAYOUT REQUESTS */}
+      {(tab === 'settlements' || tab === 'payouts') && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-          {/* Settlements */}
-          <div className="card" style={{ overflow: 'hidden' }}>
+          {tab === 'settlements' && (
+            <div className="card" style={{ overflow: 'hidden' }}>
             <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 8, borderBottom: '1px solid var(--border)' }}>
               <h4 style={{ margin: 0, fontSize: 13, fontWeight: 800, color: 'var(--ink)', display: 'flex', alignItems: 'center', gap: 6 }}>
                 <CheckCircle2 size={14} style={{ color: '#16a34a' }} /> Settlement Cycles
@@ -931,10 +1004,11 @@ export default function AdminVendorFinance() {
               </table>
             </div>
             <Pager meta={ledger?.settlements_pagination} page={settlementsPage} onPage={setSettlementsPage} pageName="Settlements" />
-          </div>
+            </div>
+          )}
 
-          {/* Payouts */}
-          <div className="card" style={{ overflow: 'hidden' }}>
+          {tab === 'payouts' && (
+            <div className="card" style={{ overflow: 'hidden' }}>
             <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 8, borderBottom: '1px solid var(--border)' }}>
               <h4 style={{ margin: 0, fontSize: 13, fontWeight: 800, color: 'var(--ink)', display: 'flex', alignItems: 'center', gap: 6 }}>
                 <DollarSign size={14} style={{ color: '#2563eb' }} /> Payout Requests
@@ -1023,7 +1097,8 @@ export default function AdminVendorFinance() {
               </table>
             </div>
             <Pager meta={ledger?.payouts_pagination} page={payoutsPage} onPage={setPayoutsPage} pageName="Payouts" />
-          </div>
+            </div>
+          )}
         </div>
       )}
 
