@@ -52,12 +52,16 @@ class AdminCustomerController extends Controller
 
         $query = $this->customerBaseQuery()
             ->when($filters['search'] ?? null, function ($q, $search) {
-                $q->where(function ($inner) use ($search) {
-                    $inner->where('first_name', 'like', "%{$search}%")
-                        ->orWhere('last_name', 'like', "%{$search}%")
-                        ->orWhere('email', 'like', "%{$search}%")
-                        ->orWhere('phone', 'like', "%{$search}%");
-                });
+                $terms = preg_split('/\s+/', trim((string) $search), -1, PREG_SPLIT_NO_EMPTY);
+
+                foreach ($terms as $term) {
+                    $q->where(function ($inner) use ($term) {
+                        $inner->where('first_name', 'like', "%{$term}%")
+                            ->orWhere('last_name', 'like', "%{$term}%")
+                            ->orWhere('email', 'like', "%{$term}%")
+                            ->orWhere('phone', 'like', "%{$term}%");
+                    });
+                }
             })
             ->when($filters['status'] ?? null, fn ($q, $s) => $q->where('status', $s))
             ->orderByDesc('created_at');

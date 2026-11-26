@@ -598,6 +598,8 @@ class AdminOrderController extends Controller
             'shipping_address.municipality' => ['nullable', 'string', 'max:100'],
             'shipping_address.postal_code'  => ['nullable', 'string', 'max:20'],
             'shipping_address.landmark'     => ['nullable', 'string', 'max:255'],
+            'shipping_address.latitude'     => ['nullable', 'numeric', 'between:-90,90'],
+            'shipping_address.longitude'    => ['nullable', 'numeric', 'between:-180,180'],
             'items'               => ['required', 'array', 'min:1'],
             'items.*.product_id'  => ['required', 'string', 'exists:products,uuid'],
             'items.*.variant_id'  => ['nullable', 'string', 'exists:product_variants,uuid'],

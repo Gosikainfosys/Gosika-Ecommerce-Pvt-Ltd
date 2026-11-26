@@ -6,10 +6,11 @@ import Input from '../../components/ui/Input'
 import Select from '../../components/ui/Select'
 import Textarea from '../../components/ui/Textarea'
 import PageHeader from '../../components/admin/PageHeader'
+import LocationMapPicker from '../../components/common/LocationMapPicker'
 import { useToast } from '../../context/ToastContext'
 import { money } from '../../utils/format'
 
-const blankItem = () => ({ product_id: '', variant_id: '', quantity: '1', unit_price: '' })
+const blankItem = () => ({ product_id: '', variant_id: '', quantity: '1', unit_price: '', product_search: '' })
 const blankAddress = {
   full_name: '',
   phone: '',
@@ -20,6 +21,80 @@ const blankAddress = {
   municipality: '',
   postal_code: '',
   landmark: '',
+  latitude: '',
+  longitude: '',
+}
+
+function SearchPicker({
+  label,
+  value,
+  placeholder,
+  options,
+  loading,
+  open,
+  required = false,
+  disabled = false,
+  onChange,
+  onFocus,
+  onBlur,
+  onSelect,
+  renderOption,
+}) {
+  return (
+    <div className="form-group" style={{ position: 'relative' }}>
+      <label className="label">{label} {required && <span className="req">*</span>}</label>
+      <input
+        className="input"
+        required={required}
+        disabled={disabled}
+        value={value}
+        placeholder={placeholder}
+        autoComplete="off"
+        onFocus={onFocus}
+        onBlur={() => window.setTimeout(onBlur, 120)}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      {open && (
+        <div
+          className="card"
+          role="listbox"
+          style={{
+            position: 'absolute',
+            top: '100%',
+            left: 0,
+            right: 0,
+            zIndex: 20,
+            maxHeight: 260,
+            overflowY: 'auto',
+            padding: 6,
+            boxShadow: 'var(--shadow-lg)',
+          }}
+        >
+          {loading ? (
+            <div className="muted text-sm p-2">Searching…</div>
+          ) : options.length ? (
+            options.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                role="option"
+                className="btn btn-ghost"
+                style={{ width: '100%', justifyContent: 'flex-start', textAlign: 'left', whiteSpace: 'normal' }}
+                onMouseDown={(event) => {
+                  event.preventDefault()
+                  onSelect(option)
+                }}
+              >
+                {renderOption(option)}
+              </button>
+            ))
+          ) : (
+            <div className="muted text-sm p-2">No matching results.</div>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function AdminManualOrderForm() {
@@ -29,27 +104,39 @@ export default function AdminManualOrderForm() {
   const [products, setProducts] = useState([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [loadError, setLoadError] = useState('')
   const [customerId, setCustomerId] = useState('')
+  const [customerQuery, setCustomerQuery] = useState('')
+  const [customerSearchResults, setCustomerSearchResults] = useState([])
+  const [customerSearchLoading, setCustomerSearchLoading] = useState(false)
+  const [customerDropdownOpen, setCustomerDropdownOpen] = useState(false)
+  const [productSearchQuery, setProductSearchQuery] = useState('')
+  const [productSearchResults, setProductSearchResults] = useState([])
+  const [productSearchLoading, setProductSearchLoading] = useState(false)
+  const [activeProductIndex, setActiveProductIndex] = useState(null)
+  const [shippingSettings, setShippingSettings] = useState({})
   const [shippingAddress, setShippingAddress] = useState(blankAddress)
   const [paymentMethod, setPaymentMethod] = useState('cod')
   const [paymentStatus, setPaymentStatus] = useState('pending')
   const [customerNotes, setCustomerNotes] = useState('')
-  const [deliveryCharge, setDeliveryCharge] = useState('0')
   const [discount, setDiscount] = useState('0')
-  const [tax, setTax] = useState('0')
   const [items, setItems] = useState([blankItem()])
 
   useEffect(() => {
     let active = true
     Promise.all([
-      api.get('/admin/customers', { params: { per_page: 100 } }),
-      api.get('/admin/products', { params: { status: 'published', per_page: 100 } }),
-    ]).then(([customerResponse, productResponse]) => {
+      api.get('/admin/customers', { params: { status: 'active', per_page: 20 } }),
+      api.get('/admin/products', { params: { status: 'published', per_page: 20 } }),
+      api.get('/admin/settings/shipping'),
+    ]).then(([customerResponse, productResponse, settingsResponse]) => {
       if (!active) return
       setCustomers(api.unwrapList(customerResponse.data))
       setProducts(api.unwrapList(productResponse.data))
+      setShippingSettings(settingsResponse.data?.data || {})
     }).catch((error) => {
-      toast.error(error.response?.data?.message || 'Failed to load customers and products.')
+      const message = error.response?.data?.message || 'Failed to load customers, products, or shipping settings.'
+      setLoadError(message)
+      toast.error(message)
     }).finally(() => {
       if (active) setLoading(false)
     })
@@ -57,13 +144,123 @@ export default function AdminManualOrderForm() {
     return () => { active = false }
   }, [toast])
 
+  useEffect(() => {
+    const query = customerQuery.trim()
+    if (!customerDropdownOpen || query.length < 2) {
+      setCustomerSearchResults([])
+      setCustomerSearchLoading(false)
+      return undefined
+    }
+
+    let active = true
+    setCustomerSearchLoading(true)
+    const timeout = window.setTimeout(() => {
+      api.get('/admin/customers', { params: { status: 'active', search: query, per_page: 20 } })
+        .then((response) => {
+          if (active) setCustomerSearchResults(api.unwrapList(response.data))
+        })
+        .catch((error) => {
+          if (active) toast.error(error.response?.data?.message || 'Could not search customers.')
+        })
+        .finally(() => {
+          if (active) setCustomerSearchLoading(false)
+        })
+    }, 250)
+
+    return () => {
+      active = false
+      window.clearTimeout(timeout)
+    }
+  }, [customerQuery, customerDropdownOpen, toast])
+
+  useEffect(() => {
+    const query = productSearchQuery.trim()
+    if (activeProductIndex === null || query.length < 2) {
+      setProductSearchResults([])
+      setProductSearchLoading(false)
+      return undefined
+    }
+
+    let active = true
+    setProductSearchResults([])
+    setProductSearchLoading(true)
+    const timeout = window.setTimeout(() => {
+      api.get('/admin/products', { params: { status: 'published', search: query, per_page: 20 } })
+        .then((response) => {
+          if (!active) return
+          const results = api.unwrapList(response.data)
+          setProductSearchResults(results)
+          setProducts((current) => {
+            const byId = new Map(current.map((product) => [product.id, product]))
+            results.forEach((product) => byId.set(product.id, product))
+            return Array.from(byId.values())
+          })
+        })
+        .catch((error) => {
+          if (active) toast.error(error.response?.data?.message || 'Could not search products.')
+        })
+        .finally(() => {
+          if (active) setProductSearchLoading(false)
+        })
+    }, 250)
+
+    return () => {
+      active = false
+      window.clearTimeout(timeout)
+    }
+  }, [productSearchQuery, activeProductIndex, toast])
+
+  const customerSearchTerm = customerQuery.trim().toLowerCase()
+  const productSearchTerm = productSearchQuery.trim().toLowerCase()
+  const customerOptions = customerSearchTerm.length >= 2
+    ? customerSearchResults
+    : customers.filter((customer) => (
+      !customerSearchTerm
+      || [customer.name, customer.phone, customer.email].some((value) => String(value || '').toLowerCase().includes(customerSearchTerm))
+    )).slice(0, 20)
+  const productOptions = productSearchTerm.length >= 2
+    ? productSearchResults
+    : products.filter((product) => (
+      !productSearchTerm
+      || [product.name, product.sku].some((value) => String(value || '').toLowerCase().includes(productSearchTerm))
+    )).slice(0, 20)
+
   const subtotal = useMemo(
     () => items.reduce((sum, item) => sum + (Number(item.unit_price) || 0) * (Number(item.quantity) || 0), 0),
     [items],
   )
+  const tax = useMemo(() => {
+    const amount = items.reduce((sum, item) => {
+      const product = products.find((candidate) => candidate.id === item.product_id)
+      const rate = Number(product?.tax_rate) || 0
+      return sum + (Number(item.unit_price) || 0) * (Number(item.quantity) || 0) * rate / 100
+    }, 0)
+    return Math.round((amount + Number.EPSILON) * 100) / 100
+  }, [items, products])
+  const deliveryCharge = useMemo(() => {
+    const byVendor = new Map()
+    items.forEach((item) => {
+      const product = products.find((candidate) => candidate.id === item.product_id)
+      if (!product) return
+      const vendorId = product.vendor?.id || product.id
+      const lineTotal = (Number(item.unit_price) || 0) * (Number(item.quantity) || 0)
+      byVendor.set(vendorId, (byVendor.get(vendorId) || 0) + lineTotal)
+    })
+    const flatFee = Number(shippingSettings['shipping.flat_charge'] ?? shippingSettings.flat_charge ?? 80)
+    const freeThreshold = Number(
+      shippingSettings['shipping.free_delivery_threshold']
+      ?? shippingSettings.free_delivery_threshold
+      ?? shippingSettings.free_shipping_threshold
+      ?? 2000,
+    )
+    const charge = Array.from(byVendor.values()).reduce((sum, vendorSubtotal) => (
+      sum + (freeThreshold > 0 && vendorSubtotal >= freeThreshold ? 0 : flatFee)
+    ), 0)
+    return Math.round((charge + Number.EPSILON) * 100) / 100
+  }, [items, products, shippingSettings])
   const grandTotal = Math.max(
     0,
-    subtotal - (Number(discount) || 0) + (Number(deliveryCharge) || 0) + (Number(tax) || 0),
+    subtotal - (Number(discount) || 0) + deliveryCharge + tax,
   )
 
   const updateAddress = (key, value) => setShippingAddress((current) => ({ ...current, [key]: value }))
@@ -79,26 +276,82 @@ export default function AdminManualOrderForm() {
       if (key === 'variant_id') {
         const product = products.find((candidate) => candidate.id === item.product_id)
         const variant = product?.variants?.find((candidate) => candidate.id === value)
-        if (variant) next.unit_price = variant.price
+        next.unit_price = variant?.price ?? product?.price ?? ''
       }
       return next
     }))
   }
 
+  const searchProductsForItem = (index, query) => {
+    setActiveProductIndex(index)
+    setProductSearchQuery(query)
+    setItems((current) => current.map((item, itemIndex) => (
+      itemIndex === index
+        ? { ...item, product_search: query, product_id: '', variant_id: '', unit_price: '' }
+        : item
+    )))
+  }
+
+  const selectProduct = (index, product) => {
+    setProducts((current) => (
+      current.some((candidate) => candidate.id === product.id)
+        ? current.map((candidate) => candidate.id === product.id ? product : candidate)
+        : [...current, product]
+    ))
+    setItems((current) => current.map((item, itemIndex) => (
+      itemIndex === index
+        ? {
+          ...item,
+          product_id: product.id,
+          variant_id: '',
+          unit_price: product.price ?? '',
+          product_search: product.name,
+        }
+        : item
+    )))
+    setActiveProductIndex(null)
+  }
+
   const selectCustomer = (id) => {
     setCustomerId(id)
-    const customer = customers.find((candidate) => candidate.id === id)
+    const customer = [...customers, ...customerSearchResults].find((candidate) => candidate.id === id)
     if (customer) {
-      setShippingAddress((current) => ({
-        ...current,
+      setCustomers((current) => (
+        current.some((candidate) => candidate.id === id) ? current : [...current, customer]
+      ))
+      setShippingAddress({
+        ...blankAddress,
         full_name: customer.name || `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
         phone: customer.phone || '',
-      }))
+      })
+      setCustomerQuery(customer.name || `${customer.first_name || ''} ${customer.last_name || ''}`.trim())
     }
+    setCustomerDropdownOpen(false)
+  }
+
+  const handleMapAddressChange = (location) => {
+    setShippingAddress((current) => ({
+      ...current,
+      address_line_1: location.street || current.address_line_1,
+      municipality: location.municipality || '',
+      district: location.district || '',
+      province: location.province || '',
+      landmark: location.landmark || '',
+      latitude: location.latitude ?? '',
+      longitude: location.longitude ?? '',
+    }))
   }
 
   const save = async (event) => {
     event.preventDefault()
+    if (loadError) {
+      toast.error('Reload the form to retry loading the current shipping settings.')
+      return
+    }
+    if (!customerId) {
+      toast.error('Search for and select a customer before creating the order.')
+      return
+    }
     if (items.some((item) => !item.product_id || Number(item.quantity) < 1)) {
       toast.error('Select a product and valid quantity for every order line.')
       return
@@ -153,15 +406,34 @@ export default function AdminManualOrderForm() {
       />
 
       <form onSubmit={save} className="card" style={{ padding: 20, display: 'grid', gap: 18 }}>
+        {loadError && <div className="alert alert-error" role="alert">{loadError} Reload the page before creating the order.</div>}
         <div className="grid md:grid-cols-2 gap-4">
-          <Select label="Customer" required value={customerId} disabled={loading || saving} onChange={(event) => selectCustomer(event.target.value)}>
-            <option value="">Select customer</option>
-            {customers.map((customer) => (
-              <option key={customer.id} value={customer.id}>
-                {[customer.name, customer.phone, customer.email].filter(Boolean).join(' · ')}
-              </option>
-            ))}
-          </Select>
+          <SearchPicker
+            label="Customer"
+            required
+            value={customerQuery}
+            placeholder="Search customer name, phone, or email"
+            options={customerOptions}
+            loading={customerSearchLoading}
+            open={customerDropdownOpen}
+            disabled={loading || saving}
+            onFocus={() => setCustomerDropdownOpen(true)}
+            onBlur={() => setCustomerDropdownOpen(false)}
+            onChange={(query) => {
+              setCustomerQuery(query)
+              setCustomerId('')
+              setCustomerDropdownOpen(true)
+            }}
+            onSelect={(customer) => selectCustomer(customer.id)}
+            renderOption={(customer) => (
+              <span>
+                <strong>{customer.name || `${customer.first_name || ''} ${customer.last_name || ''}`.trim()}</strong>
+                <span className="muted text-xs" style={{ display: 'block' }}>
+                  {[customer.phone, customer.email].filter(Boolean).join(' · ')}
+                </span>
+              </span>
+            )}
+          />
           <Select label="Payment method" value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)}>
             <option value="cod">Cash on delivery</option>
             <option value="khalti">Khalti</option>
@@ -175,17 +447,29 @@ export default function AdminManualOrderForm() {
         </div>
 
         <section>
-          <h2 style={{ fontSize: 16, margin: '0 0 12px' }}>Shipping address</h2>
+          <h2 style={{ fontSize: 16, margin: '0 0 12px' }}>Shipping address and map pin</h2>
           <div className="grid md:grid-cols-2 gap-4">
             <Input label="Full name" required value={shippingAddress.full_name} onChange={(event) => updateAddress('full_name', event.target.value)} />
             <Input label="Phone" required value={shippingAddress.phone} onChange={(event) => updateAddress('phone', event.target.value)} />
-            <Input label="Address line 1" required value={shippingAddress.address_line_1} onChange={(event) => updateAddress('address_line_1', event.target.value)} />
+          </div>
+          <LocationMapPicker
+            key={customerId || 'manual-order'}
+            title="Delivery address map"
+            description="Pin the delivery location or use GPS; the location details will be saved with the order."
+            value={{
+              province: shippingAddress.province,
+              district: shippingAddress.district,
+              municipality: shippingAddress.municipality,
+              street: shippingAddress.address_line_1,
+              landmark: shippingAddress.landmark,
+              latitude: shippingAddress.latitude,
+              longitude: shippingAddress.longitude,
+            }}
+            onChange={handleMapAddressChange}
+          />
+          <div className="grid md:grid-cols-2 gap-4 mt-3">
             <Input label="Address line 2" value={shippingAddress.address_line_2} onChange={(event) => updateAddress('address_line_2', event.target.value)} />
-            <Input label="Municipality" value={shippingAddress.municipality} onChange={(event) => updateAddress('municipality', event.target.value)} />
-            <Input label="District" value={shippingAddress.district} onChange={(event) => updateAddress('district', event.target.value)} />
-            <Input label="Province" value={shippingAddress.province} onChange={(event) => updateAddress('province', event.target.value)} />
             <Input label="Postal code" value={shippingAddress.postal_code} onChange={(event) => updateAddress('postal_code', event.target.value)} />
-            <Input label="Landmark" value={shippingAddress.landmark} onChange={(event) => updateAddress('landmark', event.target.value)} />
           </div>
         </section>
 
@@ -202,12 +486,31 @@ export default function AdminManualOrderForm() {
               const variants = product?.variants || []
               return (
                 <div key={index} className="grid md:grid-cols-5 gap-3" style={{ alignItems: 'end', padding: 12, border: '1px solid var(--border)', borderRadius: 10 }}>
-                  <Select label="Product" required value={item.product_id} disabled={loading || saving} onChange={(event) => updateItem(index, 'product_id', event.target.value)}>
-                    <option value="">Select product</option>
-                    {products.map((candidate) => (
-                      <option key={candidate.id} value={candidate.id}>{candidate.name} · {money(candidate.price)}</option>
-                    ))}
-                  </Select>
+                  <SearchPicker
+                    label="Product"
+                    required
+                    value={item.product_search}
+                    placeholder="Search product name or SKU"
+                    options={productOptions}
+                    loading={productSearchLoading && activeProductIndex === index}
+                    open={activeProductIndex === index}
+                    disabled={loading || saving}
+                    onFocus={() => {
+                      setActiveProductIndex(index)
+                      setProductSearchQuery(item.product_search || '')
+                    }}
+                    onBlur={() => setActiveProductIndex(null)}
+                    onChange={(query) => searchProductsForItem(index, query)}
+                    onSelect={(candidate) => selectProduct(index, candidate)}
+                    renderOption={(candidate) => (
+                      <span>
+                        <strong>{candidate.name}</strong>
+                        <span className="muted text-xs" style={{ display: 'block' }}>
+                          {money(candidate.price)} · SKU {candidate.sku || '—'}
+                        </span>
+                      </span>
+                    )}
+                  />
                   {variants.length > 0 && (
                     <Select label="Variant" value={item.variant_id} onChange={(event) => updateItem(index, 'variant_id', event.target.value)}>
                       <option value="">Default product price</option>
@@ -230,9 +533,25 @@ export default function AdminManualOrderForm() {
         <section>
           <h2 style={{ fontSize: 16, margin: '0 0 12px' }}>Charges</h2>
           <div className="grid md:grid-cols-4 gap-4">
-            <Input label="Delivery charge (NPR)" type="number" min="0" step="0.01" value={deliveryCharge} onChange={(event) => setDeliveryCharge(event.target.value)} />
+            <Input
+              label="Delivery charge (NPR)"
+              type="number"
+              min="0"
+              step="0.01"
+              value={deliveryCharge.toFixed(2)}
+              readOnly
+              hint="Auto-calculated from the configured flat fee and free-delivery threshold for each vendor."
+            />
             <Input label="Discount (NPR)" type="number" min="0" step="0.01" value={discount} onChange={(event) => setDiscount(event.target.value)} />
-            <Input label="Tax (NPR)" type="number" min="0" step="0.01" value={tax} onChange={(event) => setTax(event.target.value)} />
+            <Input
+              label="Tax (NPR)"
+              type="number"
+              min="0"
+              step="0.01"
+              value={tax.toFixed(2)}
+              readOnly
+              hint="Auto-calculated from each product's configured tax rate."
+            />
             <div className="form-group">
               <span className="label">Order total</span>
               <strong style={{ display: 'block', padding: '10px 0' }}>{money(grandTotal)}</strong>
@@ -242,7 +561,7 @@ export default function AdminManualOrderForm() {
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <button type="button" className="btn btn-outline" onClick={() => navigate('/admin/orders')} disabled={saving}>Cancel</button>
-          <button type="submit" className="btn btn-primary" disabled={saving || loading || customers.length === 0 || products.length === 0}>
+          <button type="submit" className="btn btn-primary" disabled={saving || loading || Boolean(loadError) || customers.length === 0 || products.length === 0}>
             <Save size={15} /> {saving ? 'Creating…' : 'Create Order'}
           </button>
         </div>

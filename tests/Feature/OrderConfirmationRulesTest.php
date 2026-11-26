@@ -2182,6 +2182,11 @@ class OrderConfirmationRulesTest extends TestCase
         ]);
         $customer->assignRole(Roles::CUSTOMER);
 
+        $this->actingAs($this->adminUser)
+            ->getJson('/api/v1/admin/customers?status=active&search=Manual%20Order%20Customer')
+            ->assertOk()
+            ->assertJsonPath('data.0.id', $customer->uuid);
+
         $response = $this->actingAs($this->adminUser)
             ->postJson('/api/v1/admin/orders', [
                 'customer_id' => $customer->uuid,
@@ -2191,6 +2196,8 @@ class OrderConfirmationRulesTest extends TestCase
                     'full_name' => 'Manual Order Customer',
                     'phone' => '9800000020',
                     'address_line_1' => '1 Market Road',
+                    'latitude' => 27.7172,
+                    'longitude' => 85.3240,
                 ],
                 'items' => [[
                     'product_id' => $this->product->uuid,
@@ -2201,6 +2208,8 @@ class OrderConfirmationRulesTest extends TestCase
             ])
             ->assertCreated()
             ->assertJsonPath('data.customer.id', $customer->uuid)
+            ->assertJsonPath('data.shipping_address.latitude', 27.7172)
+            ->assertJsonPath('data.shipping_address.longitude', 85.3240)
             ->assertJsonPath('data.grand_total', '1280.00');
 
         $this->assertDatabaseHas('orders', [
