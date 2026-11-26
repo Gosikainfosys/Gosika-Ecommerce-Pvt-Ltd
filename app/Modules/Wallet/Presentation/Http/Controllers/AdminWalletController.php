@@ -46,6 +46,7 @@ class AdminWalletController extends Controller
         $this->middleware('admin');
         $this->middleware('permission:'.Permissions::WALLETS_VIEW);
         $this->middleware('permission:'.Permissions::PAYOUTS_APPROVE)->only([
+            'initiateAvailableBalancePayout',
             'approvePayout',
             'rejectPayout',
             'markPayoutPaid',
@@ -703,6 +704,46 @@ class AdminWalletController extends Controller
             PayoutRequestResource::collection($this->service->payoutsFor($vendor)),
             'Payout requests retrieved.'
         );
+    }
+
+    public function initiateAvailableBalancePayout(Request $request, string $vendorId): JsonResponse
+    {
+        $vendor = $this->vendor($vendorId);
+        $validated = $request->validate([
+            'amount' => ['required', 'numeric', 'gt:0'],
+            'bank_account_id' => ['required', 'string', 'max:64'],
+        ]);
+        $accountId = (string) $validated['bank_account_id'];
+        $bankAccount = BankAccount::query()
+            ->where('vendor_id', $vendor->id)
+            ->where('is_verified', true)
+            ->where(function ($query) use ($accountId) {
+                $query->where('uuid', $accountId)
+                    ->orWhere('id', ctype_digit($accountId) ? (int) $accountId : 0);
+            })
+            ->first();
+
+        if (! $bankAccount) {
+            throw new DomainException('Select a verified bank account belonging to this vendor.', 422);
+        }
+
+        $payout = $this->service->initiateAvailableBalancePayoutByAdmin(
+            $vendor,
+            (float) $validated['amount'],
+            $bankAccount->id,
+            $request->user()
+        );
+
+        app(AuditLogService::class)->record(
+            $request->user(),
+            'payout.admin_distributed',
+            'payout',
+            $payout->uuid,
+            null,
+            ['vendor' => $vendor->uuid, 'amount' => $payout->amount, 'status' => $payout->status->value]
+        );
+
+        return Response::created(new PayoutRequestResource($payout), 'Available balance payout disbursed.');
     }
 
     public function approvePayout(string $payoutId): JsonResponse

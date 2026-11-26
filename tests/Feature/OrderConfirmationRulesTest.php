@@ -41,6 +41,7 @@ use App\Modules\Shipping\Application\Services\DeliveryService;
 use App\Modules\Shipping\Infrastructure\Models\DeliveryAssignment;
 use App\Modules\Shipping\Infrastructure\Models\DeliveryPartner;
 use App\Modules\Vendor\Infrastructure\Models\Store;
+use App\Modules\Vendor\Infrastructure\Models\BankAccount;
 use App\Modules\Vendor\Infrastructure\Models\Vendor;
 use App\Modules\Wallet\Application\Services\PayoutSchedule;
 use App\Modules\Wallet\Application\Services\WalletService;
@@ -1780,6 +1781,80 @@ class OrderConfirmationRulesTest extends TestCase
                 $exception->getMessage()
             );
         }
+    }
+
+    public function test_admin_can_initiate_available_balance_payout_from_vendor_finance_profile(): void
+    {
+        Setting::set('settlement.waiting_days', 0, 'settlement', 'integer', true);
+        [$order, $vendorOrder] = $this->createOrder(OrderStatus::COMPLETED, isCod: false);
+        $order->update(['completed_at' => now()->subDay()]);
+        $vendorOrder->update([
+            'status' => OrderStatus::COMPLETED,
+            'delivery_status' => DeliveryStatus::DELIVERED,
+            'vendor_payable' => 2300,
+            'commission_rate' => 8,
+            'commission_amount' => 200,
+        ]);
+        $walletService = app(WalletService::class);
+        $this->assertSame(1, $walletService->releaseMaturedVendorEarnings());
+
+        $unverifiedAccount = BankAccount::query()->create([
+            'vendor_id' => $this->vendor->id,
+            'bank_name' => 'Test Bank',
+            'account_name' => 'Vendor Seller',
+            'account_number' => '1111222233',
+            'is_verified' => false,
+        ]);
+        $this->actingAs($this->adminUser)
+            ->postJson("/api/v1/admin/wallet/vendors/{$this->vendor->uuid}/payouts", [
+                'amount' => 1500,
+                'bank_account_id' => $unverifiedAccount->uuid,
+            ])
+            ->assertUnprocessable();
+
+        $verifiedAccount = BankAccount::query()->create([
+            'vendor_id' => $this->vendor->id,
+            'bank_name' => 'Test Bank',
+            'account_name' => 'Vendor Seller',
+            'account_number' => '4444555566',
+            'is_verified' => true,
+            'is_default' => true,
+        ]);
+        $payoutResponse = $this->postJson("/api/v1/admin/wallet/vendors/{$this->vendor->uuid}/payouts", [
+            'amount' => 1500,
+            'bank_account_id' => $verifiedAccount->uuid,
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.status', 'paid')
+            ->assertJsonPath('data.funding_source', 'available_balance')
+            ->assertJsonPath('data.bank_account.id', $verifiedAccount->uuid);
+
+        $payoutId = $payoutResponse->json('data.id');
+        $payoutRecordId = $payoutResponse->json('data.ledger_reference_id');
+        $this->assertDatabaseHas('payout_requests', [
+            'uuid' => $payoutId,
+            'vendor_id' => $this->vendor->id,
+            'settlement_id' => null,
+            'amount' => 1500,
+            'status' => 'paid',
+            'approved_by' => $this->adminUser->id,
+            'created_by' => $this->adminUser->id,
+        ]);
+        $this->assertDatabaseHas('payout_records', [
+            'payout_request_id' => $payoutRecordId,
+            'amount' => 1500,
+            'net_amount' => 1500,
+            'status' => 'paid',
+            'created_by' => $this->adminUser->id,
+        ]);
+        $wallet = $walletService->walletForVendor($this->vendor);
+        $this->assertSame('800.00', $wallet->balance);
+        $this->assertSame('800.00', $wallet->available_balance);
+
+        $this->getJson("/api/v1/admin/wallet/vendors/{$this->vendor->uuid}/ledger")
+            ->assertOk()
+            ->assertJsonPath('data.stats.total_released_to_wallet', '800.00')
+            ->assertJsonPath('data.stats.total_withdrawn', '1500.00');
     }
 
     public function test_zero_day_holding_period_overrides_return_window_and_vendor_cycle(): void

@@ -121,11 +121,16 @@ export default function AdminVendorFinance() {
   const [adjustAmount, setAdjustAmount] = useState('')
   const [adjustReason, setAdjustReason] = useState('')
   const [saving, setSaving] = useState(false)
+  const [disburseOpen, setDisburseOpen] = useState(false)
+  const [disburseAmount, setDisburseAmount] = useState('')
+  const [disburseBankAccountId, setDisburseBankAccountId] = useState('')
+  const [disbursing, setDisbursing] = useState(false)
 
   const [dialogState, setDialogState] = useState({
     isOpen: false,
     action: null, // 'hold' | 'release' | 'distribute'
     settlement: null,
+    payout: null,
     loading: false,
   })
 
@@ -199,11 +204,26 @@ export default function AdminVendorFinance() {
   }
 
   const handleSettlementAction = (action, settlement) => {
-    setDialogState({ isOpen: true, action, settlement, loading: false })
+    setDialogState({ isOpen: true, action, settlement, payout: null, loading: false })
   }
 
   const handleSettlementConfirm = async (reason) => {
-    const { action, settlement } = dialogState
+    const { action, settlement, payout } = dialogState
+    if (action === 'mark-paid' && payout) {
+      setDialogState(prev => ({ ...prev, loading: true }))
+      try {
+        await api.post(`/admin/wallet/payouts/${payout.id}/mark-paid`)
+        toast.success(`Payout ${payout.payout_number} marked as disbursed.`)
+        setDialogState({ isOpen: false, action: null, settlement: null, payout: null, loading: false })
+        loadLedger()
+      } catch (err) {
+        toast.error(err.response?.data?.message || 'Payout could not be marked as disbursed.')
+        setDialogState(prev => ({ ...prev, loading: false }))
+      }
+
+      return
+    }
+
     if (!settlement) return
 
     setDialogState(prev => ({ ...prev, loading: true }))
@@ -221,12 +241,58 @@ export default function AdminVendorFinance() {
         toast.success(`Settlement #${settlement.settlement_number || ''} distributed.`)
       }
 
-      setDialogState({ isOpen: false, action: null, settlement: null, loading: false })
+      setDialogState({ isOpen: false, action: null, settlement: null, payout: null, loading: false })
       loadLedger()
     } catch (err) {
       toast.error(err.response?.data?.message || 'Settlement operation failed.')
       setDialogState(prev => ({ ...prev, loading: false }))
     }
+  }
+
+  const handleAdminPayout = async (event) => {
+    event.preventDefault()
+    const amount = Number(disburseAmount)
+    const availableBalance = Number(ledger?.wallet?.available_balance || 0)
+
+    if (!Number.isFinite(amount) || amount <= 0 || amount > availableBalance) {
+      toast.error('Enter an amount greater than zero and no more than the available balance.')
+      return
+    }
+    if (!disburseBankAccountId) {
+      toast.error('Select a verified bank account.')
+      return
+    }
+
+    setDisbursing(true)
+    try {
+      await api.post(`/admin/wallet/vendors/${vendorId}/payouts`, {
+        amount,
+        bank_account_id: disburseBankAccountId,
+      })
+      toast.success('Available wallet balance disbursed and recorded as paid.')
+      setDisburseOpen(false)
+      setTab('settlements')
+      setPayoutsPage(1)
+      loadLedger()
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Could not initiate the payout.')
+    } finally {
+      setDisbursing(false)
+    }
+  }
+
+  const openAdminPayout = () => {
+    const availableBalance = Number(ledger?.wallet?.available_balance || 0)
+    const verifiedAccounts = (ledger?.bank_accounts || []).filter(account => account.is_verified)
+    const defaultAccount = verifiedAccounts.find(account => account.is_default) || verifiedAccounts[0]
+
+    setDisburseAmount(availableBalance.toFixed(2))
+    setDisburseBankAccountId(defaultAccount?.id || '')
+    setDisburseOpen(true)
+  }
+
+  const handleMarkPayoutPaid = (payout) => {
+    setDialogState({ isOpen: true, action: 'mark-paid', settlement: null, payout, loading: false })
   }
 
   const txnDirection = (t) => (t.transaction_type || '').startsWith('debit_') ? 'debit' : 'credit'
@@ -337,6 +403,8 @@ export default function AdminVendorFinance() {
   const payouts = ledger?.payouts || []
   const transactions = ledger?.transactions || []
   const bankAccounts = ledger?.bank_accounts || []
+  const availableBalance = Number(ledger?.wallet?.available_balance || 0)
+  const verifiedBankAccounts = bankAccounts.filter(account => account.is_verified)
 
   const ordersTotal = ledger?.orders_pagination?.total ?? orders.length
   const settlementsTotal = ledger?.settlements_pagination?.total ?? settlements.length
@@ -362,6 +430,18 @@ export default function AdminVendorFinance() {
         ]}
         actions={
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {availableBalance > 0 && (
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={openAdminPayout}
+                disabled={verifiedBankAccounts.length === 0}
+                title={verifiedBankAccounts.length === 0 ? 'A verified vendor bank account is required.' : 'Initiate a payout from the available wallet balance.'}
+                style={{ display: 'flex', alignItems: 'center', gap: 6, borderRadius: 8 }}
+              >
+                <DollarSign size={14} /> Distribute Available
+              </button>
+            )}
             <button
               type="button"
               className="btn btn-outline btn-sm"
@@ -836,12 +916,13 @@ export default function AdminVendorFinance() {
                     <th style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 800, color: 'var(--muted)' }}>Amount</th>
                     <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 800, color: 'var(--muted)' }}>Status</th>
                     <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 800, color: 'var(--muted)' }}>Date</th>
+                    <th style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 800, color: 'var(--muted)' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {payouts.length === 0 && (
                     <tr>
-                      <td colSpan={6} style={{ padding: 28, textAlign: 'center', color: 'var(--muted)' }}>No payout requests for this store.</td>
+                      <td colSpan={7} style={{ padding: 28, textAlign: 'center', color: 'var(--muted)' }}>No payout requests for this store.</td>
                     </tr>
                   )}
                   {payouts.map(p => (
@@ -866,6 +947,17 @@ export default function AdminVendorFinance() {
                       <td style={{ padding: '10px 14px' }}><LocalBadge status={p.status} /></td>
                       <td style={{ padding: '10px 14px', color: 'var(--muted)', fontSize: 11.5, whiteSpace: 'nowrap' }}>
                         {p.paid_at ? formatDateTime(p.paid_at) : formatDateTime(p.requested_at)}
+                      </td>
+                      <td style={{ padding: '10px 14px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        {p.status === 'approved' && (
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-xs"
+                            onClick={() => handleMarkPayoutPaid(p)}
+                          >
+                            Mark Disbursed
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -1055,20 +1147,124 @@ export default function AdminVendorFinance() {
         </div>
       )}
 
+      {disburseOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.6)',
+            backdropFilter: 'blur(3px)',
+            zIndex: 999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+          }}
+          onClick={event => { if (event.target === event.currentTarget && !disbursing) setDisburseOpen(false) }}
+        >
+          <div
+            className="card"
+            style={{
+              width: '100%',
+              maxWidth: 480,
+              background: '#fff',
+              borderRadius: 16,
+              padding: 24,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 16,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border)', paddingBottom: 12 }}>
+              <h3 style={{ fontSize: 17, fontWeight: 800, margin: 0, color: 'var(--ink)' }}>Distribute Available Balance</h3>
+              <button type="button" className="btn btn-ghost btn-xs" onClick={() => setDisburseOpen(false)} disabled={disbursing}>✕</button>
+            </div>
+
+            <form onSubmit={handleAdminPayout} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <p style={{ fontSize: 13, color: 'var(--muted)', margin: 0 }}>
+                This directly records a payout as paid for <strong>{vendor.company_name}</strong>. Complete the bank transfer before confirming; the available balance will be debited immediately.
+              </p>
+
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)' }}>
+                Available now: <strong style={{ color: 'var(--ink)' }}>{money(availableBalance)}</strong>
+              </div>
+
+              <div>
+                <label className="label" htmlFor="admin-payout-amount" style={{ fontSize: 12, fontWeight: 700 }}>Amount (NPR) *</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input
+                    id="admin-payout-amount"
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    max={availableBalance}
+                    className="input"
+                    style={{ flex: 1, height: 38, fontSize: 14, fontWeight: 700 }}
+                    value={disburseAmount}
+                    onChange={event => setDisburseAmount(event.target.value)}
+                    required
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-sm"
+                    onClick={() => setDisburseAmount(availableBalance.toFixed(2))}
+                  >
+                    Full balance
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="label" htmlFor="admin-payout-bank-account" style={{ fontSize: 12, fontWeight: 700 }}>Verified vendor bank account *</label>
+                <select
+                  id="admin-payout-bank-account"
+                  className="input"
+                  style={{ width: '100%', height: 40 }}
+                  value={disburseBankAccountId}
+                  onChange={event => setDisburseBankAccountId(event.target.value)}
+                  required
+                >
+                  <option value="" disabled>Select a verified account</option>
+                  {verifiedBankAccounts.map(account => (
+                    <option key={account.id} value={account.id}>
+                      {account.bank_name} · {account.account_name} · {account.account_number}{account.is_default ? ' (Default)' : ''}
+                    </option>
+                  ))}
+                </select>
+                {verifiedBankAccounts.length === 0 && (
+                  <div style={{ fontSize: 12, color: '#dc2626', marginTop: 6 }}>This vendor has no verified bank account.</div>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+                <button type="button" className="btn btn-outline btn-sm" onClick={() => setDisburseOpen(false)} disabled={disbursing}>Cancel</button>
+                <button type="submit" className="btn btn-primary btn-sm" disabled={disbursing || verifiedBankAccounts.length === 0}>
+                  {disbursing ? 'Processing...' : 'Confirm Distribution'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       <ConfirmDialog
         isOpen={dialogState.isOpen}
-        onClose={() => setDialogState({ isOpen: false, action: null, settlement: null, loading: false })}
+        onClose={() => setDialogState({ isOpen: false, action: null, settlement: null, payout: null, loading: false })}
         onConfirm={handleSettlementConfirm}
         loading={dialogState.loading}
         title={
-          dialogState.action === 'distribute'
+          dialogState.action === 'mark-paid'
+            ? `Mark payout ${dialogState.payout?.payout_number || ''} as disbursed?`
+            : dialogState.action === 'distribute'
             ? `Distribute Settlement #${dialogState.settlement?.settlement_number || dialogState.settlement?.id}?`
             : dialogState.action === 'hold'
               ? `Hold Settlement #${dialogState.settlement?.settlement_number || dialogState.settlement?.id}?`
               : `Release Settlement #${dialogState.settlement?.settlement_number || dialogState.settlement?.id}?`
         }
         message={
-          dialogState.action === 'distribute'
+          dialogState.action === 'mark-paid'
+            ? 'Confirm only after the bank transfer has been completed. This records the payout as paid.'
+            : dialogState.action === 'distribute'
             ? dialogState.settlement?.status === 'processing'
               ? 'This marks the accepted payout request as paid to the store bank account.'
               : 'This releases the net payable into the store\'s available wallet balance. It does not mark a bank payout as paid.'
@@ -1076,8 +1272,8 @@ export default function AdminVendorFinance() {
               ? 'Holding keeps the funds pending until released. Please provide a reason for the hold.'
               : 'Releasing returns this settlement to eligible so the vendor can request a payout for it.'
         }
-        variant={dialogState.action === 'distribute' ? 'success' : (dialogState.action === 'hold' ? 'warning' : 'primary')}
-        confirmText={dialogState.action === 'distribute' ? 'Distribute' : (dialogState.action === 'hold' ? 'Place on Hold' : 'Release')}
+        variant={dialogState.action === 'distribute' || dialogState.action === 'mark-paid' ? 'success' : (dialogState.action === 'hold' ? 'warning' : 'primary')}
+        confirmText={dialogState.action === 'mark-paid' ? 'Mark Disbursed' : (dialogState.action === 'distribute' ? 'Distribute' : (dialogState.action === 'hold' ? 'Place on Hold' : 'Release'))}
         requireReason={dialogState.action === 'hold'}
         reasonPlaceholder="Specify reason for placing this settlement on hold..."
       />

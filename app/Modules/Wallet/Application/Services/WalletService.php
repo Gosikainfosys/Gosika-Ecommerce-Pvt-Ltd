@@ -706,6 +706,83 @@ class WalletService
         });
     }
 
+    public function initiateAvailableBalancePayoutByAdmin(
+        Vendor $vendor,
+        float $requestedAmount,
+        int $bankAccountId,
+        User $admin
+    ): PayoutRequest {
+        $this->assertPayoutsEnabled();
+        $this->releaseMaturedVendorEarnings($vendor);
+
+        $amount = round($requestedAmount, 2);
+        if ($amount <= 0) {
+            throw new DomainException('Payout amount must be greater than zero.', 422);
+        }
+
+        return DB::transaction(function () use ($vendor, $amount, $bankAccountId, $admin) {
+            $wallet = $this->lockWallet($vendor->id);
+            $bankAccount = BankAccount::query()
+                ->where('vendor_id', $vendor->id)
+                ->whereKey($bankAccountId)
+                ->where('is_verified', true)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $bankAccount) {
+                throw new DomainException('Select a verified bank account belonging to this vendor.', 422);
+            }
+
+            if ($amount > (float) $wallet->available_balance) {
+                throw new DomainException('Payout amount exceeds the available wallet balance.', 422);
+            }
+
+            $payout = new PayoutRequest();
+            $payout->payout_number = ReferenceNumber::unique('PO');
+            $payout->vendor_id = $vendor->id;
+            $payout->settlement_id = null;
+            $payout->funding_source = PayoutRequest::FUNDING_SOURCE_AVAILABLE_BALANCE;
+            $payout->wallet_id = $wallet->id;
+            $payout->bank_account_id = $bankAccount->id;
+            $payout->amount = $amount;
+            $payout->status = PayoutStatus::PAID;
+            $payout->requested_at = now();
+            $payout->approved_by = $admin->id;
+            $payout->approved_at = now();
+            $payout->paid_at = now();
+            $payout->created_by = $admin->id;
+            $payout->meta = ['initiated_by_admin' => true];
+            $payout->save();
+
+            $this->mutate($wallet, function (VendorWallet $wallet) use ($amount) {
+                $wallet->available_balance = round((float) $wallet->available_balance - $amount, 2);
+                $wallet->balance = round((float) $wallet->balance - $amount, 2);
+            });
+
+            $this->ledger($wallet, WalletTransactionType::DEBIT_WITHDRAWAL, $amount, [
+                'reference_type' => 'payout_request',
+                'reference_id' => $payout->id,
+                'description' => 'Admin initiated payout '.$payout->payout_number.' (reserved from available balance)',
+                'status' => 'held',
+                'actor_user_id' => $admin->id,
+            ]);
+
+            $record = new PayoutRecord();
+            $record->payout_request_id = $payout->id;
+            $record->amount = $amount;
+            $record->fee = 0;
+            $record->net_amount = $amount;
+            $record->status = 'paid';
+            $record->paid_at = $payout->paid_at;
+            $record->created_by = $admin->id;
+            $record->save();
+
+            $this->dispatcher->payoutUpdated($payout, 'paid');
+
+            return $payout->fresh(['bankAccount', 'settlement']);
+        });
+    }
+
     protected function assertPayoutsEnabled(): void
     {
         $enabled = Setting::get('commission.vendor_payouts_enabled', true);

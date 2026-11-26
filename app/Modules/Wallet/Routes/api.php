@@ -34,6 +34,7 @@ Route::prefix('v1/admin/wallet')->middleware(['auth:sanctum', 'ensure:admin'])->
     Route::post('vendors/{vendor}/wallet/adjust', [AdminWalletController::class, 'adjustBalance']);
     Route::put('vendors/{vendor}/settlement-cycle', [AdminWalletController::class, 'updateSettlementCycle']);
     Route::get('vendors/{vendor}/payouts', [AdminWalletController::class, 'payouts']);
+    Route::post('vendors/{vendor}/payouts', [AdminWalletController::class, 'initiateAvailableBalancePayout']);
 
     Route::post('settlements/generate', [AdminWalletController::class, 'generateSettlement']);
     Route::post('settlements/{settlement}/hold', [AdminWalletController::class, 'holdSettlement']);
