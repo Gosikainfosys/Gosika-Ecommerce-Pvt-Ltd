@@ -22,7 +22,7 @@ export default function AdminPayouts() {
   const [pagination, setPagination] = useState(null)
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState('pending')
+  const [statusFilter, setStatusFilter] = useState('all')
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
   const [appliedDates, setAppliedDates] = useState({ from: '', to: '' })
@@ -308,7 +308,7 @@ export default function AdminPayouts() {
         ]}
         onReset={() => {
           setSearch('')
-          setStatusFilter('pending')
+          setStatusFilter('all')
           setFromDate('')
           setToDate('')
           setAppliedDates({ from: '', to: '' })
