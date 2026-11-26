@@ -716,24 +716,27 @@ class AdminWalletController extends Controller
     {
         $vendor = $this->vendor($vendorId);
         $validated = $request->validated();
-        $accountId = (string) $validated['bank_account_id'];
-        $bankAccount = BankAccount::query()
-            ->where('vendor_id', $vendor->id)
-            ->where('is_verified', true)
-            ->where(function ($query) use ($accountId) {
-                $query->where('uuid', $accountId)
-                    ->orWhere('id', ctype_digit($accountId) ? (int) $accountId : 0);
-            })
-            ->first();
+        $bankAccount = null;
+        $accountId = trim((string) ($validated['bank_account_id'] ?? ''));
+        if ($accountId !== '') {
+            $bankAccount = BankAccount::query()
+                ->where('vendor_id', $vendor->id)
+                ->where('is_verified', true)
+                ->where(function ($query) use ($accountId) {
+                    $query->where('uuid', $accountId)
+                        ->orWhere('id', ctype_digit($accountId) ? (int) $accountId : 0);
+                })
+                ->first();
 
-        if (! $bankAccount) {
-            throw new DomainException('Select a verified bank account belonging to this vendor.', 422);
+            if (! $bankAccount) {
+                throw new DomainException('Select a verified bank account belonging to this vendor, or leave it blank for a manual transfer.', 422);
+            }
         }
 
         $payout = $this->service->initiateAvailableBalancePayoutByAdmin(
             $vendor,
             (float) $validated['amount'],
-            $bankAccount->id,
+            $bankAccount?->id,
             $request->user(),
             $validated['provider_reference'] ?? null,
             $validated['notes'] ?? null,

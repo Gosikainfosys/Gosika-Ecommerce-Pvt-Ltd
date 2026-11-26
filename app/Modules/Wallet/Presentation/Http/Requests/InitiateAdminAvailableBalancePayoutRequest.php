@@ -16,7 +16,7 @@ class InitiateAdminAvailableBalancePayoutRequest extends FormRequest
     {
         return [
             'amount' => ['required', 'numeric', 'gt:0'],
-            'bank_account_id' => ['required', 'string', 'max:64'],
+            'bank_account_id' => ['nullable', 'string', 'max:64'],
             'provider_reference' => ['nullable', 'string', 'max:120'],
             'notes' => ['nullable', 'string', 'max:2000'],
             'proof_files' => ['nullable', 'array', 'max:5'],

@@ -539,8 +539,9 @@ export default function AdminVendorFinance() {
                 type="button"
                 className="btn btn-primary btn-sm"
                 onClick={openAdminPayout}
-                disabled={verifiedBankAccounts.length === 0}
-                title={verifiedBankAccounts.length === 0 ? 'A verified vendor bank account is required.' : 'Initiate a payout from the available wallet balance.'}
+                title={verifiedBankAccounts.length === 0
+                  ? 'Record a manual or alternate transfer with its reference or proof.'
+                  : 'Initiate a payout from the available wallet balance.'}
                 style={{ display: 'flex', alignItems: 'center', gap: 6, borderRadius: 8 }}
               >
                 <DollarSign size={14} /> Distribute Available
@@ -657,7 +658,9 @@ export default function AdminVendorFinance() {
           </span>
         </div>
         {bankAccounts.length === 0 ? (
-          <p style={{ fontSize: 12, color: 'var(--muted)', padding: 14, textAlign: 'center' }}>No bank accounts registered for this store.</p>
+          <p style={{ fontSize: 12, color: 'var(--muted)', padding: 14, textAlign: 'center' }}>
+            No bank accounts registered. Admins can still record a manual transfer with its reference or proof.
+          </p>
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
@@ -1348,16 +1351,15 @@ export default function AdminVendorFinance() {
               </div>
 
               <div>
-                <label className="label" htmlFor="admin-payout-bank-account" style={{ fontSize: 12, fontWeight: 700 }}>Verified vendor bank account *</label>
+                <label className="label" htmlFor="admin-payout-bank-account" style={{ fontSize: 12, fontWeight: 700 }}>Transfer destination (optional)</label>
                 <select
                   id="admin-payout-bank-account"
                   className="input"
                   style={{ width: '100%', height: 40 }}
                   value={disburseBankAccountId}
                   onChange={event => setDisburseBankAccountId(event.target.value)}
-                  required
                 >
-                  <option value="" disabled>Select a verified account</option>
+                  <option value="">Manual / alternate transfer</option>
                   {verifiedBankAccounts.map(account => (
                     <option key={account.id} value={account.id}>
                       {account.bank_name} · {account.account_name} · {account.account_number}{account.is_default ? ' (Default)' : ''}
@@ -1365,7 +1367,9 @@ export default function AdminVendorFinance() {
                   ))}
                 </select>
                 {verifiedBankAccounts.length === 0 && (
-                  <div style={{ fontSize: 12, color: '#dc2626', marginTop: 6 }}>This vendor has no verified bank account.</div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>
+                    No verified bank account is on file. Provide a transaction reference or upload a receipt/screenshot below.
+                  </div>
                 )}
               </div>
 
@@ -1380,7 +1384,7 @@ export default function AdminVendorFinance() {
 
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
                 <button type="button" className="btn btn-outline btn-sm" onClick={() => setDisburseOpen(false)} disabled={disbursing}>Cancel</button>
-                <button type="submit" className="btn btn-primary btn-sm" disabled={disbursing || verifiedBankAccounts.length === 0}>
+                <button type="submit" className="btn btn-primary btn-sm" disabled={disbursing}>
                   {disbursing ? 'Processing...' : 'Confirm Distribution'}
                 </button>
               </div>

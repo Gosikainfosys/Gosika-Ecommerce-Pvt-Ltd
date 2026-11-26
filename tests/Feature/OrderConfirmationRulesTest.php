@@ -2091,32 +2091,23 @@ class OrderConfirmationRulesTest extends TestCase
             'commission_amount' => 90,
         ]);
         app(WalletService::class)->releaseMaturedVendorEarnings();
-        $bankAccount = BankAccount::create([
-            'vendor_id' => $this->vendor->id,
-            'bank_name' => 'Test Bank',
-            'account_name' => 'Himalayan Handicrafts',
-            'account_number' => '1234567890',
-            'account_type' => 'savings',
-            'is_verified' => true,
-        ]);
 
         $this->actingAs($this->adminUser)
             ->postJson("/api/v1/admin/wallet/vendors/{$this->vendor->uuid}/payouts", [
                 'amount' => 100,
-                'bank_account_id' => $bankAccount->uuid,
             ])
             ->assertUnprocessable()
             ->assertJsonValidationErrors('proof_files');
 
         $this->postJson("/api/v1/admin/wallet/vendors/{$this->vendor->uuid}/payouts", [
             'amount' => 100,
-            'bank_account_id' => $bankAccount->uuid,
             'provider_reference' => 'BANK-TRANSFER-100',
             'notes' => 'Transfer confirmed.',
         ])
             ->assertCreated()
             ->assertJsonPath('data.records.0.provider_reference', 'BANK-TRANSFER-100')
-            ->assertJsonPath('data.records.0.notes', 'Transfer confirmed.');
+            ->assertJsonPath('data.records.0.notes', 'Transfer confirmed.')
+            ->assertJsonPath('data.bank_account', null);
 
         $this->assertSame('710.00', app(WalletService::class)->walletForVendor($this->vendor)->fresh()->available_balance);
     }

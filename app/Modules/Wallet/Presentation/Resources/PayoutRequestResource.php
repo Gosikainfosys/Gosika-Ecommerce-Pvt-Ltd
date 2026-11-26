@@ -28,7 +28,7 @@ class PayoutRequestResource extends JsonResource
             'approved_at' => $this->approved_at?->toISOString(),
             'paid_at' => $this->paid_at?->toISOString(),
             'rejection_reason' => $this->rejection_reason,
-            'bank_account' => $this->whenLoaded('bankAccount', fn () => [
+            'bank_account' => $this->whenLoaded('bankAccount', fn () => $this->bankAccount ? [
                 'id' => $this->bankAccount->uuid,
                 'bank_name' => $this->bankAccount->bank_name,
                 'branch_name' => $this->bankAccount->branch_name,
@@ -37,7 +37,7 @@ class PayoutRequestResource extends JsonResource
                 'account_type' => $this->bankAccount->account_type,
                 'is_verified' => $this->bankAccount->is_verified,
                 'is_default' => $this->bankAccount->is_default,
-            ]),
+            ] : null),
             'records' => $this->whenLoaded('records', fn () => $this->records->map(fn ($r) => [
                 'id' => $r->uuid,
                 'provider_reference' => $r->provider_reference,

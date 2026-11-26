@@ -728,7 +728,7 @@ class WalletService
     public function initiateAvailableBalancePayoutByAdmin(
         Vendor $vendor,
         float $requestedAmount,
-        int $bankAccountId,
+        ?int $bankAccountId,
         User $admin,
         ?string $providerReference = null,
         ?string $notes = null,
@@ -748,15 +748,18 @@ class WalletService
         try {
             return DB::transaction(function () use ($vendor, $amount, $bankAccountId, $admin, $providerReference, $notes, $proofFiles, &$storedProofPaths) {
                 $wallet = $this->lockWallet($vendor->id);
-                $bankAccount = BankAccount::query()
-                    ->where('vendor_id', $vendor->id)
-                    ->whereKey($bankAccountId)
-                    ->where('is_verified', true)
-                    ->lockForUpdate()
-                    ->first();
+                $bankAccount = null;
+                if ($bankAccountId !== null) {
+                    $bankAccount = BankAccount::query()
+                        ->where('vendor_id', $vendor->id)
+                        ->whereKey($bankAccountId)
+                        ->where('is_verified', true)
+                        ->lockForUpdate()
+                        ->first();
 
-                if (! $bankAccount) {
-                    throw new DomainException('Select a verified bank account belonging to this vendor.', 422);
+                    if (! $bankAccount) {
+                        throw new DomainException('Select a verified bank account belonging to this vendor.', 422);
+                    }
                 }
 
                 if ($amount > (float) $wallet->available_balance) {
@@ -769,7 +772,7 @@ class WalletService
                 $payout->settlement_id = null;
                 $payout->funding_source = PayoutRequest::FUNDING_SOURCE_AVAILABLE_BALANCE;
                 $payout->wallet_id = $wallet->id;
-                $payout->bank_account_id = $bankAccount->id;
+                $payout->bank_account_id = $bankAccount?->id;
                 $payout->amount = $amount;
                 $payout->status = PayoutStatus::PAID;
                 $payout->requested_at = now();
