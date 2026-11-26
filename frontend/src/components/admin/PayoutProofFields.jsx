@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 
 export default function PayoutProofFields({
   providerReference,
@@ -8,6 +8,16 @@ export default function PayoutProofFields({
   proofFiles,
   onProofFilesChange,
 }) {
+  const [previewUrls, setPreviewUrls] = useState([])
+
+  useEffect(() => {
+    const urls = proofFiles.map((file) => (
+      file.type.startsWith('image/') ? URL.createObjectURL(file) : null
+    ))
+    setPreviewUrls(urls)
+    return () => urls.forEach((url) => url && URL.revokeObjectURL(url))
+  }, [proofFiles])
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 12, fontWeight: 700 }}>
@@ -46,8 +56,48 @@ export default function PayoutProofFields({
       </label>
 
       {proofFiles.length > 0 && (
-        <div className="muted text-xs">
-          {proofFiles.map((file) => file.name).join(' · ')}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {proofFiles.map((file, index) => (
+            <div
+              key={`${file.name}-${file.lastModified}-${index}`}
+              style={{ width: 108, display: 'flex', flexDirection: 'column', gap: 4 }}
+            >
+              {previewUrls[index] ? (
+                <img
+                  src={previewUrls[index]}
+                  alt={`${file.name} preview`}
+                  style={{
+                    width: 108,
+                    height: 76,
+                    objectFit: 'contain',
+                    background: '#f3f4f6',
+                    border: '1px solid var(--border)',
+                    borderRadius: 6,
+                  }}
+                />
+              ) : (
+                <div
+                  style={{
+                    width: 108,
+                    height: 76,
+                    display: 'grid',
+                    placeItems: 'center',
+                    color: 'var(--muted)',
+                    background: '#f3f4f6',
+                    border: '1px solid var(--border)',
+                    borderRadius: 6,
+                    fontSize: 12,
+                    fontWeight: 700,
+                  }}
+                >
+                  PDF
+                </div>
+              )}
+              <span className="muted text-xs" title={file.name} style={{ overflowWrap: 'anywhere' }}>
+                {file.name}
+              </span>
+            </div>
+          ))}
         </div>
       )}
       <div className="muted text-xs">
