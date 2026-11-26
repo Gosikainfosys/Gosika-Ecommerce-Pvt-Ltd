@@ -1,23 +1,19 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
-import * as Icons from 'lucide-react'
 import {
-  ShoppingBag, Heart, User, Search, Menu, Truck, MapPin,
+  ShoppingBag, Heart, User, Search, Truck, MapPin,
   Store, ChevronDown, Bell, Package, LogOut,
-  UserCheck, LayoutDashboard, Settings, Clock, HelpCircle, Tag, Star
+  UserCheck, LayoutDashboard, LayoutGrid, Settings, Clock, HelpCircle, Tag, Star
 } from 'lucide-react'
 import { useCart } from '../../context/CartContext'
 import { useWishlist } from '../../context/WishlistContext'
 import { useAuth } from '../../context/AuthContext'
 import { initials, apiImage } from '../../utils/format'
-import Drawer from '../ui/Drawer'
 import api from '../../api/client'
-import { getCategoryIcon } from '../../utils/icons'
 import { getSearchLocation, saveSearchLocation } from '../../utils/searchLocation'
 import GosikaLogo from '../common/GosikaLogo'
-import { CUSTOMER_NAV } from '../../utils/constants'
-
 import { useBranding } from '../../context/BrandingContext'
+import { isCustomerAccountPath } from '../../utils/customerAccount'
 
 function Logo({ size = 'md', onClick, showName = true }) {
   const branding = useBranding()
@@ -50,7 +46,6 @@ export default function CustomerHeader() {
   const navigate = useNavigate()
   const [q, setQ] = useState('')
   const [catFilter, setCatFilter] = useState('')
-  const [menuOpen, setMenuOpen] = useState(false)
   const [accountOpen, setAccountOpen] = useState(false)
   const [categories, setCategories] = useState([])
   const [unreadNotif, setUnreadNotif] = useState(0)
@@ -66,12 +61,6 @@ export default function CustomerHeader() {
   const accountRef = useRef(null)
   const suggestRef = useRef(null)
   const prevItemCount = useRef(itemCount)
-  const closeMenu = useCallback(() => setMenuOpen(false), [])
-
-  useEffect(() => {
-    closeMenu()
-  }, [location.pathname, location.search, closeMenu])
-
   useEffect(() => {
     const handleScroll = () => {
       const scrollTop = Math.max(
@@ -201,7 +190,6 @@ export default function CustomerHeader() {
     if (brand) params.set('brand', brand)
     if (nearby && getSearchLocation()) params.set('nearby', '1')
     navigate(`/shop?${params.toString()}`)
-    setMenuOpen(false)
   }
 
   const submitSearch = (e) => {
@@ -260,7 +248,6 @@ export default function CustomerHeader() {
 
   const handleLogout = async () => {
     setAccountOpen(false)
-    setMenuOpen(false)
     await logout()
     navigate('/')
   }
@@ -270,34 +257,10 @@ export default function CustomerHeader() {
   const showCustomerOptions = !!user && !isAdminUser
   const wishlistCount = wishlistIds?.length || 0
   const isHomePage = location.pathname === '/'
-  const isAccountPage = location.pathname === '/account' || location.pathname.startsWith('/account/')
-  const isDrawerLinkActive = (to, exact = false, activePaths = []) => {
-    if (activePaths.includes(location.pathname)) return true
-    if (to.includes('?')) return location.pathname + location.search === to
-    return exact
-      ? location.pathname === to && !location.search
-      : location.pathname === to || location.pathname.startsWith(`${to}/`)
-  }
-  const renderDrawerLink = (to, label, icon, { exact = false, activePaths = [], count } = {}) => {
-    const Icon = typeof icon === 'string' ? Icons[icon] || Icons.Circle : icon
-    const active = isDrawerLinkActive(to, exact, activePaths)
-    return (
-      <Link
-        key={`${to}-${label}`}
-        to={to}
-        className={`customer-drawer-link${active ? ' active' : ''}`}
-        aria-current={active ? 'page' : undefined}
-        onClick={() => setMenuOpen(false)}
-      >
-        {Icon && <Icon size={17} strokeWidth={1.9} aria-hidden="true" />}
-        <span>{label}</span>
-        {count > 0 && <span className="customer-drawer-count">{count > 99 ? '99+' : count}</span>}
-      </Link>
-    )
-  }
+  const isAccountPage = isCustomerAccountPath(location.pathname)
 
   return (
-    <header className={`customer-header${isAccountPage ? ' customer-header-account' : ''}`} role="banner">
+    <header className={`customer-header${isAccountPage ? ' customer-header--account' : ''}`} role="banner">
       {/* ---- Top strip matching Design: Solid Brand Orange ---- */}
       {isHomePage && (
         <div className={`customer-announcement${announcementHidden ? ' is-hidden' : ''}`} aria-hidden={announcementHidden}>
@@ -323,19 +286,19 @@ export default function CustomerHeader() {
 
       {/* ---- Main header ---- */}
       <div className="container header-main" style={{ padding: '14px 20px', display: 'flex', alignItems: 'center', gap: 24 }}>
-        {isAccountPage && (
-          <button
-            className="icon-btn show-sm"
-            style={{ border: 'none', background: 'none' }}
-            onClick={() => setMenuOpen(true)}
-            aria-label="Open navigation menu"
-            aria-expanded={menuOpen}
-          >
-            <Menu size={22} />
-          </button>
-        )}
+        <Logo showName={isAccountPage} />
 
-        <Logo showName={false} />
+        {isAccountPage && (
+          <nav className="customer-account-market-nav" aria-label="Marketplace navigation">
+            <NavLink to="/shop" className="customer-account-market-link">Categories</NavLink>
+            <NavLink to="/shop?filter=deals" className="customer-account-market-link">Flash Deals</NavLink>
+            <NavLink to="/shop?sort=newest" className="customer-account-market-link">New Arrivals</NavLink>
+            <NavLink to="/brands" className="customer-account-market-link">Top Brands</NavLink>
+            <NavLink to="/shop?mode=stores" className="customer-account-market-link">Stores</NavLink>
+            <NavLink to="/help" className="customer-account-market-link">Help</NavLink>
+            <Link to="/seller/login" className="customer-account-market-link customer-account-market-sell">Sell on Gosika</Link>
+          </nav>
+        )}
 
         <div className="mobile-header-search-wrap">
           <form className="mobile-header-search" onSubmit={submitSearch} role="search" aria-label="Search products">
@@ -858,7 +821,7 @@ export default function CustomerHeader() {
               textDecoration: 'none'
             }}
           >
-            <Icons.LayoutGrid size={15} color="#ff5500" /> Categories <ChevronDown size={13} />
+            <LayoutGrid size={15} color="#ff5500" /> Categories <ChevronDown size={13} />
           </NavLink>
           <NavLink to="/shop?filter=deals" className="nav-link" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontWeight: 600, fontSize: 13.5, color: '#334155', textDecoration: 'none' }}>
             <span style={{ color: '#ff5500' }}>⚡</span> Flash Deals
@@ -873,171 +836,6 @@ export default function CustomerHeader() {
         </div>
       </nav>
 
-      {/* ---- Mobile drawer ---- */}
-      <Drawer
-        open={menuOpen}
-        onClose={closeMenu}
-        title="Customer navigation"
-        side="left"
-        panelClassName="customer-navigation-drawer"
-        bodyClassName="customer-navigation-body"
-        headerContent={(
-          <div className="customer-drawer-header">
-            <Logo onClick={() => setMenuOpen(false)} />
-            <button type="button" className="customer-drawer-close" onClick={() => setMenuOpen(false)} aria-label="Close navigation">
-              <Icons.X size={20} />
-            </button>
-          </div>
-        )}
-      >
-        <div className="customer-drawer-profile">
-          {user ? (
-            <div className="customer-drawer-user">
-              {user.avatar ? (
-                <img src={apiImage(user.avatar)} alt="" />
-              ) : (
-                <span className="customer-drawer-avatar">{userInitials}</span>
-              )}
-              <div className="customer-drawer-user-details">
-                <strong>{user.name}</strong>
-                <span>{user.email}</span>
-              </div>
-            </div>
-          ) : (
-            <div className="customer-drawer-guest">
-              <div>
-                <strong>Welcome to GOSIKA</strong>
-                <span>Sign in to manage your account and orders.</span>
-              </div>
-              <div className="customer-drawer-guest-actions">
-                <Link className="btn btn-outline btn-sm" to="/login" onClick={() => setMenuOpen(false)}>Login</Link>
-                <Link className="btn btn-primary btn-sm" to="/register" onClick={() => setMenuOpen(false)}>Register</Link>
-              </div>
-            </div>
-          )}
-        </div>
-
-        <form className="customer-drawer-search" onSubmit={submitSearch} role="search">
-          <Search size={17} aria-hidden="true" />
-          <input
-            type="search"
-            value={q}
-            onChange={(event) => setQ(event.target.value)}
-            placeholder="Search products..."
-            aria-label="Search products"
-          />
-          <button type="submit" aria-label="Submit product search"><Search size={16} /></button>
-        </form>
-
-        <nav className="customer-drawer-nav" aria-label="Customer navigation">
-          {!isAccountPage && (
-            <>
-              <section className="customer-drawer-section">
-                <h2>Shop</h2>
-                {renderDrawerLink('/', 'Home', 'Home', { exact: true })}
-                {renderDrawerLink('/shop', 'All Products', 'ShoppingBag', { exact: true })}
-                {renderDrawerLink('/shop?sort=newest', 'New Arrivals', 'Clock')}
-                {renderDrawerLink('/shop?filter=deals', "Today's Deals", 'Flame')}
-              </section>
-
-              <section className="customer-drawer-section">
-                <h2>Categories</h2>
-                {categories.map((category, index) => {
-                  const Icon = getCategoryIcon(category, index)
-                  const to = `/shop?category=${encodeURIComponent(category.slug)}`
-                  const active = isDrawerLinkActive(to) ||
-                    location.pathname === `/category/${category.slug}`
-                  return (
-                    <Link
-                      key={category.id}
-                      to={to}
-                      className={`customer-drawer-link${active ? ' active' : ''}`}
-                      aria-current={active ? 'page' : undefined}
-                      onClick={() => setMenuOpen(false)}
-                    >
-                      <Icon size={17} strokeWidth={1.9} aria-hidden="true" />
-                      <span>{category.name}</span>
-                    </Link>
-                  )
-                })}
-              </section>
-            </>
-          )}
-
-          {!showCustomerOptions && !isAccountPage && (
-            <section className="customer-drawer-section">
-              <h2>Shopping</h2>
-              {renderDrawerLink('/cart', 'Cart', ShoppingBag, {
-                activePaths: ['/checkout', '/order-success'],
-                count: itemCount,
-              })}
-            </section>
-          )}
-
-          {showCustomerOptions && CUSTOMER_NAV.map((item, index) => {
-            if (item.section) {
-              return (
-                <React.Fragment key={`${item.section}-${index}`}>
-                  <h2 className="customer-drawer-section-title">{item.section}</h2>
-                  {item.section === 'SHOPPING' && !isAccountPage && renderDrawerLink('/cart', 'Cart', ShoppingBag, {
-                    activePaths: ['/checkout', '/order-success'],
-                    count: itemCount,
-                  })}
-                </React.Fragment>
-              )
-            }
-            const activePaths = item.to === '/account/orders'
-              ? ['/account/orders', ...(
-                location.pathname.startsWith('/account/orders/') && location.pathname !== '/account/orders/active'
-                  ? [location.pathname]
-                  : []
-              )]
-              : item.to === '/account/orders/active'
-                ? ['/account/orders/active']
-              : item.to === '/account/wishlist'
-                ? ['/wishlist']
-                : []
-            return renderDrawerLink(item.to, item.label, item.icon, {
-              exact: item.to === '/account/orders' || item.to === '/account/orders/active' || item.end,
-              activePaths,
-              count: item.to === '/account/wishlist'
-                ? wishlistCount
-                : item.to === '/account/notifications'
-                  ? unreadNotif
-                  : 0,
-            })
-          })}
-
-          {!showCustomerOptions && !isAccountPage && (
-            <section className="customer-drawer-section">
-              <h2>Support</h2>
-              {renderDrawerLink('/help', 'Help Center', 'LifeBuoy')}
-            </section>
-          )}
-
-          {!isAdminUser && !isAccountPage && (
-            <section className="customer-drawer-section">
-              <h2>Seller</h2>
-              {renderDrawerLink('/seller/login', 'Become a Seller', Store)}
-              {isVendor() && renderDrawerLink('/vendor', 'Vendor Dashboard', LayoutDashboard)}
-            </section>
-          )}
-          {isAdminUser && !isAccountPage && (
-            <section className="customer-drawer-section">
-              <h2>Administration</h2>
-              {renderDrawerLink('/admin', 'Admin Panel', Settings)}
-            </section>
-          )}
-        </nav>
-
-        {user && (
-          <div className="customer-drawer-footer">
-            <button type="button" onClick={handleLogout}>
-              <LogOut size={17} aria-hidden="true" /> Logout
-            </button>
-          </div>
-        )}
-      </Drawer>
     </header>
   )
 }

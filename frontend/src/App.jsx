@@ -52,6 +52,7 @@ import AccountSupport from './pages/account/AccountSupport'
 import ConversationInbox from './pages/messaging/ConversationInbox'
 import { AccountTitle } from './pages/account/AccountUI'
 import EmailVerificationPrompt from './components/common/EmailVerificationPrompt'
+import { isCustomerAccountPath } from './utils/customerAccount'
 
 import VendorDashboard from './pages/vendor/VendorDashboard'
 import VendorOrders from './pages/vendor/VendorOrders'
@@ -259,6 +260,7 @@ function AdminIndexRedirect() {
 
 function CustomerLayout() {
   const { pathname } = useLocation()
+  const isAccountRoute = isCustomerAccountPath(pathname)
   const showFooter =
     pathname === '/' ||
     pathname === '/shop' ||
@@ -270,7 +272,7 @@ function CustomerLayout() {
   return (
     <div className="flex flex-col customer-shell" style={{ minHeight: '100vh' }}>
       <CustomerHeader />
-      <main className="customer-main flex-1" style={{ display: 'flex', flexDirection: 'column' }}>
+      <main className={`customer-main flex-1${isAccountRoute ? ' customer-main-account' : ''}`} style={{ display: 'flex', flexDirection: 'column' }}>
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/shop" element={<Shop />} />
@@ -320,7 +322,7 @@ function CustomerLayout() {
         </Routes>
       </main>
       {showFooter && <CustomerFooter />}
-      <CustomerBottomNav />
+      {!isAccountRoute && <CustomerBottomNav />}
     </div>
   )
 }

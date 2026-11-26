@@ -4,9 +4,9 @@ import { ShoppingBag, PackageCheck, RotateCcw, Heart, Ticket, Clock, ArrowRight,
 import api from '../../api/client'
 import { useAuth } from '../../context/AuthContext'
 import { useWishlist } from '../../context/WishlistContext'
-import { initials, money, formatDateTime } from '../../utils/format'
+import { initials, money, formatDateTime, errorMessage } from '../../utils/format'
 import StatusOrderTable from '../../components/admin/StatusOrderTable'
-import { AccountPage, AccountSection, AccountGrid, AccountStat, AccountSkeleton } from './AccountUI'
+import { AccountPage, AccountSection, AccountGrid, AccountStat, AccountSkeleton, AccountError } from './AccountUI'
 
 const ACTIVE_STATUSES = ['confirmed', 'accepted', 'processing', 'preparing', 'ready_for_pickup', 'picked_up', 'out_for_delivery']
 
@@ -16,28 +16,31 @@ export default function CustomerDashboard() {
   const [orders, setOrders] = useState([])
   const [returns, setReturns] = useState([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
   const [filter, setFilter] = useState('all')
+  const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
     let alive = true
     setLoading(true)
-    api
-      .get('/orders', { params: { per_page: 100 } })
-      .then((res) => {
-        const raw = res.data?.data?.data ?? res.data?.data ?? res.data
-        if (alive) setOrders(Array.isArray(raw) ? raw : [])
+    setError(null)
+    Promise.all([
+      api.get('/orders', { params: { per_page: 50 } }),
+      api.get('/customer/returns', { params: { per_page: 50 } }),
+    ])
+      .then(([ordersResponse, returnsResponse]) => {
+        const orderData = ordersResponse.data?.data?.data ?? ordersResponse.data?.data ?? ordersResponse.data
+        const returnData = returnsResponse.data?.data?.data ?? returnsResponse.data?.data ?? returnsResponse.data
+        if (!alive) return
+        setOrders(Array.isArray(orderData) ? orderData : [])
+        setReturns(Array.isArray(returnData) ? returnData : [])
       })
-      .catch(() => {})
+      .catch((requestError) => {
+        if (alive) setError(requestError)
+      })
       .finally(() => alive && setLoading(false))
-    api
-      .get('/customer/returns', { params: { per_page: 100 } })
-      .then((res) => {
-        const raw = res.data?.data?.data ?? res.data?.data ?? res.data
-        if (alive) setReturns(Array.isArray(raw) ? raw : [])
-      })
-      .catch(() => {})
     return () => { alive = false }
-  }, [])
+  }, [reloadKey])
 
   const name = user?.name || 'Customer'
 
@@ -68,28 +71,35 @@ export default function CustomerDashboard() {
     )
   }
 
+  if (error) {
+    return (
+      <AccountPage title="Account Overview" subtitle="Your buyer hub — orders, savings, lists & more.">
+        <AccountError message={errorMessage(error, 'Could not load your account overview.')} onRetry={() => setReloadKey((key) => key + 1)} />
+      </AccountPage>
+    )
+  }
+
   return (
     <AccountPage title="Account Overview" subtitle="Your buyer hub — orders, savings, lists & more.">
-      {/* Greeting hero card */}
-      <div className="card" style={{ background: 'linear-gradient(120deg,#161d2b 0%,#253046 100%)', borderRadius: 18, border: 'none', padding: 22, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 18, color: '#fff', boxShadow: '0 8px 24px -6px rgba(15,23,42,0.35)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span style={{ width: 48, height: 48, borderRadius: '50%', background: 'var(--primary)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 17 }}>{initials(name)}</span>
+      <div className="card account-overview-welcome">
+        <div className="account-overview-greeting">
+          <span className="account-overview-avatar">{initials(name)}</span>
           <div>
-            <div style={{ fontSize: 17, fontWeight: 800 }}>Welcome back, {name.split(' ')[0]}</div>
-            <div style={{ fontSize: 12.5, color: '#cbd5e1', fontWeight: 500 }}>Your buyer hub · orders, savings, lists & more</div>
+            <div className="account-overview-name">Welcome back, {name.split(' ')[0]}</div>
+            <div className="account-overview-sub">Your orders, savings and shopping lists</div>
           </div>
         </div>
-        <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, letterSpacing: '0.04em' }}>TOTAL SPEND</div>
-          <div style={{ fontSize: 24, fontWeight: 900, color: '#fff' }}>{money(orders.reduce((s, o) => s + (Number(o.grand_total) || 0), 0))}</div>
-          <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>{orders.length} order{orders.length === 1 ? '' : 's'}</div>
+        <div className="account-overview-spend">
+          <div className="account-overview-spend-label">RECENT SPEND</div>
+          <div className="account-overview-spend-value">{money(orders.reduce((s, o) => s + (Number(o.grand_total) || 0), 0))}</div>
+          <div className="account-overview-spend-count">{orders.length} order{orders.length === 1 ? '' : 's'}</div>
         </div>
       </div>
 
       {/* KPI row */}
       <AccountGrid min={155}>
         <AccountStat label="Active Orders" value={collect.active} sub="In transit" icon={ShoppingBag} tone="primary" to="/account/orders/active" />
-        <AccountStat label="Delivered" value={collect.delivered} sub="All time" icon={PackageCheck} tone="success" to="/account/orders" />
+        <AccountStat label="Delivered" value={collect.delivered} sub="Recent orders" icon={PackageCheck} tone="success" to="/account/orders" />
         <AccountStat label="Pending Returns" value={collect.pendingReturns} sub="Action needed" icon={RotateCcw} tone="purple" to="/account/returns" />
         <AccountStat label="Wishlist" value={wishlistIds.length} sub="Saved for later" icon={Heart} tone="danger" to="/account/wishlist" />
         <AccountStat label="My Vouchers" value="—" sub="Check deals" icon={Ticket} tone="blue" to="/account/vouchers" />

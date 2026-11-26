@@ -9,16 +9,14 @@ import { CUSTOMER_NAV } from '../../utils/constants'
 import { AccountNavContext } from './AccountUI'
 import Drawer from '../../components/ui/Drawer'
 
-const LEGACY_NAV_PATHS = {
-  '/orders': '/account/orders',
-  '/wishlist': '/account/wishlist',
-}
-
 function isNavItemActive(to, pathname) {
   if (pathname === to) return true
-  if (LEGACY_NAV_PATHS[pathname] === to) return true
-  if (to === '/account/orders' && /^\/orders\/\d+$/.test(pathname)) return true
-  if (to === '/account/orders' && /^\/account\/orders\/\d+$/.test(pathname)) return true
+  if (to === '/account/wishlist' && pathname === '/wishlist') return true
+  if (to === '/account/orders') {
+    if (pathname === '/orders') return true
+    if (/^\/orders\/[^/]+$/.test(pathname)) return true
+    if (/^\/account\/orders\/[^/]+$/.test(pathname) && pathname !== '/account/orders/active') return true
+  }
   return false
 }
 
@@ -94,7 +92,10 @@ export default function AccountLayout() {
   return (
     <div className="account-shell" id="customer-account-shell">
       <div className="acc-desktop-toolbar">
-        <BreadcrumbNav activeLabel={label} />
+        <div className="acc-desktop-heading">
+          <BreadcrumbNav activeLabel={label} />
+          <h1 className="acc-shell-title">My Account</h1>
+        </div>
       </div>
 
       <div className="acc-mobilebar">
@@ -107,14 +108,7 @@ export default function AccountLayout() {
         >
           <Menu size={20} />
         </button>
-        <div className="acc-current-title">{label}</div>
-        <Link to="/account/profile" className="acc-mobile-avatar" aria-label="Go to profile information">
-          {user?.avatar ? (
-            <img src={apiImage(user.avatar)} alt="" />
-          ) : (
-            <span>{userInitials}</span>
-          )}
-        </Link>
+        <h1 className="acc-current-title">{label}</h1>
       </div>
 
       <div className="account-layout" id="account-layout-grid">

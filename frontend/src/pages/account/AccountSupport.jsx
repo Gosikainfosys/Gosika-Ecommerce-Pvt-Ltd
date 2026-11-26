@@ -10,7 +10,7 @@ import EmptyState from '../../components/ui/EmptyState'
 import ErrorState from '../../components/ui/ErrorState'
 import { useToast } from '../../context/ToastContext'
 import { formatDateTime, errorMessage } from '../../utils/format'
-import { AccountPage, AccountTitle } from './AccountUI'
+import { AccountPage } from './AccountUI'
 import { useAuth } from '../../context/AuthContext'
 
 export default function AccountSupport() {
@@ -201,6 +201,13 @@ export default function AccountSupport() {
     setNewDescription('')
   }
 
+  const leaveDetail = () => {
+    setView('list')
+    setSelectedStore(null)
+    setSearchParams({}, { replace: true })
+    loadTickets()
+  }
+
   const handleFileAttachment = (e, isReply = false) => {
     const files = Array.from(e.target.files || [])
     files.forEach(file => {
@@ -219,18 +226,13 @@ export default function AccountSupport() {
 
   if (view === 'new') {
     return (
-      <div className="card">
-        <AccountTitle label={selectedStore ? `Message ${selectedStore.name}` : 'Message GOSIKA Support'} />
-        <div className="flex items-center gap-2 mb-4 pb-3" style={{ borderBottom: '1px solid var(--border)' }}>
-          <button type="button" className="btn btn-ghost btn-xs flex items-center gap-1" onClick={leaveNewMessage}>
-            <ArrowLeft size={14} /> Back to Support Tickets
-          </button>
-          <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>
-            {selectedStore ? `Message ${selectedStore.name}` : 'Message GOSIKA Support'}
-          </h2>
-        </div>
-
-        <form onSubmit={handleCreateTicket} className="flex flex-col gap-3">
+      <AccountPage
+        title={selectedStore ? `Message ${selectedStore.name}` : 'New Support Ticket'}
+        subtitle={selectedStore ? 'Send a message to this store.' : 'Create a request for GOSIKA Support.'}
+        actions={<button type="button" className="btn btn-outline btn-sm" onClick={leaveNewMessage}><ArrowLeft size={14} /> Back to tickets</button>}
+      >
+        <div className="card">
+          <form onSubmit={handleCreateTicket} className="flex flex-col gap-3">
           {storeLoading ? (
             <div className="muted text-sm">Opening store conversation…</div>
           ) : selectedStore ? (
@@ -337,23 +339,24 @@ export default function AccountSupport() {
               {creating ? 'Sending…' : 'Send Message'}
             </button>
           </div>
-        </form>
-      </div>
+          </form>
+        </div>
+      </AccountPage>
     )
   }
 
   if (view === 'detail' && activeTicket) {
     const isClosed = activeTicket.status === 'closed'
     return (
-      <>
-      <AccountTitle label="Support Tickets" />
+      <AccountPage
+        title="Support Ticket"
+        subtitle={`${activeTicket.subject} · #${activeTicket.ticket_number || activeTicket.id}`}
+        actions={<button type="button" className="btn btn-outline btn-sm" onClick={leaveDetail}><ArrowLeft size={14} /> Back to tickets</button>}
+      >
       <div className="card card-pad-none" style={{ display: 'flex', flexDirection: 'column', height: 'min(640px, calc(100dvh - 190px))', minHeight: 400, overflow: 'hidden' }}>
         {/* Detail Header */}
         <div style={{ padding: '14px 18px', background: 'var(--bg)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
           <div className="flex items-center gap-2">
-            <button type="button" className="btn btn-ghost btn-xs flex items-center gap-1" onClick={() => { setView('list'); setSelectedStore(null); setSearchParams({}, { replace: true }); loadTickets(); }}>
-              <ArrowLeft size={14} /> Back
-            </button>
             <div>
               <div style={{ fontWeight: 800, fontSize: 15, color: 'var(--ink)' }}>
                 {activeTicket.vendor_name || 'GOSIKA Support'}
@@ -488,7 +491,7 @@ export default function AccountSupport() {
           </div>
         )}
       </div>
-      </>
+      </AccountPage>
     )
   }
 
