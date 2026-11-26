@@ -525,6 +525,16 @@ export default function AdminReturnDetail() {
   }
 
   const detailOrder = item?.order
+  const requestedItem = item?.order_item
+    || (detailOrder?.items || []).find(orderItem =>
+      String(orderItem.id ?? orderItem.uuid) === String(item?.order_item_id)
+    )
+  const requestedQuantity = requestedItem
+    ? Math.min(Number(requestedItem.quantity || 1), Math.max(1, Number(item?.quantity || 1)))
+    : 0
+  const requestedItemAmount = requestedItem
+    ? (Number(requestedItem.line_total || 0) / Math.max(1, Number(requestedItem.quantity || 1))) * requestedQuantity
+    : 0
   const assignment = (item?.vendor_order?.assignments || item?.order?.vendorOrders?.[0]?.assignments || [])
     .find(a => a.delivered_at) || (item?.vendor_order?.assignments || item?.order?.vendorOrders?.[0]?.assignments || [])[0]
   const deliveryPartner = assignment?.delivery_partner || assignment?.deliveryPartner
@@ -654,30 +664,31 @@ export default function AdminReturnDetail() {
           <div style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
             <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 6 }}>
               <ShoppingBag size={15} style={{ color: 'var(--muted)' }} />
-              <span style={{ fontWeight: 800, fontSize: 14 }}>Order Items</span>
+              <span style={{ fontWeight: 800, fontSize: 14 }}>Requested Item</span>
             </div>
             <div style={{ overflowX: 'auto' }}>
               <table className="table" style={{ width: '100%', minWidth: 500 }}>
                 <thead>
-                  <tr><th>Product</th><th>SKU / Variant</th><th>Qty</th><th>Unit price</th><th>Line total</th></tr>
+                  <tr><th>Product</th><th>SKU / Variant</th><th>Qty requested</th><th>Unit price</th><th>Requested amount</th></tr>
                 </thead>
                 <tbody>
-                  {(detailOrder?.items || []).map(oi => (
-                    <tr key={oi.uuid || oi.id}>
+                  {requestedItem ? (
+                    <tr key={requestedItem.uuid || requestedItem.id}>
                       <td>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                          <img src={oi.image ? apiImage(oi.image) : getProductImage(null)} alt={oi.product_name}
+                          <img src={requestedItem.image ? apiImage(requestedItem.image) : getProductImage(null)} alt={requestedItem.product_name}
                             onError={handleImgError} style={{ width: 40, height: 40, borderRadius: 6, objectFit: 'cover', flexShrink: 0 }} />
-                          <span style={{ fontWeight: 600 }}>{oi.product_name}</span>
+                          <span style={{ fontWeight: 600 }}>{requestedItem.product_name}</span>
                         </div>
                       </td>
-                      <td style={{ fontSize: 12 }}>{[oi.sku, oi.variant_name].filter(Boolean).join(' · ') || '—'}</td>
-                      <td>{oi.quantity}</td>
-                      <td>{money(oi.unit_price || 0)}</td>
-                      <td style={{ fontWeight: 700 }}>{money(oi.line_total || 0)}</td>
+                      <td style={{ fontSize: 12 }}>{[requestedItem.sku, requestedItem.variant_name].filter(Boolean).join(' · ') || '—'}</td>
+                      <td>{requestedQuantity}</td>
+                      <td>{money(requestedItem.unit_price || 0)}</td>
+                      <td style={{ fontWeight: 700 }}>{money(requestedItemAmount)}</td>
                     </tr>
-                  ))}
-                  {!(detailOrder?.items || []).length && <tr><td colSpan={5} style={{ color: 'var(--muted)' }}>No order items.</td></tr>}
+                  ) : (
+                    <tr><td colSpan={5} style={{ color: 'var(--muted)' }}>The requested order item could not be found.</td></tr>
+                  )}
                 </tbody>
               </table>
             </div>
