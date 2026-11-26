@@ -9,6 +9,17 @@ class SettlementResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
+        $status = $this->status->value;
+        if ($status === 'paid') {
+            $hasPaidPayout = $this->relationLoaded('payoutRequests')
+                ? $this->payoutRequests->contains(fn ($payout) => $payout->status->value === 'paid')
+                : $this->payoutRequests()->where('status', 'paid')->exists();
+
+            if (! $hasPaidPayout) {
+                $status = 'released';
+            }
+        }
+
         return [
             'id' => $this->uuid,
             'ledger_reference_id' => (int) $this->getKey(),
@@ -22,7 +33,7 @@ class SettlementResource extends JsonResource
             'refunds_total' => number_format((float) $this->refunds_total, 2, '.', ''),
             'adjustments_total' => number_format((float) $this->adjustments_total, 2, '.', ''),
             'net_payable' => number_format((float) $this->net_payable, 2, '.', ''),
-            'status' => $this->status->value,
+            'status' => $status,
             'hold_reason' => $this->hold_reason,
             'orders_count' => count($this->meta['vendor_order_ids'] ?? []),
             'generated_at' => $this->generated_at?->toISOString(),

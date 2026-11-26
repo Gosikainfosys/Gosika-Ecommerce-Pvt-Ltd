@@ -199,16 +199,25 @@ class WalletService
     {
         $this->reconcileRefundEarnings($vendorFilter);
 
-        $vendorIds = VendorOrder::query()
-            ->whereIn('status', [OrderStatus::DELIVERED, OrderStatus::COMPLETED])
-            ->where('delivery_status', DeliveryStatus::DELIVERED)
-            ->when($vendorFilter, fn ($query) => $query->where('vendor_id', $vendorFilter->id))
-            ->whereHas('order', fn ($query) => $query->whereIn('payment_status', [
-                OrderPaymentStatus::PAID,
-                OrderPaymentStatus::PARTIALLY_REFUNDED,
-            ]))
-            ->distinct()
-            ->pluck('vendor_id');
+        $vendorIds = $vendorFilter
+            ? collect([$vendorFilter->id])
+            : WalletTransaction::query()
+                ->join('vendor_wallets', 'vendor_wallets.id', '=', 'wallet_transactions.wallet_id')
+                ->where('wallet_transactions.transaction_type', WalletTransactionType::CREDIT_EARNINGS->value)
+                ->where('wallet_transactions.reference_type', 'vendor_order')
+                ->distinct()
+                ->pluck('vendor_wallets.vendor_id')
+                ->merge(VendorOrder::query()
+                    ->whereIn('status', [OrderStatus::DELIVERED, OrderStatus::COMPLETED])
+                    ->where('delivery_status', DeliveryStatus::DELIVERED)
+                    ->whereHas('order', fn ($query) => $query->whereIn('payment_status', [
+                        OrderPaymentStatus::PAID,
+                        OrderPaymentStatus::PARTIALLY_REFUNDED,
+                    ]))
+                    ->distinct()
+                    ->pluck('vendor_id'))
+                ->unique()
+                ->values();
 
         $releasedOrderCount = 0;
 
@@ -223,6 +232,8 @@ class WalletService
                 );
 
                 if ($maturedOrders->isEmpty()) {
+                    $this->reconcileHoldingPeriodBalance($vendor);
+
                     return $releasedCount;
                 }
 
@@ -240,12 +251,92 @@ class WalletService
                     $deliveredAt->max()->copy()->endOfDay()
                 );
                 $this->distributeSettlement($settlement);
+                $this->reconcileHoldingPeriodBalance($vendor);
 
                 return $releasedCount + $maturedOrders->count();
             });
         }
 
         return $releasedOrderCount;
+    }
+
+    protected function reconcileHoldingPeriodBalance(Vendor $vendor): void
+    {
+        $wallet = $this->lockWallet($vendor->id);
+        $earningTransactions = WalletTransaction::query()
+            ->where('wallet_id', $wallet->id)
+            ->where('transaction_type', WalletTransactionType::CREDIT_EARNINGS->value)
+            ->where('reference_type', 'vendor_order')
+            ->get(['reference_id', 'amount'])
+            ->groupBy('reference_id')
+            ->map(fn (Collection $transactions) => (float) $transactions->sum('amount'));
+
+        if ($earningTransactions->isEmpty()) {
+            return;
+        }
+
+        $releasedOrderIds = Settlement::query()
+            ->where('vendor_id', $vendor->id)
+            ->where('status', SettlementStatus::PAID->value)
+            ->with('payoutRequests')
+            ->get()
+            ->filter(fn (Settlement $settlement) => ! $settlement->payoutRequests
+                ->contains(fn (PayoutRequest $payout) => $payout->status->value === PayoutStatus::PAID->value))
+            ->flatMap(fn (Settlement $settlement) => $settlement->meta['vendor_order_ids'] ?? [])
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values();
+
+        $orders = VendorOrder::query()
+            ->where('vendor_id', $vendor->id)
+            ->whereIn('id', $earningTransactions->keys()->map(fn ($id) => (int) $id))
+            ->with(['order.vendorOrders.assignments', 'vendor'])
+            ->withSum(['refunds as refunded_total' => fn ($query) => $query
+                ->where('status', RefundStatus::REFUNDED->value)], 'amount')
+            ->get();
+
+        $totalEarnedNet = 0.0;
+        $maturedReleasedNet = 0.0;
+        foreach ($orders as $order) {
+            $netAmount = max(
+                0,
+                round((float) $earningTransactions->get($order->id, 0) - (float) ($order->refunded_total ?? 0), 2)
+            );
+            $totalEarnedNet += $netAmount;
+
+            if ($releasedOrderIds->contains($order->id) && $this->isEligibleForEarnings($order, $vendor)) {
+                $maturedReleasedNet += $netAmount;
+            }
+        }
+
+        $activePayoutStatuses = [
+            PayoutStatus::PENDING->value,
+            PayoutStatus::APPROVED->value,
+            PayoutStatus::PROCESSING->value,
+            PayoutStatus::PAID->value,
+        ];
+        $payouts = PayoutRequest::query()
+            ->where('vendor_id', $vendor->id)
+            ->whereIn('status', $activePayoutStatuses)
+            ->get(['amount', 'funding_source']);
+        $committedPayouts = (float) $payouts->sum('amount');
+        $availableBalancePayouts = (float) $payouts
+            ->where('funding_source', PayoutRequest::FUNDING_SOURCE_AVAILABLE_BALANCE)
+            ->sum('amount');
+        $nonEarningsBalance = (float) $wallet->balance - ($totalEarnedNet - $committedPayouts);
+        $targetAvailable = round($maturedReleasedNet - $availableBalancePayouts + $nonEarningsBalance, 2);
+        $targetAvailable = min(max(0, $targetAvailable), max(0, (float) $wallet->balance));
+        $targetPending = round((float) $wallet->balance - $targetAvailable, 2);
+
+        if (abs((float) $wallet->available_balance - $targetAvailable) < 0.01
+            && abs((float) $wallet->pending_balance - $targetPending) < 0.01) {
+            return;
+        }
+
+        $this->mutate($wallet, function (VendorWallet $wallet) use ($targetAvailable, $targetPending) {
+            $wallet->available_balance = $targetAvailable;
+            $wallet->pending_balance = $targetPending;
+        });
     }
 
     public function unsettledEarningsByVendor(?Vendor $vendorFilter = null): Collection
@@ -386,6 +477,7 @@ class WalletService
                 ->lockForUpdate()
                 ->firstOrFail();
             $status = $settlement->status->value;
+            $noticeEvent = 'distributed';
 
             if (! in_array($status, [SettlementStatus::ELIGIBLE->value, SettlementStatus::PROCESSING->value], true)) {
                 throw new DomainException('Only eligible or processing settlements can be distributed.', 422);
@@ -417,6 +509,7 @@ class WalletService
                     'reference_id' => $settlement->id,
                     'description' => 'Distributed settlement '.$settlement->settlement_number.' to available balance',
                 ]);
+                $noticeEvent = 'released_to_wallet';
             } else {
                 $payout = $settlement->payoutRequests()
                     ->whereIn('status', [
@@ -455,7 +548,7 @@ class WalletService
             $settlement->updated_by = $user?->id;
             $settlement->save();
 
-            $this->dispatcher->settlementNotice($settlement, 'distributed');
+            $this->dispatcher->settlementNotice($settlement, $noticeEvent);
 
             return $settlement->fresh(['vendor']);
         });
@@ -554,6 +647,7 @@ class WalletService
     ): PayoutRequest {
         $this->assertPayoutsEnabled();
         $this->assertPayoutScheduleOpen();
+        $this->releaseMaturedVendorEarnings($vendor);
 
         $amount = round($requestedAmount, 2);
         $minimumAmount = (float) Setting::get('settlement.min_payout_amount', 1000);
@@ -1122,6 +1216,27 @@ class WalletService
         }
 
         if (! $this->isCycleComplete($settlement)) {
+            return false;
+        }
+
+        $orderIds = collect($settlement->meta['vendor_order_ids'] ?? [])
+            ->map(fn ($id) => (int) $id)
+            ->filter()
+            ->unique()
+            ->values();
+
+        if ($orderIds->isEmpty()) {
+            return false;
+        }
+
+        $orders = VendorOrder::query()
+            ->where('vendor_id', $settlement->vendor_id)
+            ->whereIn('id', $orderIds)
+            ->with(['order.vendorOrders.assignments', 'vendor'])
+            ->get();
+
+        if ($orders->count() !== $orderIds->count()
+            || $orders->contains(fn (VendorOrder $order) => ! $this->isEligibleForEarnings($order, $order->vendor))) {
             return false;
         }
 

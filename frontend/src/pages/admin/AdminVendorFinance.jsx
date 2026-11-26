@@ -21,6 +21,7 @@ const STATUSES = {
   pending: { label: 'Pending', bg: '#fef3c7', fg: '#d97706' },
   processing: { label: 'Processing', bg: '#dbeafe', fg: '#2563eb' },
   eligible: { label: 'Eligible', bg: '#dcfce7', fg: '#16a34a' },
+  released: { label: 'Released to wallet', bg: '#dcfce7', fg: '#15803d' },
   hold: { label: 'Hold', bg: '#fef3c7', fg: '#d97706' },
   on_hold: { label: 'On Hold', bg: '#fef3c7', fg: '#d97706' },
   paid: { label: 'Paid', bg: '#dcfce7', fg: '#16a34a' },
@@ -432,10 +433,10 @@ export default function AdminVendorFinance() {
         )}
         <div className="card" style={{ padding: '16px 18px', borderLeft: '4px solid #0891b2' }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 }}>
-            <CheckCircle2 size={12} style={{ marginRight: 4, verticalAlign: 'middle' }} /> Settled to Date
+            <CheckCircle2 size={12} style={{ marginRight: 4, verticalAlign: 'middle' }} /> Released to Wallet
           </div>
-          <div style={{ fontSize: 20, fontWeight: 900, color: '#0891b2' }}>{money(stats.total_settled || 0)}</div>
-          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Vendor eligible funds</div>
+          <div style={{ fontSize: 20, fontWeight: 900, color: '#0891b2' }}>{money(stats.total_released_to_wallet || 0)}</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Made available to wallet · not paid out</div>
         </div>
         <div className="card" style={{ padding: '16px 18px', borderLeft: '4px solid #2563eb' }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 }}>
@@ -780,9 +781,9 @@ export default function AdminVendorFinance() {
                               className="btn btn-outline btn-xs"
                               style={{ color: '#16a34a', borderColor: '#86efac' }}
                               onClick={() => handleSettlementAction('distribute', s)}
-                              title={s.status === 'processing' ? 'Mark the accepted payout and this settlement as distributed / paid' : 'Distribute net payable to the store and mark settlement paid'}
+                              title={s.status === 'processing' ? 'Mark the accepted payout as paid to the store bank account' : 'Release net payable to the store available wallet balance'}
                             >
-                              <CheckCircle2 size={12} style={{ marginRight: 3 }} /> Distribute
+                              <CheckCircle2 size={12} style={{ marginRight: 3 }} /> {s.status === 'processing' ? 'Mark Paid' : 'Release to Wallet'}
                             </button>
                           </div>
                         )}
@@ -795,6 +796,11 @@ export default function AdminVendorFinance() {
                           >
                             <PlayCircle size={12} style={{ marginRight: 3 }} /> Release
                           </button>
+                        )}
+                        {s.status === 'released' && s.paid_at && (
+                          <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>
+                            Released {formatDateTime(s.paid_at)}
+                          </span>
                         )}
                         {s.status === 'paid' && s.paid_at && (
                           <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>
@@ -1064,8 +1070,8 @@ export default function AdminVendorFinance() {
         message={
           dialogState.action === 'distribute'
             ? dialogState.settlement?.status === 'processing'
-              ? 'This marks the accepted payout request and the settlement as distributed / paid to the store bank account.'
-              : 'This moves the net payable to the store\'s available balance and marks the settlement as distributed / paid. Only allowed when no active payout exists.'
+              ? 'This marks the accepted payout request as paid to the store bank account.'
+              : 'This releases the net payable into the store\'s available wallet balance. It does not mark a bank payout as paid.'
             : dialogState.action === 'hold'
               ? 'Holding keeps the funds pending until released. Please provide a reason for the hold.'
               : 'Releasing returns this settlement to eligible so the vendor can request a payout for it.'

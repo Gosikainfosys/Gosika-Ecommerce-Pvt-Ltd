@@ -312,6 +312,7 @@ class NotificationDispatcher
             'eligible' => 'Settlement '.$settlement->settlement_number.' ready',
             'held' => 'Settlement '.$settlement->settlement_number.' placed on hold',
             'released' => 'Settlement '.$settlement->settlement_number.' released',
+            'released_to_wallet' => 'Settlement '.$settlement->settlement_number.' released to your available wallet',
             'distributed' => 'Settlement '.$settlement->settlement_number.' paid out',
             'paid' => 'Settlement '.$settlement->settlement_number.' completed',
             default => 'Settlement '.$settlement->settlement_number.' updated',

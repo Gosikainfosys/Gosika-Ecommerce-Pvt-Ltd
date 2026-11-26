@@ -271,6 +271,7 @@ class AdminWalletController extends Controller
         $search = trim((string) $request->input('search', ''));
         $query = Settlement::query()
             ->with('vendor')
+            ->with('payoutRequests')
             ->when($search !== '', function ($q) use ($search) {
                 $q->where(function ($inner) use ($search) {
                     $inner->where('settlement_number', 'like', "%{$search}%")
@@ -303,6 +304,7 @@ class AdminWalletController extends Controller
 
             $settlementsByVendor = Settlement::query()
                 ->whereIn('vendor_id', $vendors->modelKeys())
+                ->with('payoutRequests')
                 ->latest()
                 ->get()
                 ->groupBy('vendor_id');
@@ -342,16 +344,21 @@ class AdminWalletController extends Controller
                 SettlementStatus::PROCESSING->value => 0,
                 SettlementStatus::HOLD->value => 1,
                 SettlementStatus::ELIGIBLE->value => 2,
-                SettlementStatus::PAID->value => 3,
-                'not_generated' => 4,
+                'released' => 3,
+                SettlementStatus::PAID->value => 4,
+                'not_generated' => 5,
             ];
 
             $grouped = $vendors->map(function (Vendor $vendor) use ($statusPriority, $settlementsByVendor, $earningsByVendor, $refundsByVendor, $unsettledByVendor) {
                 $rows = $settlementsByVendor->get($vendor->id, collect());
                 $earnings = $earningsByVendor->get($vendor->id);
-                $statuses = $rows->pluck('status')->map->value;
+                $displayStatus = fn (Settlement $settlement) => $settlement->status->value === SettlementStatus::PAID->value
+                    && ! $settlement->payoutRequests->contains(fn ($payout) => $payout->status->value === PayoutStatus::PAID->value)
+                    ? 'released'
+                    : $settlement->status->value;
+                $statuses = $rows->map($displayStatus);
                 $bestStatus = $statuses->sortBy(fn ($status) => $statusPriority[$status] ?? 99)->first();
-                $open = $rows->reject(fn ($row) => $row->status->value === SettlementStatus::PAID->value);
+                $open = $rows->reject(fn ($row) => in_array($displayStatus($row), ['released', SettlementStatus::PAID->value], true));
                 $wallet = $vendor->wallet;
                 $earnedTotal = max(
                     0,
@@ -463,7 +470,15 @@ class AdminWalletController extends Controller
             'total_net_payable' => number_format(max(0, $totalVendorPayable - $totalRefunded), 2, '.', ''),
             'unsettled_earnings' => number_format($unsettledEarnings, 2, '.', ''),
             'settlement_holding_days' => max(0, (int) Setting::get('settlement.waiting_days', 7)),
-            'total_settled' => number_format($settlementModels->where('status', SettlementStatus::PAID)->sum(fn ($s) => (float) $s->net_payable), 2, '.', ''),
+            'total_released_to_wallet' => number_format(
+                $settlementModels
+                    ->filter(fn ($settlement) => $settlement->status->value === SettlementStatus::PAID->value
+                        && ! $settlement->payoutRequests->contains(fn ($payout) => $payout->status->value === PayoutStatus::PAID->value))
+                    ->sum(fn ($settlement) => (float) $settlement->net_payable),
+                2,
+                '.',
+                ''
+            ),
             'total_withdrawn' => number_format(PayoutRequest::query()->where('vendor_id', $vendor->id)->where('status', PayoutStatus::PAID->value)->sum('amount'), 2, '.', ''),
         ];
 
@@ -745,11 +760,22 @@ class AdminWalletController extends Controller
     public function distributeSettlement(string $settlementId): JsonResponse
     {
         $settlement = $this->settlement($settlementId);
+        $isPayoutDistribution = $settlement->status->value === SettlementStatus::PROCESSING->value;
         $settlement = $this->service->distributeSettlement($settlement, request()->user());
 
-        app(AuditLogService::class)->record(request()->user(), 'settlement.distributed', 'settlement', $settlement->uuid, ['status' => $settlement->status->value], ['status' => SettlementStatus::PAID->value]);
+        app(AuditLogService::class)->record(
+            request()->user(),
+            $isPayoutDistribution ? 'settlement.distributed' : 'settlement.released_to_wallet',
+            'settlement',
+            $settlement->uuid,
+            ['status' => $isPayoutDistribution ? SettlementStatus::PROCESSING->value : SettlementStatus::ELIGIBLE->value],
+            ['status' => SettlementStatus::PAID->value]
+        );
 
-        return Response::success(new SettlementResource($settlement->load('vendor')), 'Settlement distributed.');
+        return Response::success(
+            new SettlementResource($settlement->load('vendor', 'payoutRequests')),
+            $isPayoutDistribution ? 'Payout marked as paid.' : 'Settlement released to the available wallet balance.'
+        );
     }
 
     protected function vendor(string $vendorId): Vendor

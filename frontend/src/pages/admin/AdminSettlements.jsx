@@ -16,7 +16,8 @@ const STATUS_ORDER = {
   processing: 0,
   hold: 1,
   eligible: 2,
-  paid: 3,
+  released: 3,
+  paid: 4,
 }
 
 const toInputDate = (d) => {

@@ -48,6 +48,7 @@ use App\Modules\Wallet\Infrastructure\Models\Commission;
 use App\Modules\Wallet\Infrastructure\Models\Settlement;
 use App\Modules\Wallet\Infrastructure\Models\VendorWallet;
 use App\Modules\Wallet\Infrastructure\Models\WalletTransaction;
+use App\Modules\Wallet\Presentation\Resources\SettlementResource;
 use Carbon\Carbon;
 use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -540,7 +541,8 @@ class OrderConfirmationRulesTest extends TestCase
         $this->actingAs($this->adminUser)
             ->getJson('/api/v1/admin/wallet/settlements?group_by_vendor=1')
             ->assertOk()
-            ->assertJsonPath('data.0.vendor_id', $this->vendor->uuid);
+            ->assertJsonPath('data.0.vendor_id', $this->vendor->uuid)
+            ->assertJsonPath('data.0.status', 'released');
     }
 
     public function test_admin_settlement_summaries_include_all_vendors_stores_and_earned_balances(): void
@@ -1654,6 +1656,14 @@ class OrderConfirmationRulesTest extends TestCase
         $this->assertSame('0.00', $wallet->pending_balance);
         $this->assertSame('810.00', $settlement->net_payable);
         $this->assertSame(SettlementStatus::PAID, $settlement->status);
+        $settlementData = SettlementResource::make($settlement->fresh()->load('payoutRequests'))->resolve();
+        $this->assertSame('released', $settlementData['status']);
+        $this->actingAs($this->adminUser)
+            ->getJson("/api/v1/admin/wallet/vendors/{$this->vendor->uuid}/ledger")
+            ->assertOk()
+            ->assertJsonPath('data.stats.total_released_to_wallet', '810.00')
+            ->assertJsonPath('data.stats.total_withdrawn', '0.00')
+            ->assertJsonPath('data.settlements.0.status', 'released');
 
         $this->assertSame(0, $scheduler->run()['earnings_released']);
         $this->assertSame(1, WalletTransaction::query()
@@ -1667,6 +1677,100 @@ class OrderConfirmationRulesTest extends TestCase
             ->where('transaction_type', 'credit_settlement')
             ->where('reference_id', $settlement->id)
             ->count());
+    }
+
+    public function test_holding_period_changes_reclassify_released_earnings_without_recrediting_them(): void
+    {
+        Setting::set('settlement.waiting_days', 0, 'settlement', 'integer', true);
+        [$order, $vendorOrder] = $this->createOrder(OrderStatus::COMPLETED, isCod: false);
+        $order->update(['completed_at' => now()->subDays(3)]);
+        $vendorOrder->update([
+            'status' => OrderStatus::COMPLETED,
+            'delivery_status' => DeliveryStatus::DELIVERED,
+            'vendor_payable' => 810,
+            'commission_rate' => 10,
+            'commission_amount' => 90,
+        ]);
+        $walletService = app(WalletService::class);
+
+        $this->assertSame(1, $walletService->releaseMaturedVendorEarnings());
+        $wallet = $walletService->walletForVendor($this->vendor);
+        $this->assertSame('810.00', $wallet->available_balance);
+        $this->assertSame('0.00', $wallet->pending_balance);
+
+        Setting::set('settlement.waiting_days', 7, 'settlement', 'integer', true);
+        $this->assertSame(0, $walletService->releaseMaturedVendorEarnings());
+        $wallet = $wallet->fresh();
+        $this->assertSame('810.00', $wallet->balance);
+        $this->assertSame('0.00', $wallet->available_balance);
+        $this->assertSame('810.00', $wallet->pending_balance);
+        Setting::set('settlement.payout_frequency', 'manual', 'settlement', 'string', true);
+        Setting::set('settlement.min_payout_amount', 0, 'settlement', 'integer', true);
+
+        try {
+            $walletService->requestAvailableBalancePayout($this->vendor, 810, null, $this->vendorUser);
+            $this->fail('A payout should not be requestable while earnings are below the current holding period.');
+        } catch (DomainException $exception) {
+            $this->assertSame('Payout amount exceeds the available wallet balance.', $exception->getMessage());
+        }
+
+        Setting::set('settlement.waiting_days', 2, 'settlement', 'integer', true);
+        $this->assertSame(0, $walletService->releaseMaturedVendorEarnings());
+        $wallet = $wallet->fresh();
+        $this->assertSame('810.00', $wallet->balance);
+        $this->assertSame('810.00', $wallet->available_balance);
+        $this->assertSame('0.00', $wallet->pending_balance);
+        $this->assertSame(1, WalletTransaction::query()
+            ->where('wallet_id', $wallet->id)
+            ->where('transaction_type', 'credit_earnings')
+            ->where('reference_type', 'vendor_order')
+            ->where('reference_id', $vendorOrder->id)
+            ->count());
+
+        $payout = $walletService->requestAvailableBalancePayout($this->vendor, 810, null, $this->vendorUser);
+        $payout = $walletService->approvePayout($payout, $this->adminUser);
+        $walletService->markPayoutPaid($payout, $this->adminUser);
+        Setting::set('settlement.waiting_days', 7, 'settlement', 'integer', true);
+        $walletService->releaseMaturedVendorEarnings();
+        $wallet = $wallet->fresh();
+        $this->assertSame('0.00', $wallet->balance);
+        $this->assertSame('0.00', $wallet->available_balance);
+        $this->assertSame('0.00', $wallet->pending_balance);
+    }
+
+    public function test_settlement_payout_request_rechecks_current_holding_period(): void
+    {
+        Setting::set('settlement.waiting_days', 0, 'settlement', 'integer', true);
+        Setting::set('settlement.payout_frequency', 'manual', 'settlement', 'string', true);
+        Setting::set('settlement.min_payout_amount', 0, 'settlement', 'integer', true);
+        [$order, $vendorOrder] = $this->createOrder(OrderStatus::COMPLETED, isCod: false);
+        $order->update(['completed_at' => now()->subDays(3)]);
+        $vendorOrder->update([
+            'status' => OrderStatus::COMPLETED,
+            'delivery_status' => DeliveryStatus::DELIVERED,
+            'vendor_payable' => 810,
+            'commission_rate' => 10,
+            'commission_amount' => 90,
+        ]);
+        $walletService = app(WalletService::class);
+        $settlement = $walletService->settleVendor(
+            $this->vendor,
+            now()->subDays(3)->startOfDay(),
+            now()->subDays(3)->endOfDay()
+        );
+
+        Setting::set('settlement.waiting_days', 7, 'settlement', 'integer', true);
+
+        $this->assertCount(0, $walletService->eligibleSettlementsFor($this->vendor));
+        try {
+            $walletService->requestPayout($settlement, null, $this->vendorUser);
+            $this->fail('A settlement payout should not be requestable before the current hold expires.');
+        } catch (DomainException $exception) {
+            $this->assertSame(
+                'Only eligible settlements with a completed cycle can be requested for payout.',
+                $exception->getMessage()
+            );
+        }
     }
 
     public function test_zero_day_holding_period_overrides_return_window_and_vendor_cycle(): void
