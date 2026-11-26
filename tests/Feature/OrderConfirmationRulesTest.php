@@ -2110,6 +2110,65 @@ class OrderConfirmationRulesTest extends TestCase
         ]);
     }
 
+    public function test_admin_product_creation_accepts_full_details_variants_attributes_and_uploaded_images(): void
+    {
+        Storage::fake('public');
+
+        $response = $this->actingAs($this->adminUser)
+            ->post('/api/v1/admin/products', [
+                'vendor_id' => $this->vendor->uuid,
+                'store_id' => $this->store->uuid,
+                'name' => 'Admin-created wool scarf',
+                'slug' => 'admin-created-wool-scarf',
+                'sku' => 'ADMIN-SCARF-001',
+                'barcode' => '1234567890123',
+                'price' => 1200,
+                'compare_at_price' => 1500,
+                'cost_price' => 600,
+                'quantity' => 0,
+                'low_stock_threshold' => 2,
+                'weight_grams' => 350,
+                'dimensions' => '25x15x8 cm',
+                'hs_code' => '621420',
+                'tax_rate' => 13,
+                'manufacturer' => 'Himalayan Textiles',
+                'short_description' => 'A handwoven wool scarf.',
+                'description' => 'Made from locally sourced wool.',
+                'is_featured' => true,
+                'is_negotiable' => false,
+                'meta' => json_encode(['origin' => 'Nepal']),
+                'variants_present' => true,
+                'variants' => [[
+                    'sku' => 'ADMIN-SCARF-BLUE',
+                    'name' => 'Blue / Medium',
+                    'price' => 1200,
+                    'quantity' => 4,
+                    'options' => ['color' => 'Blue', 'size' => 'Medium'],
+                ]],
+                'attributes' => [[
+                    'name' => 'Material',
+                    'type' => 'select',
+                    'values' => ['Wool', 'Cotton'],
+                ]],
+                'images' => [UploadedFile::fake()->image('scarf.png', 100, 100)],
+                'primary_image_upload_index' => 0,
+            ])
+            ->assertCreated()
+            ->assertJsonPath('data.name', 'Admin-created wool scarf')
+            ->assertJsonPath('data.short_description', 'A handwoven wool scarf.')
+            ->assertJsonPath('data.is_featured', true)
+            ->assertJsonPath('data.variants.0.options.color', 'Blue')
+            ->assertJsonPath('data.attributes.0.name', 'Material');
+
+        $product = Product::query()->where('uuid', $response->json('data.id'))->firstOrFail();
+        $this->assertSame(['origin' => 'Nepal'], $product->meta);
+        $this->assertDatabaseHas('product_images', [
+            'product_id' => $product->id,
+            'is_primary' => true,
+        ]);
+        $this->assertCount(1, Storage::disk('public')->allFiles('products/'.$product->uuid));
+    }
+
     public function test_admin_can_manually_create_an_order_for_a_customer(): void
     {
         $customer = User::create([

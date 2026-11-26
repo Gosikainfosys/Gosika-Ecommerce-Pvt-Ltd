@@ -9,6 +9,7 @@ use App\Modules\Catalog\Infrastructure\Models\BrandRequest;
 use App\Modules\Catalog\Infrastructure\Models\Category;
 use App\Modules\Catalog\Infrastructure\Models\Product;
 use App\Modules\Catalog\Presentation\Http\Requests\BrandReviewRequest;
+use App\Modules\Catalog\Presentation\Http\Requests\AdminProductCreateRequest;
 use App\Modules\Catalog\Presentation\Http\Requests\ProductReviewRequest;
 use App\Modules\Catalog\Presentation\Resources\BrandRequestResource;
 use App\Modules\Catalog\Presentation\Resources\BrandResource;
@@ -88,29 +89,9 @@ class AdminCatalogController extends Controller
         ]);
     }
 
-    public function storeProduct(Request $request): JsonResponse
+    public function storeProduct(AdminProductCreateRequest $request): JsonResponse
     {
-        $vendorId = Vendor::query()->where('uuid', $request->input('vendor_id'))->value('id');
-        $data = $request->validate([
-            'vendor_id' => ['required', 'string', 'exists:vendors,uuid'],
-            'store_id' => ['required', 'string', 'exists:stores,uuid'],
-            'name' => ['required', 'string', 'max:200'],
-            'description' => ['nullable', 'string'],
-            'category_id' => ['nullable', 'string', 'exists:categories,uuid'],
-            'sku' => [
-                'nullable',
-                'string',
-                'max:80',
-                Rule::unique('products', 'sku')->where(fn ($query) => $query->where('vendor_id', $vendorId)),
-            ],
-            'price' => ['required', 'numeric', 'min:0'],
-            'compare_at_price' => ['nullable', 'numeric', 'min:0'],
-            'quantity' => ['required', 'integer', 'min:0'],
-            'low_stock_threshold' => ['nullable', 'integer', 'min:0'],
-            'tax_rate' => ['nullable', 'integer', 'min:0', 'max:100'],
-            'status' => ['nullable', Rule::enum(ProductStatus::class)],
-            'image_url' => ['nullable', 'url', 'max:2048'],
-        ]);
+        $data = $request->validated();
 
         $vendor = Vendor::query()->where('uuid', $data['vendor_id'])->firstOrFail();
         if ($vendor->status !== VendorStatus::APPROVED) {
@@ -130,8 +111,12 @@ class AdminCatalogController extends Controller
 
         $imageUrl = $data['image_url'] ?? null;
         unset($data['vendor_id'], $data['store_id'], $data['image_url']);
-        $data['image_urls'] = $imageUrl ? [$imageUrl] : [];
-        $data['primary_image_url'] = $imageUrl;
+        if ($imageUrl && empty($data['image_urls'])) {
+            $data['image_urls'] = [$imageUrl];
+        }
+        if ($imageUrl && empty($data['primary_image_url']) && ! isset($data['primary_image_upload_index'])) {
+            $data['primary_image_url'] = $imageUrl;
+        }
         $data['status'] ??= ProductStatus::PUBLISHED->value;
 
         $product = $this->service->createProductForStore(
@@ -139,7 +124,7 @@ class AdminCatalogController extends Controller
             $store,
             ProductDTO::fromArray($data)
         );
-        $product->load(['vendor', 'store', 'category', 'brand', 'variants', 'images', 'primaryImage']);
+        $product->load(['vendor', 'store', 'category', 'brand', 'variants', 'images', 'primaryImage', 'attributes.values']);
 
         return Response::created(new ProductResource($product), 'Product created.');
     }
