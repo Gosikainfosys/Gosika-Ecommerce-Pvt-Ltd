@@ -2,8 +2,13 @@
 
 use App\Modules\Wallet\Presentation\Http\Controllers\AdminCommissionController;
 use App\Modules\Wallet\Presentation\Http\Controllers\AdminWalletController;
+use App\Modules\Wallet\Presentation\Http\Controllers\PublicPayoutTrackingController;
 use App\Modules\Wallet\Presentation\Http\Controllers\VendorWalletController;
 use Illuminate\Support\Facades\Route;
+
+Route::prefix('v1/public/wallet')->group(function () {
+    Route::get('payouts/{payoutId}/tracking', [PublicPayoutTrackingController::class, 'show']);
+});
 
 Route::prefix('v1/admin')->middleware(['auth:sanctum', 'ensure:admin'])->group(function () {
     Route::get('commissions', [AdminCommissionController::class, 'index']);

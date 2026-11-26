@@ -36,6 +36,7 @@ import BrandPage from './pages/Public/BrandPage'
 import DealsPage from './pages/Public/DealsPage'
 import SearchPage from './pages/Public/SearchPage'
 import BrandsPage from './pages/Public/BrandsPage'
+import PayoutTracking from './pages/Public/PayoutTracking'
 
 import AccountProfile from './pages/account/AccountProfile'
 import AccountAddresses from './pages/account/AccountAddresses'
@@ -332,6 +333,7 @@ export default function App() {
       <Route path="/seller/login" element={<VendorLogin />} />
       <Route path="/vendor/login" element={<VendorLogin />} />
       <Route path="/set-password" element={<SetPassword />} />
+      <Route path="/payout-tracking/:payoutId" element={<PayoutTracking />} />
       <Route path="/admin-login" element={<Navigate to="/admin/login" replace />} />
       <Route path="/vendor-login" element={<Navigate to="/seller/login" replace />} />
       <Route path="/access-denied" element={<PortalAccessDenied />} />

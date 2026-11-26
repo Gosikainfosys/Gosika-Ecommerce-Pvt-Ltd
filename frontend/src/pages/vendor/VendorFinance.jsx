@@ -1152,10 +1152,14 @@ export default function VendorFinance() {
                         className="icon-btn btn-sm"
                         title="Print record"
                         aria-label={`Print ${row.categoryLabel} ${row.reference || ''}`}
-                        onClick={() => {
+                        onClick={async () => {
                           if (row.payout) {
-                            if (!printPayoutReceipt(row.payout, user?.vendor?.company_name || user?.company_name)) {
-                              toast.error('Allow pop-ups to print the payout receipt.')
+                            try {
+                              if (!await printPayoutReceipt(row.payout, user?.vendor?.company_name || user?.company_name, branding)) {
+                                toast.error('Allow pop-ups to print the payout receipt.')
+                              }
+                            } catch {
+                              toast.error('Unable to generate the payout receipt QR code.')
                             }
                           } else {
                             printRow(row)

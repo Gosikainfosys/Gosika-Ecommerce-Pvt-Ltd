@@ -20,6 +20,14 @@ const STATUS_ORDER = {
   paid: 4,
 }
 
+const FREQUENCY_LABELS = {
+  manual: 'Manual On-Demand',
+  daily: 'Daily Batch',
+  weekly: 'Weekly (Every Sunday)',
+  biweekly: 'Biweekly (1st & 15th)',
+  monthly: 'Monthly (1st of month)',
+}
+
 const toInputDate = (d) => {
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, '0')
@@ -34,8 +42,7 @@ export default function AdminSettlements() {
   const [summary, setSummary] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
-  const [cycleValues, setCycleValues] = useState({})
-  const [cycleSaving, setCycleSaving] = useState({})
+  const [payoutFrequency, setPayoutFrequency] = useState('')
 
   const [generateOpen, setGenerateOpen] = useState(false)
   const [generateForm, setGenerateForm] = useState({ vendor_id: '', period_start: '', period_end: '' })
@@ -48,6 +55,12 @@ export default function AdminSettlements() {
       .catch(() => {})
   }, [])
 
+  useEffect(() => {
+    api.get('/admin/settings/commissions')
+      .then(res => setPayoutFrequency(res.data?.data?.payout_frequency || ''))
+      .catch(() => toast.error('Failed to load the admin payout schedule setting.'))
+  }, [toast])
+
   const loadSummary = async () => {
     setLoading(true)
     try {
@@ -56,7 +69,6 @@ export default function AdminSettlements() {
       const res = await api.get('/admin/wallet/settlements', { params })
       const items = api.unwrapList(res.data).sort((a, b) => (STATUS_ORDER[a.status] ?? 99) - (STATUS_ORDER[b.status] ?? 99))
       setSummary(items)
-      setCycleValues(Object.fromEntries(items.map(it => [it.vendor_id, it.settlement_cycle_days ?? 14])))
     } catch (err) {
       toast.error('Failed to load settlement summaries.')
     } finally {
@@ -68,32 +80,25 @@ export default function AdminSettlements() {
     loadSummary()
   }, [search])
 
-  const saveCycle = async (vendorId) => {
-    const raw = cycleValues[vendorId]
-    const days = Number(raw)
-    if (!raw || !Number.isInteger(days) || days < 1 || days > 120) {
-      toast.error('Settlement cycle must be a whole number between 1 and 120 days.')
-      loadSummary()
-      return
-    }
-    setCycleSaving(prev => ({ ...prev, [vendorId]: true }))
-    try {
-      await api.put(`/admin/wallet/vendors/${vendorId}/settlement-cycle`, { settlement_cycle_days: days })
-      toast.success('Settlement cycle updated.')
-    } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to update settlement cycle.')
-    } finally {
-      setCycleSaving(prev => ({ ...prev, [vendorId]: false }))
-      loadSummary()
-    }
-  }
-
   const selectVendorForGenerate = (vendorId) => {
-    const found = summary.find(x => x.vendor_id === vendorId)
-    const days = found?.settlement_cycle_days ?? cycleValues[vendorId] ?? 14
     const end = new Date()
     const start = new Date()
-    start.setDate(end.getDate() - (days - 1))
+    switch (payoutFrequency) {
+      case 'daily':
+        break
+      case 'weekly':
+        start.setDate(end.getDate() - 6)
+        break
+      case 'biweekly':
+        start.setDate(end.getDate() - 13)
+        break
+      case 'monthly':
+        start.setDate(1)
+        break
+      default:
+        setGenerateForm({ vendor_id: vendorId, period_start: '', period_end: '' })
+        return
+    }
     setGenerateForm({
       vendor_id: vendorId,
       period_start: toInputDate(start),
@@ -131,6 +136,8 @@ export default function AdminSettlements() {
         { label: 'Wallet Balance', align: 'right' },
         { label: 'Available Balance', align: 'right' },
         { label: 'Pending Balance', align: 'right' },
+        { label: 'Earning Orders', align: 'right' },
+        { label: 'Settlement Periods', align: 'right' },
         { label: 'Status' },
       ],
       rows: summary.map(s => [
@@ -145,6 +152,8 @@ export default function AdminSettlements() {
         s.net_payable || 0,
         s.available_balance || 0,
         s.pending_balance || 0,
+        s.earning_orders_count || 0,
+        s.settlements_count || 0,
         s.status || '',
       ]),
       title: 'Vendor Settlement Summaries',
@@ -220,6 +229,9 @@ export default function AdminSettlements() {
                 <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 11.5, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>
                   Store / Vendor
                 </th>
+                <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 11.5, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>
+                  Earning Orders / Settlement Periods
+                </th>
                 <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: 11.5, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>
                   Gross Sales / Total Earned
                 </th>
@@ -240,11 +252,13 @@ export default function AdminSettlements() {
             <tbody>
               {loading ? (
                 Array.from({ length: 4 }).map((_, i) => (
-                  <tr key={i}><td colSpan={6} style={{ padding: '18px 16px', textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>Loading settlement summaries...</td></tr>
+                  <tr key={i}>
+                    <td colSpan={7} style={{ padding: '18px 16px', textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>Loading settlement summaries...</td>
+                  </tr>
                 ))
               ) : summary.length === 0 ? (
                 <tr>
-                  <td colSpan={6} style={{ padding: 40, textAlign: 'center', color: 'var(--muted)' }}>
+                  <td colSpan={7} style={{ padding: 40, textAlign: 'center', color: 'var(--muted)' }}>
                     <div style={{ fontWeight: 700, color: 'var(--ink)' }}>No vendor profiles found.</div>
                     <div style={{ maxWidth: 620, margin: '6px auto 0', fontSize: 12 }}>
                       Vendors and their stores appear here even before they have a settlement or earned orders.
@@ -273,28 +287,15 @@ export default function AdminSettlements() {
                             {store.name} · {store.status}
                           </div>
                         ))}
-                        <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-                          {s.earning_orders_count} earning order(s) · {s.settlements_count} settlement period(s)
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 4, fontSize: 10.5, color: 'var(--muted)' }}>
-                          Cycle
-                          <input
-                            type="number"
-                            min={1}
-                            max={120}
-                            className="input"
-                            aria-label={`Settlement cycle days for ${s.vendor_name}`}
-                            value={cycleValues[s.vendor_id] ?? s.settlement_cycle_days ?? ''}
-                            onChange={e => setCycleValues(prev => ({ ...prev, [s.vendor_id]: e.target.value }))}
-                            onBlur={() => saveCycle(s.vendor_id)}
-                            onKeyDown={e => { if (e.key === 'Enter') e.target.blur() }}
-                            disabled={cycleSaving[s.vendor_id]}
-                            title="Settlement cycle length in days (saved on blur or Enter)"
-                            style={{ width: 52, height: 24, padding: '2px 4px', fontSize: 10.5, fontWeight: 700, textAlign: 'center' }}
-                          />
-                          days
-                        </div>
                       </div>
+                    </div>
+                  </td>
+                  <td style={{ padding: '12px 16px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    <div style={{ fontWeight: 700, fontSize: 12, color: 'var(--ink)' }}>
+                      {s.earning_orders_count ?? 0} earning order(s)
+                    </div>
+                    <div style={{ marginTop: 3, fontSize: 11, color: 'var(--muted)' }}>
+                      {s.settlements_count ?? 0} settlement period(s)
                     </div>
                   </td>
                   <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 700, fontSize: 13 }}>
@@ -382,8 +383,11 @@ export default function AdminSettlements() {
                 </select>
                 {generateForm.vendor_id && (
                   <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 6 }}>
-                    Period auto-filled from the configured settlement cycle of{' '}
-                    <strong>{cycleValues[generateForm.vendor_id] ?? 14} days</strong> — adjust the dates above if needed.
+                    {payoutFrequency === 'manual'
+                      ? 'Payout schedule is Manual On-Demand. Choose the period dates for this batch.'
+                      : payoutFrequency
+                        ? <>Period is shared across vendors and follows the admin payout schedule: <strong>{FREQUENCY_LABELS[payoutFrequency] || payoutFrequency}</strong>. Adjust dates above if needed.</>
+                        : 'Choose the period dates for this batch; the admin payout schedule could not be loaded.'}
                   </div>
                 )}
               </div>

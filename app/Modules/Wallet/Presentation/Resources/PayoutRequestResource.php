@@ -2,6 +2,7 @@
 
 namespace App\Modules\Wallet\Presentation\Resources;
 
+use App\Modules\Wallet\Application\Services\PayoutTrackingToken;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -13,6 +14,7 @@ class PayoutRequestResource extends JsonResource
             'id' => $this->uuid,
             'ledger_reference_id' => (int) $this->getKey(),
             'payout_number' => $this->payout_number,
+            'tracking_token' => app(PayoutTrackingToken::class)->generate($this->resource),
             'vendor_id' => $this->vendor?->uuid,
             'vendor_name' => $this->whenLoaded('vendor', fn () => $this->vendor?->company_name),
             'settlement_id' => $this->settlement?->uuid,

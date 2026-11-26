@@ -274,8 +274,12 @@ export default function AdminPayouts() {
                 <button
                   type="button"
                   className="btn btn-outline btn-xs"
-                  onClick={() => {
-                    if (!printPayoutReceipt(item)) toast.error('Allow pop-ups to print the payout receipt.')
+                  onClick={async () => {
+                    try {
+                      if (!await printPayoutReceipt(item, '', branding)) toast.error('Allow pop-ups to print the payout receipt.')
+                    } catch {
+                      toast.error('Unable to generate the payout receipt QR code.')
+                    }
                   }}
                   title="Print payout receipt"
                   aria-label={`Print receipt for ${item.payout_number}`}

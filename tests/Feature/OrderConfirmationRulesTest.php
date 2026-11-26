@@ -1895,6 +1895,18 @@ class OrderConfirmationRulesTest extends TestCase
             ->assertJsonPath('data.records.0.notes', "Bank transfer completed.\nReceipt uploaded after distribution.")
             ->assertJsonPath('data.records.0.proofs.0.name', 'after-distribution.png');
 
+        $trackingToken = $payoutResponse->json('data.tracking_token');
+        $trackingPath = "/api/v1/public/wallet/payouts/{$payoutId}/tracking?token={$trackingToken}";
+        $this->getJson($trackingPath)
+            ->assertOk()
+            ->assertJsonPath('data.payout_number', $payoutResponse->json('data.payout_number'))
+            ->assertJsonPath('data.vendor_name', 'Himalayan Handicrafts')
+            ->assertJsonPath('data.amount', '1500.00')
+            ->assertJsonPath('data.status', 'paid')
+            ->assertJsonPath('data.provider_reference', 'TEST-POST-DISTRIBUTION-REF');
+        $this->getJson("/api/v1/public/wallet/payouts/{$payoutId}/tracking?token=invalid")
+            ->assertNotFound();
+
         $record = PayoutRecord::query()->where('payout_request_id', $payoutRecordId)->firstOrFail();
         Storage::disk('local')->assertExists($record->meta['proofs'][0]['path']);
         $this->actingAs($this->vendorUser)
