@@ -4,11 +4,9 @@ import { MessageSquare, PackageOpen } from 'lucide-react'
 import api from '../api/client'
 import { useList } from '../hooks/useApi'
 import StatusBadge from '../components/commerce/StatusBadge'
-import EmptyState from '../components/ui/EmptyState'
-import ErrorState from '../components/ui/ErrorState'
 import Pagination from '../components/ui/Pagination'
 import FilterBar from '../components/admin/FilterBar'
-import { ProductCardSkeletonMini } from '../components/ui/Skeleton'
+import { AccountPage, AccountEmpty, AccountError, AccountSkeleton } from './account/AccountUI'
 import { money, formatDateTime, apiImage, getProductImage } from '../utils/format'
 import { PAYMENT_METHOD_LABELS, PAYMENT_BRAND_LOGOS } from '../utils/constants'
 import { useCart } from '../context/CartContext'
@@ -25,7 +23,10 @@ const STATUS_TABS = [
   { value: 'cancelled', label: 'Cancelled' },
 ]
 
-export default function OrderList({ basePath = '/orders' }) {
+const PAGE_TITLE = 'My Orders'
+const PAGE_SUBTITLE = 'Manage and track your purchases.'
+
+export default function OrderList({ basePath = '/account/orders' }) {
   const [searchParams, setSearchParams] = useSearchParams()
   const { addItem } = useCart()
   const toast = useToast()
@@ -88,7 +89,7 @@ export default function OrderList({ basePath = '/orders' }) {
   }
 
   const changeStatus = (value) => {
-    updateQuery({ status: value })
+    updateQuery({ status: value === 'all' ? '' : value })
   }
 
   const resetFilters = () => {
@@ -135,71 +136,67 @@ export default function OrderList({ basePath = '/orders' }) {
     }
   }
 
+  const filters = (
+    <FilterBar
+      search={search}
+      onSearchChange={value => updateQuery({ search: value.trim() })}
+      searchPlaceholder="Search order number or product..."
+      debounceMs={350}
+      statusFilter={status || 'all'}
+      onStatusChange={changeStatus}
+      statusOptions={STATUS_TABS.filter(tab => tab.value)}
+      segmented
+      fromDate={dateFrom}
+      toDate={dateTo}
+      onFromDateChange={setDateFrom}
+      onToDateChange={setDateTo}
+      onApplyFilters={() => updateQuery({ date_from: dateFrom, date_to: dateTo })}
+      onReset={resetFilters}
+    />
+  )
+
+  const pageActions = (
+    <Link to="/account/orders/active" className="btn btn-outline btn-sm">
+      Track active orders
+    </Link>
+  )
+
   if (loading) {
     return (
-      <div className="page-shell container">
-        <h1 style={{ fontSize: 24 }}>My Orders</h1>
-        <div className="flex flex-col gap-3 mt-2">
-          {Array.from({ length: 3 }).map((_, i) => <ProductCardSkeletonMini key={i} />)}
-        </div>
-      </div>
+      <AccountPage title={PAGE_TITLE} subtitle={PAGE_SUBTITLE} actions={pageActions}>
+        <AccountSkeleton rows={3} />
+      </AccountPage>
     )
   }
 
-  if (error) return <div className="page-shell container"><ErrorState onRetry={reload} /></div>
+  if (error) {
+    return (
+      <AccountPage title={PAGE_TITLE} subtitle={PAGE_SUBTITLE} actions={pageActions}>
+        <AccountError onRetry={reload} />
+      </AccountPage>
+    )
+  }
 
   if (!items.length) {
     return (
-      <div className="page-shell container">
-        <h1 style={{ fontSize: 24 }}>My Orders</h1>
-        <FilterBar
-          search={search}
-          onSearchChange={value => updateQuery({ search: value.trim() })}
-          searchPlaceholder="Search order number or product..."
-          debounceMs={350}
-          statusFilter={status || 'all'}
-          onStatusChange={value => changeStatus(value === 'all' ? '' : value)}
-          statusOptions={STATUS_TABS.filter(tab => tab.value).map(tab => ({ value: tab.value, label: tab.label }))}
-          fromDate={dateFrom}
-          toDate={dateTo}
-          onFromDateChange={setDateFrom}
-          onToDateChange={setDateTo}
-          onApplyFilters={() => updateQuery({ date_from: dateFrom, date_to: dateTo })}
-          onReset={resetFilters}
-        />
-        <EmptyState
+      <AccountPage title={PAGE_TITLE} subtitle={PAGE_SUBTITLE} actions={pageActions}>
+        {filters}
+        <AccountEmpty
           icon={PackageOpen}
           title={status ? 'No orders with this status' : 'No orders yet'}
           message="When you place an order, it will appear here with live tracking."
           action={<Link to="/shop" className="btn btn-primary">Start shopping</Link>}
         />
-      </div>
+      </AccountPage>
     )
   }
 
   return (
-    <div className="page-shell container">
-      <div className="flex items-center justify-between wrap gap-2">
-        <h1 style={{ fontSize: 24 }}>My Orders</h1>
-      </div>
-      <FilterBar
-        search={search}
-        onSearchChange={value => updateQuery({ search: value.trim() })}
-        searchPlaceholder="Search order number or product..."
-        debounceMs={350}
-        statusFilter={status || 'all'}
-        onStatusChange={value => changeStatus(value === 'all' ? '' : value)}
-        statusOptions={STATUS_TABS.filter(tab => tab.value).map(tab => ({ value: tab.value, label: tab.label }))}
-        fromDate={dateFrom}
-        toDate={dateTo}
-        onFromDateChange={setDateFrom}
-        onToDateChange={setDateTo}
-        onApplyFilters={() => updateQuery({ date_from: dateFrom, date_to: dateTo })}
-        onReset={resetFilters}
-      />
-      <div className="flex flex-col gap-3 mt-2">
+    <AccountPage title={PAGE_TITLE} subtitle={PAGE_SUBTITLE} actions={pageActions}>
+      {filters}
+      <div className="account-order-list">
         {items.map((o) => (
-          <div key={o.id} className="card card-hover">
+          <div key={o.id} className="card card-hover account-order-card">
             <Link to={`${basePath}/${o.id}`} style={{ display: 'block', color: 'inherit', textDecoration: 'none' }}>
               <div className="flex items-center justify-between wrap gap-2">
                 <div>
@@ -212,10 +209,13 @@ export default function OrderList({ basePath = '/orders' }) {
                 </div>
                 <div className="text-right">
                   <div className="price-current" style={{ fontSize: 17 }}>{money(o.grand_total)}</div>
-                  <div className="muted text-xs flex items-center justify-end gap-1">{o.payment_method === 'esewa' && <img src={PAYMENT_BRAND_LOGOS.esewa} alt="eSewa" style={{ height: 12, width: 'auto' }} />}{PAYMENT_METHOD_LABELS[o.payment_method] || o.payment_method}</div>
+                  <div className="muted text-xs flex items-center justify-end gap-1">
+                    {o.payment_method === 'esewa' && <img src={PAYMENT_BRAND_LOGOS.esewa} alt="eSewa" style={{ height: 12, width: 'auto' }} />}
+                    {PAYMENT_METHOD_LABELS[o.payment_method] || o.payment_method}
+                  </div>
                 </div>
               </div>
-              <div className="flex gap-2 mt-2" style={{ overflow: 'hidden' }}>
+              <div className="flex gap-2 mt-2 account-order-thumbs">
                 {o.items?.slice(0, 4).map((it) => {
                   const fallback = getProductImage(it, 0, true)
                   const src = it.image ? apiImage(it.image) : fallback
@@ -257,6 +257,6 @@ export default function OrderList({ basePath = '/orders' }) {
         ))}
       </div>
       <Pagination page={page} lastPage={meta.last_page} total={meta.total} onChange={setPage} />
-    </div>
+    </AccountPage>
   )
 }

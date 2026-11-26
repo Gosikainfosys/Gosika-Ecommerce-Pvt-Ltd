@@ -177,7 +177,7 @@ export default function DeliveryDetail() {
       <DeliveryRouteMap
         pickup={{
           address: a.pickup_address,
-          name: a.order_number ? `Order ${a.order_number}` : 'Merchant Store',
+          name: a.pickup_store_name || (a.order_number ? `Order ${a.order_number}` : 'Merchant Store'),
           lat: a.pickup_coordinates?.lat,
           lng: a.pickup_coordinates?.lng,
         }}

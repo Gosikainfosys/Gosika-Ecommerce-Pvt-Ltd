@@ -132,7 +132,7 @@ export default function AccountProfile() {
 
   if (loading) {
     return (
-      <AccountPage title="Personal Profile" subtitle="Update your personal information.">
+      <AccountPage title="Profile Information" subtitle="Update your personal information.">
         <AccountSkeleton rows={4} height={44} asCards={false} />
       </AccountPage>
     )
@@ -140,14 +140,14 @@ export default function AccountProfile() {
 
   if (error) {
     return (
-      <AccountPage title="Personal Profile" subtitle="Update your personal information.">
+      <AccountPage title="Profile Information" subtitle="Update your personal information.">
         <AccountError message={errorMessage(error)} onRetry={load} />
       </AccountPage>
     )
   }
 
   return (
-    <AccountPage title="Personal Profile" subtitle="Update your personal information.">
+    <AccountPage title="Profile Information" subtitle="Update your personal information.">
       {/* Profile Picture Section */}
       <AccountSection title="Profile Picture" subtitle="Your photo appears across the marketplace." icon={User} pad={22}>
         <div className="flex items-center gap-4 wrap">

@@ -16,6 +16,10 @@ class OrderResource extends JsonResource
     public function toArray(Request $request): array
     {
         $shipping = $this->shipping_address_snapshot ? json_decode($this->shipping_address_snapshot, true) : null;
+        if ($shipping && $this->shippingAddress) {
+            $shipping['latitude'] = $shipping['latitude'] ?? $this->shippingAddress->latitude;
+            $shipping['longitude'] = $shipping['longitude'] ?? $this->shippingAddress->longitude;
+        }
 
         $placedAt = Carbon::parse($this->placed_at ?? $this->created_at);
         $cancellationWindowMins = (int) Setting::get('order.cancellation_window_minutes', 15);

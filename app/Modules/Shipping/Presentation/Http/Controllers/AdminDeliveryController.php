@@ -227,7 +227,13 @@ class AdminDeliveryController extends Controller
     public function assignments(Request $request): JsonResponse
     {
         $assignments = DeliveryAssignment::query()
-            ->with(['tracking', 'vendorOrder', 'deliveryPartner'])
+            ->with([
+                'tracking',
+                'vendorOrder.order.shippingAddress',
+                'vendorOrder.store.addresses',
+                'vendorOrder.vendor.kyc',
+                'deliveryPartner',
+            ])
             ->when($request->input('status'), fn ($query, $status) => $query->where('status', $status))
             ->when($request->input('partner_id'), fn ($query, $id) => $query->whereHas('deliveryPartner', fn ($q) => $q->where('uuid', $id)))
             ->latest()
@@ -248,7 +254,13 @@ class AdminDeliveryController extends Controller
     public function assignment(string $assignmentId): JsonResponse
     {
         $assignment = DeliveryAssignment::query()
-            ->with(['tracking', 'vendorOrder', 'deliveryPartner'])
+            ->with([
+                'tracking',
+                'vendorOrder.order.shippingAddress',
+                'vendorOrder.store.addresses',
+                'vendorOrder.vendor.kyc',
+                'deliveryPartner',
+            ])
             ->where('uuid', $assignmentId)
             ->firstOrFail();
 
@@ -286,7 +298,13 @@ class AdminDeliveryController extends Controller
             );
 
             return Response::created(
-                new DeliveryAssignmentResource($assignment->load(['tracking', 'vendorOrder', 'deliveryPartner'])),
+                new DeliveryAssignmentResource($assignment->load([
+                    'tracking',
+                    'vendorOrder.order.shippingAddress',
+                    'vendorOrder.store.addresses',
+                    'vendorOrder.vendor.kyc',
+                    'deliveryPartner',
+                ])),
                 'Delivery partner assigned.'
             );
         } catch (DomainException $e) {
@@ -329,7 +347,13 @@ class AdminDeliveryController extends Controller
             );
 
             return Response::success(
-                new DeliveryAssignmentResource($assignment->load(['tracking', 'vendorOrder', 'deliveryPartner'])),
+                new DeliveryAssignmentResource($assignment->load([
+                    'tracking',
+                    'vendorOrder.order.shippingAddress',
+                    'vendorOrder.store.addresses',
+                    'vendorOrder.vendor.kyc',
+                    'deliveryPartner',
+                ])),
                 'Delivery reassigned.'
             );
         } catch (DomainException $e) {

@@ -56,7 +56,14 @@ class OrderService
                 'items.vendorOrder',
                 'vendorOrders' => fn ($query) => $query
                     ->withSum(['refunds as refunded_amount' => fn ($refunds) => $refunds->where('status', 'refunded')], 'amount')
-                    ->with(['items', 'assignments.tracking']),
+                    ->with([
+                        'items',
+                        'store.addresses',
+                        'vendor.kyc',
+                        'assignments.tracking',
+                        'assignments.vendorOrder.store.addresses',
+                        'assignments.vendorOrder.vendor.kyc',
+                    ]),
                 'shippingAddress',
             ])
             ->first();
@@ -600,6 +607,8 @@ class OrderService
             'municipality' => $address->municipality?->name,
             'postal_code' => $address->postal_code,
             'landmark' => $address->landmark,
+            'latitude' => $address->latitude,
+            'longitude' => $address->longitude,
         ], JSON_UNESCAPED_UNICODE);
     }
 }

@@ -3,10 +3,11 @@ import { Link } from 'react-router-dom'
 import { Heart, X } from 'lucide-react'
 import api from '../api/client'
 import { useWishlist } from '../context/WishlistContext'
-import EmptyState from '../components/ui/EmptyState'
-import ErrorState from '../components/ui/ErrorState'
-import { ProductCardSkeletonMini } from '../components/ui/Skeleton'
+import { AccountPage, AccountEmpty, AccountError, AccountSkeleton } from './account/AccountUI'
 import { money, errorMessage, getProductImage } from '../utils/format'
+
+const PAGE_TITLE = 'Wishlist'
+const PAGE_SUBTITLE = 'Products you saved for later.'
 
 export default function Wishlist() {
   const { toggle } = useWishlist()
@@ -24,7 +25,7 @@ export default function Wishlist() {
         const data = res.data.data || res.data
         setItems(data?.items || [])
       })
-      .catch((e) => setError(e))
+      .catch((loadError) => setError(loadError))
       .finally(() => setLoading(false))
   }
 
@@ -34,75 +35,71 @@ export default function Wishlist() {
     const productId = item.product?.id || item.product_id
     if (!productId) return
     setRemoving(productId)
-    const res = await toggle(productId)
+    const result = await toggle(productId)
     setRemoving(null)
-    if (res?.ok) {
-      setItems((prev) => prev.filter((i) => (i.product?.id || i.product_id) !== productId))
+    if (result?.ok) {
+      setItems((previous) => previous.filter((entry) => (entry.product?.id || entry.product_id) !== productId))
     }
   }
 
+  const actions = <Link to="/shop" className="btn btn-outline btn-sm">Continue shopping</Link>
+
   if (loading) {
     return (
-      <div className="page-shell container">
-        <h1 style={{ fontSize: 24 }}>My Wishlist</h1>
-        <div className="product-grid mt-2">
-          {Array.from({ length: 8 }).map((_, i) => <ProductCardSkeletonMini key={i} />)}
-        </div>
-      </div>
+      <AccountPage title={PAGE_TITLE} subtitle={PAGE_SUBTITLE} actions={actions}>
+        <AccountSkeleton rows={2} />
+      </AccountPage>
     )
   }
 
-  if (error) return <div className="page-shell container"><ErrorState message={errorMessage(error)} onRetry={load} /></div>
+  if (error) {
+    return (
+      <AccountPage title={PAGE_TITLE} subtitle={PAGE_SUBTITLE} actions={actions}>
+        <AccountError message={errorMessage(error)} onRetry={load} />
+      </AccountPage>
+    )
+  }
 
   if (!items.length) {
     return (
-      <div className="page-shell container">
-        <EmptyState
+      <AccountPage title={PAGE_TITLE} subtitle={PAGE_SUBTITLE} actions={actions}>
+        <AccountEmpty
           icon={Heart}
           title="Your wishlist is empty"
           message="Tap the heart icon on any product to save it here for later."
           action={<Link to="/shop" className="btn btn-primary">Explore products</Link>}
         />
-      </div>
+      </AccountPage>
     )
   }
 
   return (
-    <div className="page-shell container">
-      <h1 style={{ fontSize: 24 }}>My Wishlist ({items.length})</h1>
-      <div className="product-grid mt-2">
+    <AccountPage title={`${PAGE_TITLE} (${items.length})`} subtitle={PAGE_SUBTITLE} actions={actions}>
+      <div className="product-grid account-wishlist-grid">
         {items.map((item) => {
           const product = item.product
           const productId = product?.id || item.product_id
           if (!product) return null
           return (
-            <div key={productId} className="card card-pad-none card-hover" style={{ display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden' }}>
-              <Link to={`/product/${productId}`} aria-label={product.name} style={{ position: 'relative', display: 'block' }}>
-                <div style={{ height: 150, background: 'var(--bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-                  <img
-                    src={getProductImage(product)}
-                    alt={product.name}
-                    loading="lazy"
-                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                  />
-                </div>
+            <div key={productId} className="card card-pad-none card-hover account-wishlist-card">
+              <Link to={`/product/${productId}`} aria-label={product.name} className="account-wishlist-image">
+                <img src={getProductImage(product)} alt={product.name} loading="lazy" />
               </Link>
-              <div style={{ padding: 12 }}>
+              <div className="account-wishlist-body">
                 <Link to={`/product/${productId}`} className="line-clamp-2 font-semibold" style={{ fontSize: 14, lineHeight: 1.35, minHeight: 38, display: 'block' }}>
                   {product.name}
                 </Link>
                 <span className="price-current" style={{ fontSize: 15 }}>{money(product.price)}</span>
               </div>
-              <div style={{ padding: '0 12px 12px', marginTop: 'auto', display: 'flex', gap: 6 }}>
-                <Link to={`/product/${productId}`} className="btn btn-primary btn-sm flex-1">
-                  View Product
-                </Link>
+              <div className="account-wishlist-actions">
+                <Link to={`/product/${productId}`} className="btn btn-primary btn-sm flex-1">View Product</Link>
                 <button
                   type="button"
                   className="btn btn-outline btn-sm"
                   onClick={() => handleRemove(item)}
                   disabled={removing === productId}
                   title="Remove from wishlist"
+                  aria-label={`Remove ${product.name} from wishlist`}
                 >
                   <X size={13} />
                 </button>
@@ -111,6 +108,6 @@ export default function Wishlist() {
           )
         })}
       </div>
-    </div>
+    </AccountPage>
   )
 }

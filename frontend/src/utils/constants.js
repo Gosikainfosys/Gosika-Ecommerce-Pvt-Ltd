@@ -39,6 +39,7 @@ export const ORDER_STATUS_LABELS = {
   payment_pending: 'Payment Pending',
   confirmed: 'Confirmed',
   accepted: 'Accepted',
+  rejected: 'Rejected',
   preparing: 'Preparing',
   processing: 'Processing',
   ready_for_pickup: 'Ready for Pickup',
@@ -48,6 +49,8 @@ export const ORDER_STATUS_LABELS = {
   completed: 'Completed',
   cancelled: 'Cancelled',
   returned: 'Returned',
+  refunded: 'Refunded',
+  failed: 'Failed',
 }
 
 export const ORDER_STATUS_FLOW = [
@@ -63,11 +66,13 @@ export const ORDER_STATUS_FLOW = [
 
 export const DELIVERY_STATUS_LABELS = {
   pending: 'Pending',
+  assigned: 'Assigned',
   accepted: 'Accepted',
   picked_up: 'Picked Up',
   out_for_delivery: 'Out for Delivery',
   delivered: 'Delivered',
   failed: 'Failed',
+  returned_to_vendor: 'Returned to Vendor',
   cancelled: 'Cancelled',
 }
 
@@ -215,29 +220,33 @@ export const DELIVERY_MOBILE_NAV = [
 ]
 
 export const CUSTOMER_NAV = [
+  { section: 'OVERVIEW' },
+  { to: '/account', label: 'Account Dashboard', icon: 'LayoutDashboard', end: true },
+
   { section: 'ORDERS' },
   { to: '/account/orders', label: 'My Orders', icon: 'ShoppingBag' },
   { to: '/account/orders/active', label: 'Track Orders', icon: 'MapPin' },
-  { to: '/account/returns', label: 'Returns & Refunds', icon: 'RotateCcw' },
 
   { section: 'SHOPPING' },
   { to: '/account/wishlist', label: 'Wishlist', icon: 'Heart' },
   { to: '/account/vouchers', label: 'Vouchers', icon: 'Ticket' },
-
-  { section: 'REVIEWS' },
   { to: '/account/reviews', label: 'My Reviews', icon: 'Star' },
+
+  { section: 'RETURNS & REFUNDS' },
+  { to: '/account/returns', label: 'Return Requests', icon: 'RotateCcw' },
+
+  { section: 'COMMUNICATION' },
+  { to: '/account/messages', label: 'Messages', icon: 'MessageCircle' },
+  { to: '/account/notifications', label: 'Notifications', icon: 'Bell' },
 
   { section: 'SUPPORT' },
   { to: '/account/help', label: 'Help Center', icon: 'LifeBuoy' },
-  { to: '/account/messages', label: 'Messages', icon: 'MessageCircle' },
   { to: '/account/support', label: 'Support Tickets', icon: 'Headphones' },
 
-  { section: 'ACCOUNT' },
-  { to: '/account', label: 'Account Overview', icon: 'LayoutDashboard', end: true },
-  { to: '/account/notifications', label: 'Notifications', icon: 'Bell' },
-  { to: '/account/profile', label: 'Personal Profile', icon: 'User' },
-  { to: '/account/addresses', label: 'Addresses', icon: 'MapPin' },
-  { to: '/account/security', label: 'Security', icon: 'Lock' },
+  { section: 'ACCOUNT SETTINGS' },
+  { to: '/account/profile', label: 'Profile Information', icon: 'User' },
+  { to: '/account/addresses', label: 'Saved Addresses', icon: 'MapPin' },
+  { to: '/account/security', label: 'Password & Security', icon: 'Lock' },
 ]
 
 export const ADMIN_MOBILE_NAV = [

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   Store, Upload, Image as ImageIcon, ArrowLeft, Eye, Mail, Phone
 } from 'lucide-react'
@@ -9,12 +9,15 @@ import Textarea from '../../components/ui/Textarea'
 import Spinner from '../../components/ui/Spinner'
 import { Skeleton } from '../../components/ui/Skeleton'
 import ErrorState from '../../components/ui/ErrorState'
+import LocationMapPicker from '../../components/common/LocationMapPicker'
 import { useToast } from '../../context/ToastContext'
 import { apiImage, errorMessage } from '../../utils/format'
 
 export default function VendorStoreEdit() {
   const navigate = useNavigate()
   const { id } = useParams()
+  const [searchParams] = useSearchParams()
+  const isPickupLocationFlow = searchParams.get('from') === 'shipping'
   const toast = useToast()
   const logoInputRef = useRef(null)
   const bannerInputRef = useRef(null)
@@ -33,6 +36,15 @@ export default function VendorStoreEdit() {
     contact_email: '',
     contact_phone: '',
   })
+  const [pickupAddress, setPickupAddress] = useState({
+    province: 'Bagmati Province',
+    district: 'Kathmandu',
+    municipality: 'Kathmandu Metropolitan City',
+    street: '',
+    landmark: '',
+    latitude: null,
+    longitude: null,
+  })
 
   const load = () => {
     setLoading(true)
@@ -42,6 +54,9 @@ export default function VendorStoreEdit() {
         const list = r.data.data || []
         const s = id ? list.find((item) => String(item.id) === String(id)) : list[0]
         if (s) {
+          const address = s.addresses?.find((item) => item.address_type === 'pickup')
+            || s.addresses?.[0]
+            || {}
           setStoreId(s.id)
           setForm({
             name: s.name || '',
@@ -51,6 +66,15 @@ export default function VendorStoreEdit() {
             logo: s.logo || '',
             contact_email: s.contact_email || '',
             contact_phone: s.contact_phone || '',
+          })
+          setPickupAddress({
+            province: address.province || 'Bagmati Province',
+            district: address.district || 'Kathmandu',
+            municipality: address.municipality || 'Kathmandu Metropolitan City',
+            street: address.address_line_1 || '',
+            landmark: address.landmark || '',
+            latitude: address.latitude || null,
+            longitude: address.longitude || null,
           })
         } else {
           setStoreId(null)
@@ -132,6 +156,11 @@ export default function VendorStoreEdit() {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+    if (!pickupAddress.street.trim()) {
+      toast.error('Enter the pickup street address before saving.')
+      return
+    }
+
     setSaving(true)
     try {
       const payload = {
@@ -142,14 +171,23 @@ export default function VendorStoreEdit() {
         contact_phone: form.contact_phone || undefined,
         logo: form.logo || undefined,
         banner: form.banner || undefined,
+        pickup_address: {
+          street: pickupAddress.street.trim(),
+          landmark: pickupAddress.landmark.trim() || null,
+          province: pickupAddress.province,
+          district: pickupAddress.district,
+          municipality: pickupAddress.municipality,
+          latitude: pickupAddress.latitude,
+          longitude: pickupAddress.longitude,
+        },
       }
       if (storeId) {
         await api.put(`/vendor/stores/${storeId}`, payload)
       } else {
         await api.post('/vendor/stores', payload)
       }
-      toast.success('Store details saved successfully!')
-      navigate('/vendor/stores')
+      toast.success('Store and pickup location saved successfully!')
+      navigate(searchParams.get('from') === 'shipping' ? '/vendor/shipping' : '/vendor/stores')
     } catch (err) {
       toast.error(errorMessage(err))
     } finally {
@@ -190,9 +228,13 @@ export default function VendorStoreEdit() {
       {/* Page Header */}
       <div className="page-header">
         <div className="page-header-left">
-          <h1 style={{ fontSize: 24, fontWeight: 800 }}>{storeId ? 'Edit Store Details & Branding' : 'Create Store'}</h1>
+          <h1 style={{ fontSize: 24, fontWeight: 800 }}>
+            {isPickupLocationFlow ? 'Set Pickup Location' : storeId ? 'Edit Store Details & Pickup Location' : 'Create Store'}
+          </h1>
           <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 4 }}>
-            Set up your storefront identity, contact details and description.
+            {isPickupLocationFlow
+              ? `Store details and the mapped address where couriers collect orders${form.name ? ` from ${form.name}` : ''}.`
+              : 'Set up your storefront details and the exact address where couriers collect orders.'}
           </p>
         </div>
       </div>
@@ -397,6 +439,35 @@ export default function VendorStoreEdit() {
           </p>
         </div>
 
+        <div className="card" style={{ padding: 20 }}>
+          <h3 style={{ fontSize: 16, fontWeight: 800, marginBottom: 8 }} className="flex items-center gap-2">
+            <Store size={18} color="var(--primary)" /> Pickup Address & Map Pin
+          </h3>
+          <p className="muted text-xs" style={{ margin: '0 0 14px' }}>
+            Enter the street or building address and pin the store entrance. Couriers use this as the order pickup point.
+          </p>
+          <LocationMapPicker
+            value={{
+              province: pickupAddress.province,
+              district: pickupAddress.district,
+              municipality: pickupAddress.municipality,
+              street: pickupAddress.street,
+              landmark: pickupAddress.landmark,
+              latitude: pickupAddress.latitude,
+              longitude: pickupAddress.longitude,
+            }}
+            onChange={(location) => setPickupAddress({
+              province: location.province,
+              district: location.district,
+              municipality: location.municipality,
+              street: location.street,
+              landmark: location.landmark,
+              latitude: location.latitude,
+              longitude: location.longitude,
+            })}
+          />
+        </div>
+
         {/* Action Buttons */}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 10, flexWrap: 'wrap' }}>
           <Link to="/vendor/stores" className="btn btn-outline">
@@ -408,7 +479,7 @@ export default function VendorStoreEdit() {
             style={{ minWidth: 160 }}
             disabled={saving || uploadingLogo || uploadingBanner}
           >
-            {saving ? <Spinner size={16} color="#fff" /> : 'Save Store Details'}
+            {saving ? <Spinner size={16} color="#fff" /> : 'Save Store & Pickup Location'}
           </button>
         </div>
       </form>

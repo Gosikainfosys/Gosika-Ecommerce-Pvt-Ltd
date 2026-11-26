@@ -1934,10 +1934,16 @@ class DeliveryService
         }
 
         $parts = [$store->name];
-        $address = $store->addresses()->first();
+        $address = $store->addresses()
+            ->orderByRaw("CASE WHEN address_type = 'pickup' THEN 0 ELSE 1 END")
+            ->first();
 
-        if ($address && $address->address_line_1) {
-            $parts[] = $address->address_line_1;
+        if ($address) {
+            $parts = array_merge($parts, array_filter([
+                $address->address_line_1,
+                $address->address_line_2,
+                $address->landmark,
+            ]));
         }
 
         return implode(', ', array_filter($parts));

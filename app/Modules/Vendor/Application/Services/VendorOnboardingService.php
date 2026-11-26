@@ -18,6 +18,7 @@ use App\Modules\Vendor\Application\DataTransferObjects\KycDTO;
 use App\Modules\Vendor\Application\DataTransferObjects\StoreDTO;
 use App\Modules\Vendor\Infrastructure\Models\BankAccount;
 use App\Modules\Vendor\Infrastructure\Models\Store;
+use App\Modules\Vendor\Infrastructure\Models\StoreAddress;
 use App\Modules\Vendor\Infrastructure\Models\Vendor;
 use App\Modules\Vendor\Infrastructure\Models\VendorDocument;
 use App\Modules\Vendor\Infrastructure\Models\VendorKyc;
@@ -240,6 +241,42 @@ class VendorOnboardingService
         ]);
 
         return $store;
+    }
+
+    public function savePickupAddress(Vendor $vendor, Store $store, array $data): StoreAddress
+    {
+        $this->assertVendorOwnsStore($vendor, $store);
+
+        $province = Province::query()
+            ->whereRaw('LOWER(name) = ?', [mb_strtolower($data['province'])])
+            ->first();
+        $district = District::query()
+            ->when($province, fn ($query) => $query->where('province_id', $province->id))
+            ->whereRaw('LOWER(name) = ?', [mb_strtolower($data['district'])])
+            ->first();
+        $municipality = Municipality::query()
+            ->when($district, fn ($query) => $query->where('district_id', $district->id))
+            ->whereRaw('LOWER(name) = ?', [mb_strtolower($data['municipality'])])
+            ->first();
+
+        return $store->addresses()->updateOrCreate(
+            ['address_type' => 'pickup'],
+            [
+                'address_line_1' => trim($data['street']),
+                'address_line_2' => implode(', ', array_filter([
+                    $data['municipality'],
+                    $data['district'],
+                    $data['province'],
+                ])),
+                'country_id' => Country::query()->where('code', 'NP')->value('id'),
+                'province_id' => $province?->id,
+                'district_id' => $district?->id,
+                'municipality_id' => $municipality?->id,
+                'landmark' => $data['landmark'] ?? null,
+                'latitude' => $data['latitude'] ?? null,
+                'longitude' => $data['longitude'] ?? null,
+            ]
+        );
     }
 
     public function submitStoreForApproval(Vendor $vendor, Store $store): Store

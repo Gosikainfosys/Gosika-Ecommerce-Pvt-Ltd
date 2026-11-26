@@ -11,12 +11,20 @@ import EmptyState from '../../components/ui/EmptyState'
 import { errorMessage } from '../../utils/format'
 
 function addressLine(s) {
-  return [
-    s.street || s.street_address || s.address_line_1,
-    s.municipality || s.city,
-    s.district,
-    s.province,
-  ].filter(Boolean).join(', ') || 'Address not set yet'
+  const address = s.addresses?.find((item) => item.address_type === 'pickup')
+    || s.addresses?.[0]
+  if (!address) return 'Address not set yet'
+
+  const parts = [
+    address.address_line_1,
+    address.address_line_2,
+    address.landmark,
+  ]
+  if (!address.address_line_2) {
+    parts.push(address.municipality, address.district, address.province)
+  }
+
+  return parts.filter((part, index, values) => part && values.indexOf(part) === index).join(', ') || 'Address not set yet'
 }
 
 export default function VendorShipping() {
@@ -43,7 +51,7 @@ export default function VendorShipping() {
             The addresses where couriers pick up your parcels for delivery.
           </p>
         </div>
-        <Link to="/vendor/store/edit" className="btn btn-primary btn-sm">
+        <Link to="/vendor/store/edit?from=shipping" className="btn btn-primary btn-sm">
           <Plus size={14} /> Add Location
         </Link>
       </div>
@@ -96,7 +104,7 @@ export default function VendorShipping() {
                       <PackageCheck size={13} /> Packing Slips
                     </Link>
                   )}
-                  <Link to={`/vendor/store/edit`} className="btn btn-primary btn-sm">
+                  <Link to="/vendor/store/edit?from=shipping" className="btn btn-primary btn-sm">
                     <Pencil size={13} /> Edit Location
                   </Link>
                 </div>
@@ -120,7 +128,7 @@ export default function VendorShipping() {
           icon={Warehouse}
           title="No pickup locations yet"
           message="Add a store address to set up your first pickup point for courier collection."
-          action={<Link to="/vendor/store/edit" className="btn btn-primary"><Plus size={14} /> Add Location</Link>}
+          action={<Link to="/vendor/store/edit?from=shipping" className="btn btn-primary"><Plus size={14} /> Add Location</Link>}
         />
       )}
     </div>

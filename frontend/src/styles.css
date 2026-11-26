@@ -4278,6 +4278,235 @@ button {
 }
 
 /* ==========================================================================
+   CUSTOMER PORTAL — UNIFIED ACCOUNT SHELL
+   Scoped to the customer account experience; admin/seller styles are untouched.
+   ========================================================================== */
+.account-shell {
+  width: 100%;
+  max-width: 1340px;
+  margin: 0 auto;
+  padding: 20px 20px 56px;
+}
+.account-page { width: 100%; }
+.account-page-head { align-items: flex-start; margin-bottom: 4px; }
+.account-page-title { font-size: 22px; line-height: 1.25; }
+.account-page-sub { font-size: 13.5px; line-height: 1.5; }
+
+/* Sidebar identity and navigation */
+.acc-brand {
+  gap: 10px;
+  padding: 12px;
+  margin: 0 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+  text-decoration: none;
+  color: var(--ink);
+}
+.acc-brand-mark {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--primary, #ff5500);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 900;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+.acc-brand-mark .acc-brand-logo {
+  width: 22px;
+  height: 22px;
+  max-width: 22px;
+  object-fit: contain;
+  filter: brightness(0) invert(1);
+}
+.acc-brand-copy { display: flex; min-width: 0; flex-direction: column; }
+.acc-brand-text { font-size: 15px; font-weight: 800; letter-spacing: -0.01em; }
+.acc-brand-caption {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  line-height: 1.4;
+}
+.acc-user { gap: 10px; padding: 12px; margin-bottom: 12px; border-radius: 12px; }
+.acc-user-avatar { width: 42px; height: 42px; }
+.acc-nav-scroll { border-radius: 12px; }
+.acc-nav { padding: 6px; }
+.acc-nav-link { padding: 9px 11px; border-radius: 9px; font-size: 13px; }
+.acc-s-label { padding: 12px 11px 4px; }
+.acc-logout { border-radius: 10px; }
+
+.acc-mobile-menu-btn { display: none; }
+.account-nav-drawer { width: min(300px, 88vw); max-width: 100vw; }
+.account-nav-drawer .drawer-header { flex: 0 0 auto; padding: 12px 16px; }
+.account-drawer-header { display: flex; width: 100%; align-items: center; }
+.account-drawer-header .acc-brand { margin: 0; flex: 1; }
+.account-nav-drawer-body { padding: 12px 14px 20px; }
+.account-nav-drawer-body .acc-nav { padding: 4px; }
+.account-nav-drawer-body .acc-logout { margin-top: 14px; }
+
+@media (min-width: 780px) and (max-width: 1119px) {
+  .account-layout { grid-template-columns: 78px minmax(0, 1fr); gap: 20px; }
+  .acc-brand { justify-content: center; padding: 10px 0; border-color: transparent; background: transparent; }
+  .acc-brand-copy { display: none; }
+  .acc-user { justify-content: center; padding: 10px 0; border-color: transparent; }
+  .acc-s-label { justify-content: center; }
+  .acc-s-label-text { display: none; }
+  .acc-nav-link { justify-content: center; padding: 10px 0; border-left: none; }
+  .acc-nav-link.active { border-left-color: transparent; }
+  .acc-nav-text { display: none; }
+  .acc-logout { justify-content: center; }
+  .acc-logout-text { display: none; }
+}
+
+@media (min-width: 1120px) {
+  .account-layout { grid-template-columns: 256px minmax(0, 1fr); gap: 24px; }
+}
+
+@media (max-width: 779px) {
+  .acc-mobilebar { gap: 8px; padding: 9px 10px; border-radius: 12px; }
+  .acc-mobile-menu-btn {
+    display: inline-flex;
+    width: 38px;
+    height: 38px;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: #fff;
+    color: var(--ink);
+    cursor: pointer;
+  }
+  .acc-mobile-menu-btn:hover { color: var(--primary); border-color: var(--primary); }
+}
+
+/* Shared account content primitives */
+.account-order-page-actions,
+.account-page-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* Order list */
+.account-order-list { display: flex; flex-direction: column; gap: 12px; }
+.account-order-card { padding: 16px; }
+.account-order-thumbs { overflow: hidden; }
+
+/* Order detail */
+.account-order-status-strip {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  padding: 14px 16px;
+}
+.account-order-status-item { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.account-order-countdown {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  background: #fff7ed;
+  color: #c2410c;
+  font-size: 12px;
+  font-weight: 700;
+  margin-left: auto;
+}
+.account-order-alert { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.account-order-delivered { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; background: #ecfdf5; border-color: #a7f3d0; color: #065f46; }
+.account-order-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: start; }
+.account-order-main-column,
+.account-order-side-column { display: flex; min-width: 0; flex-direction: column; gap: 16px; }
+.account-order-items { display: flex; flex-direction: column; }
+.account-order-item {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--border);
+}
+.account-order-item:last-child { border-bottom: none; padding-bottom: 0; }
+.account-order-item:first-child { padding-top: 0; }
+.account-order-item-info { min-width: 0; }
+.account-order-item-price { display: flex; align-items: flex-end; flex-direction: column; gap: 4px; text-align: right; }
+.account-otp-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 14px;
+  border: 1px dashed #fdba74;
+  border-radius: 10px;
+  background: #fff7ed;
+}
+.account-otp-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #9a3412; }
+.account-otp-value { margin-top: 3px; font-family: monospace; font-size: 26px; font-weight: 800; letter-spacing: 0.18em; color: var(--primary); }
+.account-otp-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.account-otp-note { margin-top: 10px; font-size: 12px; color: var(--muted); }
+.account-summary-rows { display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
+.account-summary-total { padding-top: 10px; border-top: 1px solid var(--border); }
+.account-address-block { display: flex; flex-direction: column; gap: 3px; }
+.account-address-map-wrap { margin-top: 12px; }
+.account-address-map { width: 100%; height: 180px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.account-address-map.leaflet-container { font-family: inherit; }
+.account-map-link { display: inline-flex; align-items: center; gap: 5px; margin-top: 8px; font-size: 12px; font-weight: 700; color: var(--primary); text-decoration: none; }
+.account-map-link:hover { text-decoration: underline; }
+.account-support-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.account-order-protection { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 0 !important; }
+.account-review-anchor { scroll-margin-top: 100px; }
+.account-review-list { display: flex; flex-direction: column; gap: 12px; }
+.account-review-item { padding: 13px; border: 1px solid var(--border); border-radius: 10px; }
+
+@media (min-width: 1040px) {
+  .account-order-grid { grid-template-columns: minmax(0, 1fr) 320px; gap: 22px; }
+}
+
+/* Help center */
+.help-topics { display: flex; flex-direction: column; }
+.help-topic { border-bottom: 1px solid var(--border); }
+.help-topic:last-child { border-bottom: none; }
+.help-topic-trigger {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 8px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 600;
+  text-align: left;
+  color: var(--ink);
+}
+.help-topic-chevron { transition: transform 0.15s ease; }
+.help-contact-card { margin-top: 16px; }
+
+/* Wishlist */
+.account-wishlist-card { display: flex; min-width: 0; flex-direction: column; overflow: hidden; }
+.account-wishlist-image { display: block; height: 150px; background: var(--bg); overflow: hidden; }
+.account-wishlist-image img { width: 100%; height: 100%; object-fit: cover; }
+.account-wishlist-body { display: flex; flex-direction: column; gap: 6px; padding: 12px; }
+.account-wishlist-actions { display: flex; gap: 6px; padding: 0 12px 12px; margin-top: auto; }
+
+@media (max-width: 560px) {
+  .account-shell { padding: 12px 12px 48px; }
+  .account-order-status-strip { gap: 12px; }
+  .account-order-countdown { margin-left: 0; }
+  .account-order-item { grid-template-columns: 48px minmax(0, 1fr); }
+  .account-order-item-price { grid-column: 2; align-items: flex-start; text-align: left; }
+  .account-otp-box { align-items: flex-start; }
+  .account-address-map { height: 160px; }
+}
+
+/* ==========================================================================
    GOSIKA ADMIN & SELLER AUTH PORTALS (PRODUCTION REDESIGN)
    ========================================================================== */
 

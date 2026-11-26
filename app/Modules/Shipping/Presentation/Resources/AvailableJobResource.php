@@ -38,9 +38,15 @@ class AvailableJobResource extends JsonResource
         $pickupAddress = '';
         if ($store) {
             $parts = [$store->name];
-            $storeAddress = $store->addresses()->first();
-            if ($storeAddress && $storeAddress->address_line_1) {
-                $parts[] = $storeAddress->address_line_1;
+            $storeAddress = $store->addresses()
+                ->orderByRaw("CASE WHEN address_type = 'pickup' THEN 0 ELSE 1 END")
+                ->first();
+            if ($storeAddress) {
+                $parts = array_merge($parts, array_filter([
+                    $storeAddress->address_line_1,
+                    $storeAddress->address_line_2,
+                    $storeAddress->landmark,
+                ]));
             }
             $pickupAddress = implode(', ', array_filter($parts));
         }

@@ -46,6 +46,14 @@ class StoreRequest extends FormRequest
             'settings.auto_ready_for_pickup' => ['nullable', 'boolean'],
             'settings.estimated_prep_time' => ['nullable', 'string', 'max:120'],
             'settings.pickup_instructions' => ['nullable', 'string', 'max:1000'],
+            'pickup_address' => ['sometimes', 'array'],
+            'pickup_address.street' => ['required_with:pickup_address', 'string', 'max:255'],
+            'pickup_address.landmark' => ['nullable', 'string', 'max:255'],
+            'pickup_address.province' => ['required_with:pickup_address', 'string', 'max:100'],
+            'pickup_address.district' => ['required_with:pickup_address', 'string', 'max:100'],
+            'pickup_address.municipality' => ['required_with:pickup_address', 'string', 'max:150'],
+            'pickup_address.latitude' => ['nullable', 'required_with:pickup_address.longitude', 'numeric', 'between:25,32'],
+            'pickup_address.longitude' => ['nullable', 'required_with:pickup_address.latitude', 'numeric', 'between:79,89.5'],
         ];
     }
 }

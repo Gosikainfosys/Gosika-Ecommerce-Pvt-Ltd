@@ -122,7 +122,12 @@ class DeliveryPartnerController extends Controller
         ]);
 
         $assignments = $partner->assignments()
-            ->with(['tracking', 'vendorOrder.order'])
+            ->with([
+                'tracking',
+                'vendorOrder.order.shippingAddress',
+                'vendorOrder.store.addresses',
+                'vendorOrder.vendor.kyc',
+            ])
             ->when($filters['statuses'] ?? null, fn ($query, $statuses) => $query->whereIn('status', $statuses))
             ->when(
                 ! ($filters['statuses'] ?? null) && ($filters['status'] ?? null),
@@ -333,7 +338,12 @@ class DeliveryPartnerController extends Controller
         }
 
         return Response::success(
-            new DeliveryAssignmentResource($assignment->load(['tracking', 'vendorOrder.order'])),
+            new DeliveryAssignmentResource($assignment->load([
+                'tracking',
+                'vendorOrder.order.shippingAddress',
+                'vendorOrder.store.addresses',
+                'vendorOrder.vendor.kyc',
+            ])),
             'Delivery assignment retrieved.'
         );
     }
@@ -342,14 +352,24 @@ class DeliveryPartnerController extends Controller
     {
         $assignment = $this->service->accept($request->user(), $assignment);
 
-        return Response::success(new DeliveryAssignmentResource($assignment->load(['tracking', 'vendorOrder.order'])), 'Delivery accepted.');
+        return Response::success(new DeliveryAssignmentResource($assignment->load([
+            'tracking',
+            'vendorOrder.order.shippingAddress',
+            'vendorOrder.store.addresses',
+            'vendorOrder.vendor.kyc',
+        ])), 'Delivery accepted.');
     }
 
     public function pickup(Request $request, DeliveryAssignment $assignment): JsonResponse
     {
         $assignment = $this->service->pickup($request->user(), $assignment);
 
-        return Response::success(new DeliveryAssignmentResource($assignment->load(['tracking', 'vendorOrder.order'])), 'Order picked up.');
+        return Response::success(new DeliveryAssignmentResource($assignment->load([
+            'tracking',
+            'vendorOrder.order.shippingAddress',
+            'vendorOrder.store.addresses',
+            'vendorOrder.vendor.kyc',
+        ])), 'Order picked up.');
     }
 
     public function outForDelivery(Request $request, DeliveryAssignment $assignment): JsonResponse
@@ -357,7 +377,12 @@ class DeliveryPartnerController extends Controller
         [$assignment] = $this->service->outForDelivery($request->user(), $assignment);
 
         return Response::success(
-            new DeliveryAssignmentResource($assignment->load(['tracking', 'vendorOrder.order'])),
+            new DeliveryAssignmentResource($assignment->load([
+                'tracking',
+                'vendorOrder.order.shippingAddress',
+                'vendorOrder.store.addresses',
+                'vendorOrder.vendor.kyc',
+            ])),
             'Order is out for delivery. Request the 6-digit confirmation OTP from the customer upon arrival.'
         );
     }
@@ -366,21 +391,36 @@ class DeliveryPartnerController extends Controller
     {
         $assignment = $this->service->deliver($request->user(), $assignment, $request->input('otp'));
 
-        return Response::success(new DeliveryAssignmentResource($assignment->load(['tracking', 'vendorOrder.order'])), 'Delivery confirmed.');
+        return Response::success(new DeliveryAssignmentResource($assignment->load([
+            'tracking',
+            'vendorOrder.order.shippingAddress',
+            'vendorOrder.store.addresses',
+            'vendorOrder.vendor.kyc',
+        ])), 'Delivery confirmed.');
     }
 
     public function fail(DeliveryFailureRequest $request, DeliveryAssignment $assignment): JsonResponse
     {
         $assignment = $this->service->fail($request->user(), $assignment, $request->input('reason'));
 
-        return Response::success(new DeliveryAssignmentResource($assignment->load(['tracking', 'vendorOrder.order'])), 'Delivery marked as failed.');
+        return Response::success(new DeliveryAssignmentResource($assignment->load([
+            'tracking',
+            'vendorOrder.order.shippingAddress',
+            'vendorOrder.store.addresses',
+            'vendorOrder.vendor.kyc',
+        ])), 'Delivery marked as failed.');
     }
 
     public function returnToVendor(Request $request, DeliveryAssignment $assignment): JsonResponse
     {
         $assignment = $this->service->returnToVendor($request->user(), $assignment, $request->input('reason'));
 
-        return Response::success(new DeliveryAssignmentResource($assignment->load(['tracking', 'vendorOrder.order'])), 'Order returned to vendor.');
+        return Response::success(new DeliveryAssignmentResource($assignment->load([
+            'tracking',
+            'vendorOrder.order.shippingAddress',
+            'vendorOrder.store.addresses',
+            'vendorOrder.vendor.kyc',
+        ])), 'Order returned to vendor.');
     }
 
     public function availableJobs(Request $request): JsonResponse
@@ -420,7 +460,13 @@ class DeliveryPartnerController extends Controller
             $assignment = $this->service->claim($request->user(), $vendorOrder);
 
             return Response::success(
-                new DeliveryAssignmentResource($assignment->load(['tracking', 'vendorOrder', 'deliveryPartner'])),
+                new DeliveryAssignmentResource($assignment->load([
+                    'tracking',
+                    'vendorOrder.order.shippingAddress',
+                    'vendorOrder.store.addresses',
+                    'vendorOrder.vendor.kyc',
+                    'deliveryPartner',
+                ])),
                 'Shipment claimed successfully.'
             );
         } catch (DomainException $e) {
@@ -444,7 +490,12 @@ class DeliveryPartnerController extends Controller
         ]);
 
         $query = $partner->assignments()
-            ->with(['tracking', 'vendorOrder'])
+            ->with([
+                'tracking',
+                'vendorOrder.order.shippingAddress',
+                'vendorOrder.store.addresses',
+                'vendorOrder.vendor.kyc',
+            ])
             ->addSelect([
                 'refunded_amount' => Refund::query()
                     ->selectRaw('COALESCE(SUM(amount), 0)')

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import {
   MapPin, Navigation, Compass, Sparkles, Loader2, CheckCircle2, AlertCircle
 } from 'lucide-react'
+import L from 'leaflet'
 import api from '../../api/client'
 import {
   NEPAL_PROVINCES,
@@ -11,6 +12,7 @@ import {
   matchNepalLocation,
 } from '../../utils/nepalLocations'
 import { NEPAL_POPULAR_LOCATIONS, NEPAL_CITY_COORDINATES } from '../../utils/constants'
+import { createOpenStreetMap, createRouteMarker } from '../../utils/leafletMap'
 
 export function normalizeProvince(p) {
   if (!p) return ''
@@ -69,6 +71,12 @@ export default function LocationMapPicker({
   const initialLandmark = value?.landmark || propLandmark || ''
   const initialLat = Number(value?.latitude || propLatitude || propCoordinates?.lat || NEPAL_CITY_COORDINATES[PROVINCE_CAPITALS[initialProv]]?.lat || 27.7172)
   const initialLng = Number(value?.longitude || propLongitude || propCoordinates?.lng || NEPAL_CITY_COORDINATES[PROVINCE_CAPITALS[initialProv]]?.lng || 85.3240)
+  const initialCoordinatesAreExact = [
+    [value?.latitude, value?.longitude],
+    [propLatitude, propLongitude],
+    [propCoordinates?.lat, propCoordinates?.lng],
+  ].some(([lat, lng]) => lat !== undefined && lat !== null && lng !== undefined && lng !== null
+    && Number.isFinite(Number(lat)) && Number.isFinite(Number(lng)))
 
   const [province, setProvince] = useState(initialProv)
   const [district, setDistrict] = useState(initialDist)
@@ -76,12 +84,16 @@ export default function LocationMapPicker({
   const [streetAddress, setStreetAddress] = useState(initialStreet)
   const [landmark, setLandmark] = useState(initialLandmark)
   const [coordinates, setCoordinates] = useState({ lat: initialLat, lng: initialLng })
+  const [coordinatesAreExact, setCoordinatesAreExact] = useState(initialCoordinatesAreExact)
   const [isLocating, setIsLocating] = useState(false)
   const [resolvingGeo, setResolvingGeo] = useState(false)
   const [geoStatus, setGeoStatus] = useState('')
-  const [pinOffset, setPinOffset] = useState({ x: 50, y: 50 })
 
   const lastEmittedRef = useRef('')
+  const mapContainerRef = useRef(null)
+  const leafletMapRef = useRef(null)
+  const markerRef = useRef(null)
+  const mapLocationHandlerRef = useRef(null)
 
   // Sync from props if external value changes
   useEffect(() => {
@@ -101,6 +113,7 @@ export default function LocationMapPicker({
     if (nextLat && nextLng && (Number(nextLat) !== coordinates.lat || Number(nextLng) !== coordinates.lng)) {
       setCoordinates({ lat: Number(nextLat), lng: Number(nextLng) })
     }
+    if (nextLat && nextLng) setCoordinatesAreExact(true)
   }, [
     value?.province, value?.district, value?.municipality, value?.street, value?.address, value?.latitude, value?.longitude, value?.landmark,
     propProvince, propDistrict, propMunicipality, propCity, propStreet, propAddress, propLandmark, propLatitude, propLongitude, propCoordinates
@@ -120,11 +133,11 @@ export default function LocationMapPicker({
       address: data.street !== undefined ? data.street : streetAddress,
       street_address: data.street !== undefined ? data.street : streetAddress,
       landmark: data.landmark !== undefined ? data.landmark : landmark,
-      latitude: data.lat !== undefined ? data.lat : coordinates.lat,
-      longitude: data.lng !== undefined ? data.lng : coordinates.lng,
+      latitude: data.lat !== undefined ? data.lat : coordinatesAreExact ? coordinates.lat : null,
+      longitude: data.lng !== undefined ? data.lng : coordinatesAreExact ? coordinates.lng : null,
       coordinates: {
-        lat: data.lat !== undefined ? data.lat : coordinates.lat,
-        lng: data.lng !== undefined ? data.lng : coordinates.lng,
+        lat: data.lat !== undefined ? data.lat : coordinatesAreExact ? coordinates.lat : null,
+        lng: data.lng !== undefined ? data.lng : coordinatesAreExact ? coordinates.lng : null,
       },
       formatted_address: [
         data.street !== undefined ? data.street : streetAddress,
@@ -139,7 +152,7 @@ export default function LocationMapPicker({
       lastEmittedRef.current = sig
       onChange?.(payload)
     }
-  }, [province, district, municipality, streetAddress, landmark, coordinates, onChange])
+  }, [province, district, municipality, streetAddress, landmark, coordinates, coordinatesAreExact, onChange])
 
   // Apply reverse geocoded data smoothly and atomically
   const applyResolvedLocation = (geo, lat, lng) => {
@@ -186,6 +199,7 @@ export default function LocationMapPicker({
 
     if (lat && lng) {
       setCoordinates({ lat, lng })
+      setCoordinatesAreExact(true)
     }
 
     const statusText = [nextMuni, nextDist, nextProv].filter(Boolean).join(', ')
@@ -241,13 +255,62 @@ export default function LocationMapPicker({
     if (local) {
       applyResolvedLocation(local, lat, lng)
     } else {
-      setGeoStatus('')
+      setGeoStatus('Coordinates selected. Address details could not be resolved automatically.')
+      emitChange({ lat, lng })
     }
   }
+
+  const handleMapLocationChange = async (lat, lng) => {
+    const newLat = Number(lat.toFixed(6))
+    const newLng = Number(lng.toFixed(6))
+    setCoordinates({ lat: newLat, lng: newLng })
+    setCoordinatesAreExact(true)
+    await performReverseGeocode(newLat, newLng)
+    setResolvingGeo(false)
+  }
+  mapLocationHandlerRef.current = handleMapLocationChange
+
+  useEffect(() => {
+    if (!showMap || !mapContainerRef.current) return undefined
+
+    const map = createOpenStreetMap(mapContainerRef.current, [coordinates.lat, coordinates.lng], 14)
+    const marker = L.marker([coordinates.lat, coordinates.lng], {
+      icon: createRouteMarker('P', '#f97316'),
+      draggable: true,
+      title: 'Drag to set the delivery location',
+    }).addTo(map)
+
+    map.on('click', (event) => {
+      mapLocationHandlerRef.current?.(event.latlng.lat, event.latlng.lng)
+    })
+    marker.on('dragend', (event) => {
+      const position = event.target.getLatLng()
+      mapLocationHandlerRef.current?.(position.lat, position.lng)
+    })
+
+    leafletMapRef.current = map
+    markerRef.current = marker
+    return () => {
+      map.remove()
+      leafletMapRef.current = null
+      markerRef.current = null
+    }
+  }, [showMap])
+
+  useEffect(() => {
+    const map = leafletMapRef.current
+    const marker = markerRef.current
+    if (!map || !marker) return
+
+    const position = [coordinates.lat, coordinates.lng]
+    marker.setLatLng(position)
+    map.setView(position, map.getZoom() || 14)
+  }, [coordinates.lat, coordinates.lng])
 
   const handleProvinceChange = (newProv) => {
     const normP = normalizeProvince(newProv)
     setProvince(normP)
+    setCoordinatesAreExact(false)
     const validDists = getDistrictsForProvince(normP)
     const firstDist = validDists[0] || ''
     setDistrict(firstDist)
@@ -261,7 +324,6 @@ export default function LocationMapPicker({
       const c = NEPAL_CITY_COORDINATES[capitalName]
       newCoords = { lat: c.lat, lng: c.lng }
       setCoordinates(newCoords)
-      setPinOffset({ x: 50, y: 50 })
     }
 
     setGeoStatus('')
@@ -269,13 +331,14 @@ export default function LocationMapPicker({
       province: normP,
       district: firstDist,
       municipality: firstMuni,
-      lat: newCoords.lat,
-      lng: newCoords.lng,
+      lat: null,
+      lng: null,
     })
   }
 
   const handleDistrictChange = (newDist) => {
     setDistrict(newDist)
+    setCoordinatesAreExact(false)
     const munis = getMunicipalitiesForDistrict(newDist, province)
     const firstMuni = munis[0]?.name || ''
     setMunicipality(firstMuni)
@@ -286,7 +349,6 @@ export default function LocationMapPicker({
       const c = NEPAL_CITY_COORDINATES[cityName]
       newCoords = { lat: c.lat, lng: c.lng }
       setCoordinates(newCoords)
-      setPinOffset({ x: 50, y: 50 })
     }
 
     setGeoStatus('')
@@ -294,8 +356,8 @@ export default function LocationMapPicker({
       province,
       district: newDist,
       municipality: firstMuni,
-      lat: newCoords.lat,
-      lng: newCoords.lng,
+      lat: null,
+      lng: null,
     })
   }
 
@@ -330,7 +392,7 @@ export default function LocationMapPicker({
         const lat = Number(pos.coords.latitude.toFixed(6))
         const lng = Number(pos.coords.longitude.toFixed(6))
         setCoordinates({ lat, lng })
-        setPinOffset({ x: 50, y: 50 })
+        setCoordinatesAreExact(true)
         await performReverseGeocode(lat, lng)
         setIsLocating(false)
         setResolvingGeo(false)
@@ -338,6 +400,7 @@ export default function LocationMapPicker({
       (err) => {
         console.warn('GPS detection failed, falling back to default:', err)
         setCoordinates({ lat: 27.7172, lng: 85.3240 })
+        setCoordinatesAreExact(false)
         setIsLocating(false)
         setResolvingGeo(false)
         setGeoStatus('GPS detection failed. Please select your location on the map or dropdowns.')
@@ -353,7 +416,7 @@ export default function LocationMapPicker({
     setMunicipality(preset.municipality)
     setStreetAddress(preset.address || '')
     setCoordinates({ lat: preset.lat, lng: preset.lng })
-    setPinOffset({ x: 50, y: 50 })
+    setCoordinatesAreExact(false)
     setGeoStatus(`📍 Selected: ${preset.name}`)
 
     emitChange({
@@ -361,30 +424,10 @@ export default function LocationMapPicker({
       district: preset.district,
       municipality: preset.municipality,
       street: preset.address || '',
-      lat: preset.lat,
-      lng: preset.lng,
+      lat: null,
+      lng: null,
     })
   }
-
-  const handleMapClick = async (e) => {
-    const rect = e.currentTarget.getBoundingClientRect()
-    const x = ((e.clientX - rect.left) / rect.width) * 100
-    const y = ((e.clientY - rect.top) / rect.height) * 100
-    setPinOffset({ x: Math.max(5, Math.min(95, x)), y: Math.max(10, Math.min(90, y)) })
-
-    const baseLat = coordinates.lat || 27.7172
-    const baseLng = coordinates.lng || 85.3240
-    const deltaLat = ((50 - y) / 1000).toFixed(6)
-    const deltaLng = ((x - 50) / 1000).toFixed(6)
-    const newLat = Number((baseLat + Number(deltaLat)).toFixed(6))
-    const newLng = Number((baseLng + Number(deltaLng)).toFixed(6))
-
-    setCoordinates({ lat: newLat, lng: newLng })
-    await performReverseGeocode(newLat, newLng)
-    setResolvingGeo(false)
-  }
-
-  const osmEmbedUrl = `https://www.openstreetmap.org/export/embed.html?bbox=${(coordinates.lng - 0.015).toFixed(4)}%2C${(coordinates.lat - 0.010).toFixed(4)}%2C${(coordinates.lng + 0.015).toFixed(4)}%2C${(coordinates.lat + 0.010).toFixed(4)}&layer=mapnik&marker=${coordinates.lat}%2C${coordinates.lng}`
 
   return (
     <div className="location-map-picker card card-pad-none" style={{ overflow: 'hidden', border: '1px solid var(--border)', background: 'var(--surface)' }}>
@@ -414,7 +457,7 @@ export default function LocationMapPicker({
 
       {/* Map View */}
       {showMap && (
-        <div style={{ position: 'relative', height: 220, background: '#e2e8f0', overflow: 'hidden', cursor: 'crosshair' }} onClick={handleMapClick}>
+        <div style={{ position: 'relative', height: 220, background: '#e2e8f0', overflow: 'hidden' }}>
           {(isLocating || resolvingGeo) && (
             <div
               style={{
@@ -437,23 +480,14 @@ export default function LocationMapPicker({
             </div>
           )}
 
-          <iframe
-            title="Nepal Delivery Location Map"
-            src={osmEmbedUrl}
-            style={{ width: '100%', height: '100%', border: 'none', pointerEvents: 'none' }}
-          />
-          {/* Custom Floating Pin */}
-          <div style={{ position: 'absolute', left: `${pinOffset.x}%`, top: `${pinOffset.y}%`, transform: 'translate(-50%, -100%)', display: 'flex', flexDirection: 'column', alignItems: 'center', pointerEvents: 'none', transition: 'all 0.15s ease-out' }}>
-            <div style={{ background: 'var(--primary)', color: '#fff', padding: '4px 8px', borderRadius: 'var(--radius-sm)', fontSize: 11, fontWeight: 700, boxShadow: 'var(--shadow-md)', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
-              <MapPin size={12} /> Pinpoint Location
-            </div>
-            <div style={{ width: 20, height: 20, borderRadius: '50%', background: 'var(--primary)', border: '3px solid #fff', boxShadow: '0 0 12px var(--primary)' }} />
-          </div>
+          <div ref={mapContainerRef} style={{ width: '100%', height: '100%' }} />
           {/* Bottom Lat/Lng & status info badge */}
           <div style={{ position: 'absolute', bottom: 10, left: 12, background: 'rgba(15, 23, 42, 0.88)', color: '#fff', padding: '4px 10px', borderRadius: 'var(--radius-sm)', fontSize: 11, fontFamily: 'monospace', display: 'flex', alignItems: 'center', gap: 6, boxShadow: 'var(--shadow-sm)', flexWrap: 'wrap' }}>
             <Compass size={12} color="#38bdf8" />
             <span>Lat: {coordinates.lat.toFixed(4)}, Lng: {coordinates.lng.toFixed(4)}</span>
-            <span style={{ color: '#94a3b8' }}>· Click anywhere to re-pin & auto-fill</span>
+            <span style={{ color: coordinatesAreExact ? '#86efac' : '#fcd34d' }}>
+              · {coordinatesAreExact ? 'Exact GPS pin' : 'Approximate center — click the map or drag the pin'}
+            </span>
           </div>
         </div>
       )}

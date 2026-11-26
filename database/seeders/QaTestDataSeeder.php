@@ -34,6 +34,7 @@ use App\Modules\Shipping\Infrastructure\Models\DeliveryAssignment;
 use App\Modules\Shipping\Infrastructure\Models\DeliveryPartner;
 use App\Modules\Shipping\Infrastructure\Models\ShippingZone;
 use App\Modules\Vendor\Infrastructure\Models\Store;
+use App\Modules\Vendor\Infrastructure\Models\StoreAddress;
 use App\Modules\Vendor\Infrastructure\Models\Vendor;
 use App\Modules\Vendor\Infrastructure\Models\VendorDocument;
 use App\Modules\Vendor\Infrastructure\Models\VendorKyc;
@@ -202,6 +203,14 @@ class QaTestDataSeeder extends Seeder
                     'settings' => ['qa_reference' => $reference],
                 ]
             );
+            StoreAddress::query()->updateOrCreate(
+                ['store_id' => $store->id, 'address_type' => 'pickup'],
+                [
+                    'address_line_1' => 'QA Pickup Address, Kathmandu',
+                    'latitude' => null,
+                    'longitude' => null,
+                ]
+            );
 
             $kyc = VendorKyc::query()->updateOrCreate(
                 ['vendor_id' => $vendor->id],
@@ -215,6 +224,8 @@ class QaTestDataSeeder extends Seeder
                     'province' => 'Bagmati Province',
                     'district' => 'Kathmandu',
                     'municipality' => 'Kathmandu Metropolitan City',
+                    'latitude' => null,
+                    'longitude' => null,
                     'status' => $definition['kyc'],
                     'reviewed_by' => $definition['kyc'] === 'approved' ? $this->users['ADM-01']->id : null,
                     'reviewed_at' => $definition['kyc'] === 'approved' ? now()->subDays(4) : null,
@@ -304,6 +315,8 @@ class QaTestDataSeeder extends Seeder
                         'municipality_id' => $municipality->id,
                         'postal_code' => '44600',
                         'landmark' => 'QA landmark',
+                        'latitude' => null,
+                        'longitude' => null,
                         'is_default' => $index === 0,
                     ]
                 );

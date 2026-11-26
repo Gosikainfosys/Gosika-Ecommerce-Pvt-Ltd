@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Modules\Catalog\Infrastructure\Models\Product;
 use App\Modules\Catalog\Infrastructure\Models\ProductVariant;
+use App\Modules\Customer\Infrastructure\Models\CustomerAddress;
 use App\Modules\Identity\Domain\Roles;
 use App\Modules\Identity\Infrastructure\Models\User;
 use App\Modules\Order\Infrastructure\Models\Order;
@@ -101,10 +102,19 @@ class DeliveryAssignmentTest extends TestCase
 
         StoreAddress::create([
             'store_id' => $this->store->id,
+            'address_type' => 'business',
+            'address_line_1' => 'Business office, Kathmandu',
+            'latitude' => '27.7000',
+            'longitude' => '85.3000',
+        ]);
+        StoreAddress::create([
+            'store_id' => $this->store->id,
+            'address_type' => 'pickup',
             'address_line_1' => 'Putalisadak, Kathmandu',
             'district' => 'Kathmandu',
             'province' => 'Bagmati',
-            'is_pickup_default' => true,
+            'latitude' => '27.7103',
+            'longitude' => '85.3222',
         ]);
 
         // Delivery Partner 1 (Approved & Online)
@@ -167,10 +177,22 @@ class DeliveryAssignmentTest extends TestCase
         ]);
         $customer->assignRole(Roles::CUSTOMER);
 
+        $shippingAddress = CustomerAddress::create([
+            'uuid' => (string) Str::uuid(),
+            'user_id' => $customer->id,
+            'full_name' => 'Ram Shrestha',
+            'phone' => '9812345678',
+            'address_line_1' => 'Boudha, Stupa Road',
+            'municipality' => 'Kathmandu Metropolitan',
+            'latitude' => '27.7210',
+            'longitude' => '85.3610',
+        ]);
+
         $order = Order::create([
             'uuid' => (string) Str::uuid(),
             'order_number' => 'ORD-'.strtoupper(Str::random(8)),
             'user_id' => $customer->id,
+            'shipping_address_id' => $shippingAddress->id,
             'payment_method' => $isCod ? PaymentMethod::COD->value : 'esewa',
             'payment_status' => $isCod ? OrderPaymentStatus::PENDING : OrderPaymentStatus::PAID,
             'status' => $status,
@@ -213,6 +235,40 @@ class DeliveryAssignmentTest extends TestCase
         ]);
 
         return [$order, $vendorOrder];
+    }
+
+    public function test_customer_and_delivery_partner_routes_use_saved_pickup_and_dropoff_coordinates(): void
+    {
+        [$order] = $this->createTestOrder();
+
+        $claimResponse = $this->actingAs($this->riderUser1)
+            ->postJson("/api/v1/delivery-partner/available-jobs/{$order->vendorOrders()->firstOrFail()->uuid}/claim");
+
+        $claimResponse->assertOk()
+            ->assertJsonPath('data.pickup_address', 'Gosika Gadgets Store, Putalisadak, Kathmandu')
+            ->assertJsonPath('data.pickup_store_name', 'Gosika Gadgets Store')
+            ->assertJsonPath('data.pickup_coordinates.lat', 27.7103)
+            ->assertJsonPath('data.pickup_coordinates.lng', 85.3222)
+            ->assertJsonPath('data.dropoff_coordinates.lat', 27.721)
+            ->assertJsonPath('data.dropoff_coordinates.lng', 85.361);
+
+        $assignment = DeliveryAssignment::where('vendor_order_id', $order->vendorOrders()->firstOrFail()->id)->firstOrFail();
+        $assignment->update(['pickup_address' => 'Gosika Gadgets Store, old city-only location, Kathmandu']);
+
+        $this->actingAs($this->riderUser1)
+            ->getJson('/api/v1/delivery-partner/assignments')
+            ->assertOk()
+            ->assertJsonPath('data.0.pickup_address', 'Gosika Gadgets Store, Putalisadak, Kathmandu')
+            ->assertJsonPath('data.0.pickup_coordinates.lat', 27.7103)
+            ->assertJsonPath('data.0.dropoff_coordinates.lng', 85.361);
+
+        $customerResponse = $this->actingAs($order->user)
+            ->getJson("/api/v1/orders/{$order->uuid}");
+
+        $customerResponse->assertOk()
+            ->assertJsonPath('data.shipping_address.latitude', '27.7210')
+            ->assertJsonPath('data.shipping_address.longitude', '85.3610')
+            ->assertJsonPath('data.vendor_orders.0.assignment.pickup_coordinates.lat', 27.7103);
     }
 
     // ── 1. Vendor marks shipment ready for pickup ──────────────────────────

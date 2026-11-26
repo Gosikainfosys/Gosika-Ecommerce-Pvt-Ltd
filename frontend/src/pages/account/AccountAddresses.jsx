@@ -4,14 +4,11 @@ import api from '../../api/client'
 import Modal from '../../components/ui/Modal'
 import Input from '../../components/ui/Input'
 import Select from '../../components/ui/Select'
-import Spinner from '../../components/ui/Spinner'
 import ConfirmDialog from '../../components/ui/ConfirmDialog'
-import EmptyState from '../../components/ui/EmptyState'
-import ErrorState from '../../components/ui/ErrorState'
 import LocationMapPicker from '../../components/common/LocationMapPicker'
 import { useToast } from '../../context/ToastContext'
 import { errorMessage } from '../../utils/format'
-import { AccountPage } from './AccountUI'
+import { AccountPage, AccountEmpty, AccountError, AccountSkeleton } from './AccountUI'
 
 const EMPTY_FORM = {
   address_type: 'shipping',
@@ -191,16 +188,14 @@ export default function AccountAddresses() {
 
   return (
     <AccountPage
-      title="Addresses"
+      title="Saved Addresses"
       subtitle="Manage your shipping destinations across Nepal."
       actions={<button className="btn btn-primary btn-sm flex items-center gap-1" onClick={openAdd}><Plus size={14} /> Add New Address</button>}
     >
       {loading ? (
-        <div className="card" style={{ padding: 30, textAlign: 'center' }}>
-          <Spinner size={20} color="var(--primary)" />
-        </div>
+        <AccountSkeleton rows={2} />
       ) : error ? (
-        <ErrorState message={errorMessage(error)} onRetry={load} />
+        <AccountError message={errorMessage(error)} onRetry={load} />
       ) : addresses.length ? (
         <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 14 }}>
           {addresses.map((a) => (
@@ -239,7 +234,7 @@ export default function AccountAddresses() {
           ))}
         </div>
       ) : (
-        <EmptyState
+        <AccountEmpty
           icon={MapPin}
           title="No addresses saved"
           message="Add a delivery address to speed up checkout."

@@ -109,4 +109,52 @@ class VendorStoreProfileTest extends TestCase
             'status' => 'active',
         ]);
     }
+
+    public function test_vendor_can_save_and_list_a_mapped_pickup_address(): void
+    {
+        Role::findOrCreate(Roles::VENDOR_ADMIN, 'web');
+        $user = User::factory()->create();
+        $user->assignRole(Roles::VENDOR_ADMIN);
+        $vendor = Vendor::query()->create([
+            'user_id' => $user->id,
+            'company_name' => 'Pickup Address Vendor',
+            'business_email' => 'pickup-address-vendor@example.test',
+            'status' => VendorStatus::APPROVED,
+        ]);
+        $store = Store::query()->create([
+            'vendor_id' => $vendor->id,
+            'name' => 'Pickup Address Store',
+            'slug' => 'pickup-address-store',
+            'status' => 'active',
+        ]);
+
+        $pickupAddress = [
+            'street' => 'Main Bazaar Road, Ward 4',
+            'landmark' => 'Near Clock Tower',
+            'province' => 'Koshi Province',
+            'district' => 'Morang',
+            'municipality' => 'Biratnagar Metropolitan City',
+            'latitude' => 26.4525,
+            'longitude' => 87.2718,
+        ];
+
+        $this->actingAs($user)
+            ->putJson('/api/v1/vendor/stores/'.$store->uuid, [
+                'name' => 'Pickup Address Store',
+                'slug' => 'pickup-address-store',
+                'pickup_address' => $pickupAddress,
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.addresses.0.address_type', 'pickup')
+            ->assertJsonPath('data.addresses.0.address_line_1', 'Main Bazaar Road, Ward 4')
+            ->assertJsonPath('data.addresses.0.address_line_2', 'Biratnagar Metropolitan City, Morang, Koshi Province')
+            ->assertJsonPath('data.addresses.0.latitude', '26.4525')
+            ->assertJsonPath('data.addresses.0.longitude', '87.2718');
+
+        $this->actingAs($user)
+            ->getJson('/api/v1/vendor/stores')
+            ->assertOk()
+            ->assertJsonPath('data.0.addresses.0.address_type', 'pickup')
+            ->assertJsonPath('data.0.addresses.0.address_line_1', 'Main Bazaar Road, Ward 4');
+    }
 }

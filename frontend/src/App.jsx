@@ -278,12 +278,9 @@ function CustomerLayout() {
           <Route path="/products/:id" element={<ProductDetail />} />
           <Route path="/store/:id" element={<Store />} />
           <Route path="/cart" element={<Cart />} />
-          <Route path="/wishlist" element={<AuthRoute><Wishlist /></AuthRoute>} />
           <Route path="/checkout" element={<AuthRoute><Checkout /></AuthRoute>} />
           <Route path="/order-success" element={<AuthRoute><OrderSuccess /></AuthRoute>} />
           <Route path="/payments/esewa/callback" element={<PaymentCallback />} />
-          <Route path="/orders" element={<AuthRoute><OrderList /></AuthRoute>} />
-          <Route path="/orders/:id" element={<AuthRoute><OrderDetail /></AuthRoute>} />
           <Route path="/category/:category" element={<CategoryPage />} />
           <Route path="/brand/:brand" element={<BrandPage />} />
           <Route path="/brands" element={<BrandsPage />} />
@@ -296,23 +293,28 @@ function CustomerLayout() {
           <Route path="/forgot-password" element={<GuestRoute><ForgotPassword /></GuestRoute>} />
           <Route path="/reset-password" element={<GuestRoute><ResetPassword /></GuestRoute>} />
           <Route path="/social-auth" element={<SocialAuth />} />
-          <Route path="/account" element={<AuthRoute><AccountLayout /></AuthRoute>}>
-            <Route index element={<CustomerDashboard />} />
-            <Route path="help" element={<><AccountTitle label="Help Center" /><Help /></>} />
-            <Route path="orders" element={<><AccountTitle label="My Orders" /><OrderList basePath="/account/orders" /></>} />
-            <Route path="orders/active" element={<AccountActiveOrders />} />
-            <Route path="orders/:id" element={<><AccountTitle label="Order Detail" /><OrderDetail embedded basePath="/account/orders" /></>} />
-            <Route path="returns" element={<AccountReturns />} />
-            <Route path="vouchers" element={<AccountVouchers />} />
-            <Route path="wishlist" element={<><AccountTitle label="Wishlist" /><Wishlist /></>} />
-            <Route path="reviews" element={<AccountMyReviews />} />
-            <Route path="profile" element={<AccountProfile />} />
-            <Route path="addresses" element={<AccountAddresses />} />
-            <Route path="security" element={<AccountSecurity />} />
-            <Route path="notifications" element={<AccountNotifications />} />
-            <Route path="messages" element={<ConversationInbox portal="customer" />} />
-            <Route path="support" element={<AccountSupport />} />
-            <Route path="*" element={<Navigate to="/account" replace />} />
+          {/* One authenticated customer account shell. Legacy order/wishlist URLs
+              keep working and render through the same layout. */}
+          <Route element={<AuthRoute><AccountLayout /></AuthRoute>}>
+            <Route path="/account" element={<CustomerDashboard />} />
+            <Route path="/account/help" element={<Help embedded />} />
+            <Route path="/account/orders" element={<OrderList basePath="/account/orders" />} />
+            <Route path="/account/orders/active" element={<AccountActiveOrders />} />
+            <Route path="/account/orders/:id" element={<OrderDetail basePath="/account/orders" />} />
+            <Route path="/account/returns" element={<AccountReturns />} />
+            <Route path="/account/vouchers" element={<AccountVouchers />} />
+            <Route path="/account/wishlist" element={<Wishlist />} />
+            <Route path="/account/reviews" element={<AccountMyReviews />} />
+            <Route path="/account/profile" element={<AccountProfile />} />
+            <Route path="/account/addresses" element={<AccountAddresses />} />
+            <Route path="/account/security" element={<AccountSecurity />} />
+            <Route path="/account/notifications" element={<AccountNotifications />} />
+            <Route path="/account/messages" element={<><AccountTitle label="Messages" /><ConversationInbox portal="customer" /></>} />
+            <Route path="/account/support" element={<AccountSupport />} />
+            <Route path="/orders" element={<OrderList basePath="/account/orders" />} />
+            <Route path="/orders/:id" element={<OrderDetail basePath="/account/orders" />} />
+            <Route path="/wishlist" element={<Wishlist />} />
+            <Route path="/account/*" element={<Navigate to="/account" replace />} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>

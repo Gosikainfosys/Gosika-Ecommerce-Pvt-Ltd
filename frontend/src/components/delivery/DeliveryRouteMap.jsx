@@ -1,32 +1,49 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+import L from 'leaflet'
 import {
-  MapPin, Store, Navigation, ExternalLink, Compass,
-  Truck, CheckCircle2, AlertCircle, Copy, Layers
+  MapPin, Store, Navigation, ExternalLink, Compass, Truck, Copy,
 } from 'lucide-react'
 import { NEPAL_CITY_COORDINATES } from '../../utils/constants'
+import { createOpenStreetMap, createRouteMarker } from '../../utils/leafletMap'
 import { useToast } from '../../context/ToastContext'
 
-/**
- * Helper to extract coordinates from text if explicit coords are not supplied.
- * Checks for known Nepal cities/hubs.
- */
-function resolveCoordsFromAddress(address) {
-  if (!address || typeof address !== 'string') return null
-  const lower = address.toLowerCase()
-  for (const [city, coords] of Object.entries(NEPAL_CITY_COORDINATES)) {
-    if (lower.includes(city.toLowerCase())) {
-      return { lat: coords.lat, lng: coords.lng, source: city }
-    }
+function findApproximateCoords(address) {
+  const search = (address || '').toLowerCase()
+  const match = Object.entries(NEPAL_CITY_COORDINATES).find(([city]) => search.includes(city.toLowerCase()))
+  return match ? { ...match[1], city: match[0] } : null
+}
+
+function isNepalCoordinate(lat, lng) {
+  return Number.isFinite(lat) && Number.isFinite(lng) && lat >= 25 && lat <= 32 && lng >= 79 && lng <= 89.5
+}
+
+function normalizePoint(point, fallbackName, fallbackAddress) {
+  const rawLat = typeof point === 'object' && point ? point.lat ?? point.latitude : null
+  const rawLng = typeof point === 'object' && point ? point.lng ?? point.longitude : null
+  const lat = rawLat === null || rawLat === '' ? NaN : Number(rawLat)
+  const lng = rawLng === null || rawLng === '' ? NaN : Number(rawLng)
+  const address = (typeof point === 'string' ? point : point?.address) || fallbackAddress
+  const hasCoordinates = isNepalCoordinate(lat, lng)
+  const approximate = !hasCoordinates ? findApproximateCoords(address) : null
+
+  return {
+    name: (typeof point === 'object' && point?.name) || fallbackName,
+    address,
+    phone: typeof point === 'object' ? point?.phone : null,
+    ...(hasCoordinates
+      ? { lat, lng, isApproximate: false }
+      : approximate
+        ? { lat: approximate.lat, lng: approximate.lng, isApproximate: true, approximateCity: approximate.city }
+        : {}),
   }
-  return null
 }
 
 export default function DeliveryRouteMap({
-  pickup,              // { name, address, lat, lng } or string address
-  dropoff,             // { name, address, phone, lat, lng } or string address
-  rider,               // { name, phone, lat, lng }
-  tracking = [],       // array of tracking events
-  status = 'assigned', // current delivery status
+  pickup,
+  dropoff,
+  rider,
+  tracking = [],
+  status = 'assigned',
   height = 340,
   title = 'Map-Based Delivery Route',
   subtitle = 'Live visual delivery corridor and GPS navigation',
@@ -35,137 +52,166 @@ export default function DeliveryRouteMap({
   style = {},
 }) {
   const toast = useToast()
-  const [mapLayer, setMapLayer] = useState('mapnik') // 'mapnik'
   const [isCopied, setIsCopied] = useState(false)
+  const [routeGeometry, setRouteGeometry] = useState(null)
+  const [routeLoading, setRouteLoading] = useState(false)
+  const [routeError, setRouteError] = useState('')
+  const mapContainerRef = useRef(null)
+  const leafletMapRef = useRef(null)
+  const mapLayersRef = useRef(null)
 
-  // 1. Normalize Pickup Point
-  const pickupPoint = useMemo(() => {
-    const rawAddress = typeof pickup === 'string' ? pickup : pickup?.address || ''
-    const rawName = typeof pickup === 'object' ? pickup?.name : ''
-    let lat = typeof pickup === 'object' ? Number(pickup?.lat) : NaN
-    let lng = typeof pickup === 'object' ? Number(pickup?.lng) : NaN
+  const pickupPoint = useMemo(
+    () => normalizePoint(pickup, 'Merchant Store (Pickup)', 'Pickup address unavailable'),
+    [pickup],
+  )
+  const dropoffPoint = useMemo(
+    () => normalizePoint(dropoff, 'Customer Dropoff', 'Delivery address unavailable'),
+    [dropoff],
+  )
 
-    if (isNaN(lat) || isNaN(lng) || !lat || !lng) {
-      const fallback = resolveCoordsFromAddress(rawAddress)
-      lat = fallback?.lat || 27.7172 // default Kathmandu
-      lng = fallback?.lng || 85.3240
-    }
-
-    return {
-      name: rawName || 'Merchant Store (Pickup)',
-      address: rawAddress || 'Store Pickup Location',
-      lat,
-      lng,
-    }
-  }, [pickup])
-
-  // 2. Normalize Dropoff Point
-  const dropoffPoint = useMemo(() => {
-    const rawAddress = typeof dropoff === 'string' ? dropoff : dropoff?.address || ''
-    const rawName = typeof dropoff === 'object' ? dropoff?.name : ''
-    const rawPhone = typeof dropoff === 'object' ? dropoff?.phone : ''
-    let lat = typeof dropoff === 'object' ? Number(dropoff?.lat) : NaN
-    let lng = typeof dropoff === 'object' ? Number(dropoff?.lng) : NaN
-
-    if (isNaN(lat) || isNaN(lng) || !lat || !lng) {
-      const fallback = resolveCoordsFromAddress(rawAddress)
-      // Slight offset if same as pickup so bbox doesn't collapse
-      lat = fallback?.lat || (pickupPoint.lat + 0.015)
-      lng = fallback?.lng || (pickupPoint.lng + 0.015)
-    }
-
-    return {
-      name: rawName || 'Customer Dropoff',
-      phone: rawPhone,
-      address: rawAddress || 'Customer Delivery Address',
-      lat,
-      lng,
-    }
-  }, [dropoff, pickupPoint])
-
-  // 3. Current Rider Location
   const riderPoint = useMemo(() => {
-    let lat = Number(rider?.lat)
-    let lng = Number(rider?.lng)
+    const directPoint = normalizePoint(rider, rider?.name || 'Assigned Courier Rider', '')
+    if (directPoint.lat !== undefined) return directPoint
 
-    // Check latest tracking update if rider lat/lng not provided
-    if (isNaN(lat) || isNaN(lng) || !lat || !lng) {
-      const latestWithCoords = [...tracking].reverse().find(t => t.latitude && t.longitude)
-      if (latestWithCoords) {
-        lat = Number(latestWithCoords.latitude)
-        lng = Number(latestWithCoords.longitude)
+    const latestWithCoords = [...tracking].reverse().find((event) => (
+      normalizePoint(event, '', '').lat !== undefined
+    ))
+    return latestWithCoords ? normalizePoint(latestWithCoords, rider?.name || 'Assigned Courier Rider', '') : null
+  }, [rider, tracking])
+
+  const routeCoordinatesComplete = pickupPoint.lat !== undefined
+    && dropoffPoint.lat !== undefined
+    && !pickupPoint.isApproximate
+    && !dropoffPoint.isApproximate
+  const routeEndpointsAvailable = [pickupPoint, dropoffPoint].every((point) => (
+    (point.lat !== undefined && !point.isApproximate)
+    || (point.address && !point.address.toLowerCase().includes('unavailable'))
+  ))
+  const routeEndpoint = (point) => point.lat !== undefined && !point.isApproximate
+    ? `${point.lat},${point.lng}`
+    : point.address
+  const googleMapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(routeEndpoint(pickupPoint))}&destination=${encodeURIComponent(routeEndpoint(dropoffPoint))}&travelmode=driving`
+
+  useEffect(() => {
+    if (!mapContainerRef.current) return undefined
+
+    const center = pickupPoint.lat !== undefined
+      ? [pickupPoint.lat, pickupPoint.lng]
+      : dropoffPoint.lat !== undefined
+        ? [dropoffPoint.lat, dropoffPoint.lng]
+        : [27.7172, 85.3240]
+    const map = createOpenStreetMap(mapContainerRef.current, center, 13)
+    const layers = L.layerGroup().addTo(map)
+    leafletMapRef.current = map
+    mapLayersRef.current = layers
+
+    const observer = typeof ResizeObserver === 'undefined'
+      ? null
+      : new ResizeObserver(() => map.invalidateSize())
+    observer?.observe(mapContainerRef.current)
+
+    return () => {
+      observer?.disconnect()
+      map.remove()
+      leafletMapRef.current = null
+      mapLayersRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!routeCoordinatesComplete) {
+      setRouteGeometry(null)
+      setRouteError('')
+      setRouteLoading(false)
+      return undefined
+    }
+
+    const controller = new AbortController()
+    const url = `https://router.project-osrm.org/route/v1/driving/${pickupPoint.lng},${pickupPoint.lat};${dropoffPoint.lng},${dropoffPoint.lat}?overview=full&geometries=geojson&steps=false`
+    setRouteGeometry(null)
+    setRouteError('')
+    setRouteLoading(true)
+
+    const loadRoute = async () => {
+      try {
+        const response = await fetch(url, { signal: controller.signal })
+        if (!response.ok) throw new Error(`Routing service returned ${response.status}.`)
+
+        const result = await response.json()
+        const coordinates = result.routes?.[0]?.geometry?.coordinates
+        if (result.code !== 'Ok' || !Array.isArray(coordinates) || coordinates.length < 2) {
+          throw new Error('No drivable route was found between these points.')
+        }
+
+        setRouteGeometry(coordinates)
+      } catch (error) {
+        if (error.name !== 'AbortError') {
+          setRouteError(error.message || 'Road route could not be loaded.')
+        }
+      } finally {
+        if (!controller.signal.aborted) setRouteLoading(false)
       }
     }
 
-    if (!isNaN(lat) && !isNaN(lng) && lat && lng) {
-      return {
-        name: rider?.name || 'Assigned Courier Rider',
-        phone: rider?.phone,
-        lat,
-        lng,
+    loadRoute()
+    return () => controller.abort()
+  }, [routeCoordinatesComplete, pickupPoint.lat, pickupPoint.lng, dropoffPoint.lat, dropoffPoint.lng])
+
+  useEffect(() => {
+    const map = leafletMapRef.current
+    const layers = mapLayersRef.current
+    if (!map || !layers) return
+
+    layers.clearLayers()
+    const bounds = L.latLngBounds([])
+    const stops = [
+      { point: pickupPoint, label: pickupPoint.isApproximate ? 'A~' : 'A', color: pickupPoint.isApproximate ? '#818cf8' : '#4338ca' },
+      { point: dropoffPoint, label: dropoffPoint.isApproximate ? 'B~' : 'B', color: dropoffPoint.isApproximate ? '#34d399' : '#059669' },
+    ].filter(({ point }) => point.lat !== undefined)
+
+    stops.forEach(({ point, label, color }) => {
+      const position = [point.lat, point.lng]
+      L.marker(position, { icon: createRouteMarker(label, color), keyboard: false }).addTo(layers)
+      bounds.extend(position)
+    })
+
+    if (routeGeometry) {
+      const route = L.polyline(routeGeometry.map(([lng, lat]) => [lat, lng]), {
+        color: '#f97316',
+        weight: 5,
+        opacity: 0.9,
+      }).addTo(layers)
+      bounds.extend(route.getBounds())
+    }
+
+    if (bounds.isValid()) {
+      const visibleBounds = bounds.pad(0.15)
+      if (riderPoint?.lat !== undefined && visibleBounds.contains([riderPoint.lat, riderPoint.lng])) {
+        L.marker([riderPoint.lat, riderPoint.lng], {
+          icon: createRouteMarker('R', '#ea580c'),
+          keyboard: false,
+        }).addTo(layers)
       }
+      map.fitBounds(visibleBounds, { padding: [28, 28], maxZoom: routeGeometry ? 16 : 14 })
     }
-
-    // Interpolate midpoint if out for delivery
-    if (status === 'out_for_delivery') {
-      return {
-        name: rider?.name || 'Assigned Courier Rider',
-        phone: rider?.phone,
-        lat: (pickupPoint.lat + dropoffPoint.lat) / 2,
-        lng: (pickupPoint.lng + dropoffPoint.lng) / 2,
-        isEstimated: true,
-      }
-    }
-
-    return null
-  }, [rider, tracking, status, pickupPoint, dropoffPoint])
-
-  // 4. Calculate Bounding Box
-  const bbox = useMemo(() => {
-    const points = [
-      { lat: pickupPoint.lat, lng: pickupPoint.lng },
-      { lat: dropoffPoint.lat, lng: dropoffPoint.lng },
-    ]
-    if (riderPoint) {
-      points.push({ lat: riderPoint.lat, lng: riderPoint.lng })
-    }
-
-    const lats = points.map(p => p.lat)
-    const lngs = points.map(p => p.lng)
-
-    const minLat = Math.min(...lats)
-    const maxLat = Math.max(...lats)
-    const minLng = Math.min(...lngs)
-    const maxLng = Math.max(...lngs)
-
-    const latDelta = Math.max(0.01, (maxLat - minLat) * 0.4)
-    const lngDelta = Math.max(0.01, (maxLng - minLng) * 0.4)
-
-    return {
-      minLng: (minLng - lngDelta).toFixed(4),
-      minLat: (minLat - latDelta).toFixed(4),
-      maxLng: (maxLng + lngDelta).toFixed(4),
-      maxLat: (maxLat + latDelta).toFixed(4),
-      centerLat: ((minLat + maxLat) / 2).toFixed(6),
-      centerLng: ((minLng + maxLng) / 2).toFixed(6),
-    }
-  }, [pickupPoint, dropoffPoint, riderPoint])
-
-  // Center marker on rider if out for delivery, else destination
-  const activeMarker = riderPoint || (status === 'delivered' ? dropoffPoint : pickupPoint)
-
-  const osmUrl = `https://www.openstreetmap.org/export/embed.html?bbox=${bbox.minLng}%2C${bbox.minLat}%2C${bbox.maxLng}%2C${bbox.maxLat}&layer=${mapLayer}&marker=${activeMarker.lat}%2C${activeMarker.lng}`
-
-  // Google Maps directions navigation URL
-  const googleMapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(pickupPoint.lat + ',' + pickupPoint.lng)}&destination=${encodeURIComponent(dropoffPoint.lat + ',' + dropoffPoint.lng)}&travelmode=driving`
+  }, [pickupPoint, dropoffPoint, riderPoint, routeGeometry])
 
   const copyCoordinates = () => {
+    if (!routeCoordinatesComplete) return
     const text = `Pickup: ${pickupPoint.lat}, ${pickupPoint.lng} | Delivery: ${dropoffPoint.lat}, ${dropoffPoint.lng}`
     navigator.clipboard.writeText(text)
     setIsCopied(true)
     toast.success('Route GPS coordinates copied!')
     setTimeout(() => setIsCopied(false), 2000)
   }
+
+  const routeStatus = routeLoading
+    ? 'Calculating road route…'
+    : routeError
+      ? `Road route unavailable: ${routeError}`
+      : routeCoordinatesComplete
+        ? 'Road route shown'
+        : 'Exact GPS points are needed for road routing; approximate pins are not routed.'
 
   return (
     <div
@@ -179,7 +225,6 @@ export default function DeliveryRouteMap({
         ...style,
       }}
     >
-      {/* Header bar */}
       <div
         style={{
           padding: '14px 18px',
@@ -219,13 +264,14 @@ export default function DeliveryRouteMap({
             type="button"
             className="btn btn-ghost btn-xs"
             onClick={copyCoordinates}
+            disabled={!routeCoordinatesComplete}
             title="Copy Coordinates"
             style={{ fontSize: 11, padding: '4px 8px' }}
           >
             <Copy size={12} /> {isCopied ? 'Copied' : 'GPS Coords'}
           </button>
 
-          {showDirectionsBtn && (
+          {showDirectionsBtn && routeEndpointsAvailable && (
             <a
               href={googleMapsUrl}
               target="_blank"
@@ -246,26 +292,13 @@ export default function DeliveryRouteMap({
         </div>
       </div>
 
-      {/* Map Canvas / Embed */}
       <div style={{ position: 'relative', width: '100%', height, background: '#e2e8f0' }}>
-        <iframe
-          title="Delivery Route Map"
-          width="100%"
-          height="100%"
-          frameBorder="0"
-          scrolling="no"
-          marginHeight="0"
-          marginWidth="0"
-          src={osmUrl}
-          style={{ border: 0, display: 'block' }}
-        />
-
-        {/* Floating Route Waypoint Indicator Pills */}
+        <div ref={mapContainerRef} style={{ width: '100%', height: '100%' }} />
         <div
           style={{
             position: 'absolute',
             top: 12,
-            left: 12,
+            left: 52,
             right: 12,
             display: 'flex',
             justifyContent: 'space-between',
@@ -273,65 +306,41 @@ export default function DeliveryRouteMap({
             pointerEvents: 'none',
             flexWrap: 'wrap',
             gap: 8,
+            zIndex: 500,
           }}
         >
-          {/* Pickup Pin Pill */}
-          <div
-            style={{
-              pointerEvents: 'auto',
-              background: 'rgba(255, 255, 255, 0.94)',
-              backdropFilter: 'blur(8px)',
-              border: '1px solid #cbd5e1',
-              borderRadius: 8,
-              padding: '6px 10px',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.12)',
-              maxWidth: 220,
-              fontSize: 11.5,
-            }}
-          >
+          <div style={{ pointerEvents: 'auto', background: 'rgba(255,255,255,.94)', border: '1px solid #cbd5e1', borderRadius: 8, padding: '6px 10px', boxShadow: '0 4px 12px rgba(0,0,0,.12)', maxWidth: 320, fontSize: 11.5 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontWeight: 800, color: '#4338ca' }}>
               <Store size={12} /> Pickup: {pickupPoint.name}
             </div>
-            <div style={{ color: '#475569', fontSize: 10.5, marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            <div style={{ color: '#475569', fontSize: 10.5, marginTop: 1, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>
               {pickupPoint.address}
             </div>
           </div>
 
-          {/* Delivery Pin Pill */}
-          <div
-            style={{
-              pointerEvents: 'auto',
-              background: 'rgba(255, 255, 255, 0.94)',
-              backdropFilter: 'blur(8px)',
-              border: '1px solid #cbd5e1',
-              borderRadius: 8,
-              padding: '6px 10px',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.12)',
-              maxWidth: 220,
-              fontSize: 11.5,
-              textAlign: 'right',
-            }}
-          >
+          <div style={{ pointerEvents: 'auto', background: 'rgba(255,255,255,.94)', border: '1px solid #cbd5e1', borderRadius: 8, padding: '6px 10px', boxShadow: '0 4px 12px rgba(0,0,0,.12)', maxWidth: 320, fontSize: 11.5, textAlign: 'right' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 5, fontWeight: 800, color: '#059669' }}>
               <MapPin size={12} /> Dropoff: {dropoffPoint.name}
             </div>
-            <div style={{ color: '#475569', fontSize: 10.5, marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            <div style={{ color: '#475569', fontSize: 10.5, marginTop: 1, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>
               {dropoffPoint.address}
             </div>
           </div>
         </div>
 
-        {/* Live Rider Beacon Overlay when out for delivery */}
+        <div style={{ position: 'absolute', bottom: 10, left: 10, zIndex: 500, maxWidth: 'calc(100% - 20px)', padding: '5px 9px', borderRadius: 6, background: 'rgba(255,255,255,.95)', color: routeError ? '#b91c1c' : '#334155', fontSize: 10.5 }}>
+          {routeStatus}
+        </div>
+
         {(status === 'out_for_delivery' || status === 'picked_up') && (
           <div
             style={{
               position: 'absolute',
-              bottom: 12,
-              left: 12,
-              pointerEvents: 'auto',
+              bottom: 10,
+              right: 10,
+              zIndex: 500,
               background: 'rgba(15, 23, 42, 0.9)',
               color: '#fff',
-              backdropFilter: 'blur(8px)',
               borderRadius: 8,
               padding: '6px 12px',
               fontSize: 11.5,
@@ -342,22 +351,12 @@ export default function DeliveryRouteMap({
               boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
             }}
           >
-            <span
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: '50%',
-                background: '#10b981',
-                boxShadow: '0 0 0 3px rgba(16, 185, 129, 0.4)',
-                animation: 'pulse 1.5s infinite',
-              }}
-            />
-            <span>Rider In Transit · Corridor Active</span>
+            <Truck size={13} color="#10b981" />
+            <span>Rider In Transit</span>
           </div>
         )}
       </div>
 
-      {/* Corridor Waypoints Card Footer */}
       <div
         style={{
           padding: '12px 18px',
@@ -370,80 +369,30 @@ export default function DeliveryRouteMap({
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div
-            style={{
-              width: 24,
-              height: 24,
-              borderRadius: '50%',
-              background: '#e0e7ff',
-              color: '#4338ca',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: 11,
-              fontWeight: 800,
-              flexShrink: 0,
-            }}
-          >
-            1
-          </div>
+          <div style={{ width: 24, height: 24, borderRadius: '50%', background: '#e0e7ff', color: '#4338ca', display: 'grid', placeItems: 'center', fontSize: 11, fontWeight: 800, flexShrink: 0 }}>1</div>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontWeight: 700, color: 'var(--ink)' }}>Seller Warehouse</div>
-            <div style={{ color: '#64748b', fontSize: 11, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {pickupPoint.address}
-            </div>
+            <div style={{ fontWeight: 700, color: 'var(--ink)' }}>Store Pickup</div>
+            <div style={{ color: '#64748b', fontSize: 11, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{pickupPoint.address}</div>
           </div>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div
-            style={{
-              width: 24,
-              height: 24,
-              borderRadius: '50%',
-              background: status === 'out_for_delivery' ? '#fef3c7' : '#f1f5f9',
-              color: status === 'out_for_delivery' ? '#d97706' : '#64748b',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: 11,
-              fontWeight: 800,
-              flexShrink: 0,
-            }}
-          >
-            <Truck size={12} />
+          <div style={{ width: 24, height: 24, borderRadius: '50%', background: routeGeometry ? '#ffedd5' : '#f1f5f9', color: '#ea580c', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+            <Navigation size={12} />
           </div>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontWeight: 700, color: 'var(--ink)' }}>Transit Corridor</div>
+            <div style={{ fontWeight: 700, color: 'var(--ink)' }}>Road Route</div>
             <div style={{ color: '#64748b', fontSize: 11 }}>
-              {status === 'delivered' ? 'Completed' : status === 'out_for_delivery' ? 'On Highway / Way' : 'Dispatched'}
+              {routeLoading ? 'Calculating…' : routeGeometry ? 'Driving route' : routeCoordinatesComplete ? 'Route unavailable' : 'Waiting for exact GPS'}
             </div>
           </div>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div
-            style={{
-              width: 24,
-              height: 24,
-              borderRadius: '50%',
-              background: status === 'delivered' ? '#d1fae5' : '#fee2e2',
-              color: status === 'delivered' ? '#059669' : '#dc2626',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: 11,
-              fontWeight: 800,
-              flexShrink: 0,
-            }}
-          >
-            3
-          </div>
+          <div style={{ width: 24, height: 24, borderRadius: '50%', background: '#d1fae5', color: '#059669', display: 'grid', placeItems: 'center', fontSize: 11, fontWeight: 800, flexShrink: 0 }}>3</div>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontWeight: 700, color: 'var(--ink)' }}>Customer Doorstep</div>
-            <div style={{ color: '#64748b', fontSize: 11, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {dropoffPoint.address}
-            </div>
+            <div style={{ fontWeight: 700, color: 'var(--ink)' }}>Customer Dropoff</div>
+            <div style={{ color: '#64748b', fontSize: 11, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{dropoffPoint.address}</div>
           </div>
         </div>
       </div>

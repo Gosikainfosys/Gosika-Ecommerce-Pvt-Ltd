@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { Headphones, Mail, Phone, ChevronDown, Truck, CreditCard, RefreshCcw, Store } from 'lucide-react'
-import EmptyState from '../components/ui/EmptyState'
+import { AccountPage } from './account/AccountUI'
 
 const SECTIONS = {
   shipping: {
@@ -25,34 +25,29 @@ const SECTIONS = {
   },
 }
 
-export default function Help() {
+function HelpContent() {
   const [open, setOpen] = useState('shipping')
-  return (
-    <div className="page-shell container">
-      <div className="text-center mb-3" style={{ maxWidth: 560, margin: '0 auto 24px' }}>
-        <span className="avatar" style={{ width: 56, height: 56, marginBottom: 10 }}><Headphones size={26} /></span>
-        <h1 style={{ fontSize: 24 }}>How can we help?</h1>
-        <p className="muted">Find answers about shipping, payments, returns and selling.</p>
-      </div>
 
-      <div className="card" style={{ maxWidth: 640, margin: '0 auto' }}>
+  return (
+    <>
+      <div className="help-topics">
         {Object.entries(SECTIONS).map(([key, s]) => (
-          <div key={key} style={{ borderBottom: '1px solid var(--border)' }}>
+          <div key={key} className="help-topic">
             <button
-              className="flex items-center justify-between gap-2"
+              type="button"
+              className="help-topic-trigger"
               onClick={() => setOpen(open === key ? '' : key)}
-              style={{ width: '100%', padding: '14px 8px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 15, fontWeight: 600, textAlign: 'left' }}
               aria-expanded={open === key}
             >
               <span className="flex items-center gap-2"><s.icon size={18} color="var(--primary)" /> {s.title}</span>
-              <ChevronDown size={17} style={{ transform: open === key ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
+              <ChevronDown size={17} className="help-topic-chevron" style={{ transform: open === key ? 'rotate(180deg)' : 'none' }} />
             </button>
             {open === key && <p className="muted" style={{ padding: '0 8px 16px', whiteSpace: 'pre-line' }}>{s.body}</p>}
           </div>
         ))}
       </div>
 
-      <div className="card mt-2" style={{ maxWidth: 640, margin: '16px auto 0' }}>
+      <div className="card help-contact-card">
         <h2 style={{ fontSize: 17 }} className="flex items-center gap-2"><Headphones size={18} color="var(--primary)" /> Still need help?</h2>
         <p className="muted text-sm">Our support team is available 24/7.</p>
         <div className="flex items-center gap-4 wrap mt-2">
@@ -60,6 +55,30 @@ export default function Help() {
           <a href="tel:+9779800000000" className="btn btn-outline"><Phone size={16} /> +977 9800 000 000</a>
         </div>
       </div>
+    </>
+  )
+}
+
+export default function Help({ embedded = false }) {
+  if (embedded) {
+    return (
+      <AccountPage
+        title="Help Center"
+        subtitle="Find answers about shipping, payments, returns and selling on Gosika."
+      >
+        <HelpContent />
+      </AccountPage>
+    )
+  }
+
+  return (
+    <div className="page-shell container">
+      <div className="text-center mb-3" style={{ maxWidth: 560, margin: '0 auto 24px' }}>
+        <span className="avatar" style={{ width: 56, height: 56, marginBottom: 10 }}><Headphones size={26} /></span>
+        <h1 style={{ fontSize: 24 }}>How can we help?</h1>
+        <p className="muted">Find answers about shipping, payments, returns and selling.</p>
+      </div>
+      <HelpContent />
     </div>
   )
 }

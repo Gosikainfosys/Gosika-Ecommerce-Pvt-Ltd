@@ -14,49 +14,57 @@ class DeliveryAssignmentResource extends JsonResource
         $originalCodAmount = round((float) $this->cod_amount, 2);
         $refundedAmount = round((float) ($this->refunded_amount ?? 0), 2);
 
-        $dropoffCoords = null;
         $order = $this->vendorOrder?->order;
+        $shippingSnap = null;
         if ($order && $order->shipping_address_snapshot) {
             $shippingSnap = is_array($order->shipping_address_snapshot)
                 ? $order->shipping_address_snapshot
                 : json_decode((string) $order->shipping_address_snapshot, true);
-            if (! empty($shippingSnap['latitude']) && ! empty($shippingSnap['longitude'])) {
-                $dropoffCoords = [
-                    'lat' => (float) $shippingSnap['latitude'],
-                    'lng' => (float) $shippingSnap['longitude'],
-                ];
-            }
+        }
+        $dropoffCoords = $this->coordinatePair(
+            $shippingSnap['latitude'] ?? $order?->shippingAddress?->latitude,
+            $shippingSnap['longitude'] ?? $order?->shippingAddress?->longitude,
+        );
+
+        $store = $this->vendorOrder?->store;
+        $storeAddress = null;
+        if ($store) {
+            $storeAddresses = $store->addresses;
+            $storeAddress = $storeAddresses->first(fn ($address) => $address->address_type === 'pickup') ?? $storeAddresses->first();
+        }
+        $pickupCoords = $this->coordinatePair($storeAddress?->latitude, $storeAddress?->longitude);
+        $vendor = $this->vendorOrder?->vendor;
+        if (! $pickupCoords && ! $storeAddress) {
+            $pickupCoords = $this->coordinatePair($vendor?->kyc?->latitude, $vendor?->kyc?->longitude);
         }
 
-        $pickupCoords = null;
-        $vendor = $this->vendorOrder?->vendor;
-        if ($vendor) {
-            if ($vendor->relationLoaded('stores') && $vendor->stores->isNotEmpty()) {
-                $store = $vendor->stores->first();
-                $storeAddress = $store->relationLoaded('address') ? $store->address : $store->address()->first();
-                if ($storeAddress && ! empty($storeAddress->latitude) && ! empty($storeAddress->longitude)) {
-                    $pickupCoords = [
-                        'lat' => (float) $storeAddress->latitude,
-                        'lng' => (float) $storeAddress->longitude,
-                    ];
-                }
-            }
-            if (! $pickupCoords && $vendor->relationLoaded('kyc') && $vendor->kyc) {
-                if (! empty($vendor->kyc->latitude) && ! empty($vendor->kyc->longitude)) {
-                    $pickupCoords = [
-                        'lat' => (float) $vendor->kyc->latitude,
-                        'lng' => (float) $vendor->kyc->longitude,
-                    ];
-                }
-            }
-        }
+        $pickupAddressFallback = $storeAddress
+            ? implode(', ', array_filter([
+                $store?->name,
+                $storeAddress->address_line_1,
+                $storeAddress->address_line_2,
+                $storeAddress->landmark,
+            ]))
+            : implode(', ', array_filter([
+                $store?->name,
+                $vendor?->kyc?->address,
+                $vendor?->kyc?->landmark,
+                $vendor?->kyc?->municipality,
+                $vendor?->kyc?->district,
+                $vendor?->kyc?->province,
+            ]));
+        $pickupAddress = $pickupAddressFallback ?: $this->pickup_address;
+        $dropoffAddress = $this->dropoff_address ?: implode(', ', array_filter([
+            $shippingSnap['address_line_1'] ?? $order?->shippingAddress?->address_line_1,
+            $shippingSnap['address_line_2'] ?? $order?->shippingAddress?->address_line_2,
+            $shippingSnap['municipality'] ?? null,
+            $shippingSnap['district'] ?? null,
+            $shippingSnap['province'] ?? null,
+        ]));
 
         $riderCoords = null;
-        if ($this->deliveryPartner && $this->deliveryPartner->latitude && $this->deliveryPartner->longitude) {
-            $riderCoords = [
-                'lat' => (float) $this->deliveryPartner->latitude,
-                'lng' => (float) $this->deliveryPartner->longitude,
-            ];
+        if ($this->deliveryPartner) {
+            $riderCoords = $this->coordinatePair($this->deliveryPartner->latitude, $this->deliveryPartner->longitude);
         }
 
         return [
@@ -72,8 +80,9 @@ class DeliveryAssignmentResource extends JsonResource
             'original_cod_amount' => number_format($originalCodAmount, 2, '.', ''),
             'refunded_amount' => number_format($refundedAmount, 2, '.', ''),
             'cod_amount' => number_format(max(0, $originalCodAmount - $refundedAmount), 2, '.', ''),
-            'pickup_address' => $this->pickup_address,
-            'dropoff_address' => $this->dropoff_address,
+            'pickup_store_name' => $store?->name,
+            'pickup_address' => $pickupAddress,
+            'dropoff_address' => $dropoffAddress,
             'pickup_coordinates' => $pickupCoords,
             'dropoff_coordinates' => $dropoffCoords,
             'rider_coordinates' => $riderCoords,
@@ -98,5 +107,20 @@ class DeliveryAssignmentResource extends JsonResource
             'tracking' => DeliveryTrackingResource::collection($this->whenLoaded('tracking')),
             'vendor_order' => $this->whenLoaded('vendorOrder'),
         ];
+    }
+
+    private function coordinatePair($latitude, $longitude): ?array
+    {
+        if (! is_numeric($latitude) || ! is_numeric($longitude)) {
+            return null;
+        }
+
+        $latitude = (float) $latitude;
+        $longitude = (float) $longitude;
+        if ($latitude < 25 || $latitude > 32 || $longitude < 79 || $longitude > 89.5) {
+            return null;
+        }
+
+        return ['lat' => $latitude, 'lng' => $longitude];
     }
 }

@@ -342,7 +342,7 @@ export default function Returns() {
 
   return (
     <AccountPage
-      title="Returns, Exchanges & Refunds"
+      title="Return Requests"
       subtitle="Manage product returns, request replacements for damaged items, or exchange products."
       actions={
         <button

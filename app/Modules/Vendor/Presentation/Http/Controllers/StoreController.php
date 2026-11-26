@@ -11,6 +11,7 @@ use App\Modules\Vendor\Presentation\Resources\StoreResource;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
+use Illuminate\Support\Facades\DB;
 
 class StoreController extends Controller
 {
@@ -23,7 +24,18 @@ class StoreController extends Controller
     public function create(StoreRequest $request): JsonResponse
     {
         $vendor = $this->vendorFor($request);
-        $store = $this->service->createStore($vendor, StoreDTO::fromArray($request->validated()));
+        $data = $request->validated();
+        $pickupAddress = $data['pickup_address'] ?? null;
+        unset($data['pickup_address']);
+
+        $store = DB::transaction(function () use ($vendor, $data, $pickupAddress) {
+            $store = $this->service->createStore($vendor, StoreDTO::fromArray($data));
+            if ($pickupAddress !== null) {
+                $this->service->savePickupAddress($vendor, $store, $pickupAddress);
+            }
+
+            return $store->load(['addresses.province', 'addresses.district', 'addresses.municipality']);
+        });
 
         return Response::success(new StoreResource($store), 'Store created.', [], 201);
     }
@@ -32,8 +44,18 @@ class StoreController extends Controller
     {
         $vendor = $this->vendorFor($request);
         $store = $this->findOwnedStore($vendor, $storeId);
+        $data = $request->validated();
+        $pickupAddress = $data['pickup_address'] ?? null;
+        unset($data['pickup_address']);
 
-        $store = $this->service->updateStore($vendor, $store, StoreDTO::fromArray($request->validated()));
+        $store = DB::transaction(function () use ($vendor, $store, $data, $pickupAddress) {
+            $store = $this->service->updateStore($vendor, $store, StoreDTO::fromArray($data));
+            if ($pickupAddress !== null) {
+                $this->service->savePickupAddress($vendor, $store, $pickupAddress);
+            }
+
+            return $store->load(['addresses.province', 'addresses.district', 'addresses.municipality']);
+        });
 
         return Response::success(new StoreResource($store), 'Store updated.');
     }
@@ -52,7 +74,11 @@ class StoreController extends Controller
         $vendor = $this->vendorFor($request);
 
         return Response::success(
-            StoreResource::collection($vendor->stores),
+            StoreResource::collection($vendor->stores()->with([
+                'addresses.province',
+                'addresses.district',
+                'addresses.municipality',
+            ])->get()),
             'Stores retrieved.'
         );
     }

@@ -48,7 +48,7 @@ export default function AccountSecurity() {
   }
 
   return (
-    <AccountPage title="Security" subtitle="Keep your account safe — update your password and manage your sessions.">
+    <AccountPage title="Password & Security" subtitle="Keep your account safe — update your password and manage your sessions.">
       <EmailVerificationCard user={user} onVerified={reloadUser} />
       <AccountSection title="Change Password" subtitle="Use at least 8 characters with letters & numbers." icon={KeyRound} pad={22} className="account-form-card">
         {error && <div className="alert alert-error">{error}</div>}
