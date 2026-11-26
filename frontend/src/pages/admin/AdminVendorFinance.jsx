@@ -568,6 +568,20 @@ export default function AdminVendorFinance() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14 }}>
         <div className="card" style={{ padding: '16px 18px', borderLeft: '4px solid var(--primary, #2563eb)' }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted, #6b7280)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 }}>
+            <TrendingUp size={12} style={{ marginRight: 4, verticalAlign: 'middle' }} /> Total Earned
+          </div>
+          <div style={{ fontSize: 20, fontWeight: 900, color: 'var(--ink, #111827)' }}>{money(stats.total_net_payable || 0)}</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>After commission and refunds; includes payouts</div>
+        </div>
+        <div className="card" style={{ padding: '16px 18px', borderLeft: '4px solid #2563eb' }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 }}>
+            <DollarSign size={12} style={{ marginRight: 4, verticalAlign: 'middle' }} /> Withdrawn
+          </div>
+          <div style={{ fontSize: 20, fontWeight: 900, color: '#2563eb' }}>{money(stats.total_withdrawn || 0)}</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Payouts disbursed</div>
+        </div>
+        <div className="card" style={{ padding: '16px 18px', borderLeft: '4px solid var(--primary, #2563eb)' }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 }}>
             <Wallet size={12} style={{ marginRight: 4, verticalAlign: 'middle' }} /> Credited Wallet Balance
           </div>
           <div style={{ fontSize: 20, fontWeight: 900, color: 'var(--ink, #111827)' }}>{money(wallet.balance || 0)}</div>
@@ -575,26 +589,10 @@ export default function AdminVendorFinance() {
         </div>
         <div className="card" style={{ padding: '16px 18px', borderLeft: '4px solid #16a34a' }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 }}>
-            <TrendingUp size={12} style={{ marginRight: 4, verticalAlign: 'middle' }} /> Available
+            <CheckCircle2 size={12} style={{ marginRight: 4, verticalAlign: 'middle' }} /> Available
           </div>
           <div style={{ fontSize: 20, fontWeight: 900, color: '#16a34a' }}>{money(wallet.available_balance || 0)}</div>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Ready for payout</div>
-        </div>
-        <div className="card" style={{ padding: '16px 18px', borderLeft: '4px solid #d97706' }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 }}>
-            <Clock size={12} style={{ marginRight: 4, verticalAlign: 'middle' }} /> Pending
-          </div>
-          <div style={{ fontSize: 20, fontWeight: 900, color: '#d97706' }}>{money(wallet.pending_balance || 0)}</div>
-          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Credited, awaiting release</div>
-        </div>
-        <div className="card" style={{ padding: '16px 18px', borderLeft: '4px solid #f59e0b' }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 }}>
-            <Clock size={12} style={{ marginRight: 4, verticalAlign: 'middle' }} /> Awaiting Settlement
-          </div>
-          <div style={{ fontSize: 20, fontWeight: 900, color: '#b45309' }}>{money(stats.unsettled_earnings || 0)}</div>
-          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
-            Not yet credited · {stats.settlement_holding_days ?? 0}-day hold
-          </div>
         </div>
         <div className="card" style={{ padding: '16px 18px', borderLeft: '4px solid #7c3aed' }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 }}>
@@ -603,28 +601,12 @@ export default function AdminVendorFinance() {
           <div style={{ fontSize: 20, fontWeight: 900, color: '#7c3aed' }}>{money(stats.total_commission || 0)}</div>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>From {stats.orders_count || 0} orders</div>
         </div>
-        {Number(stats.total_refunded || 0) > 0 && (
-          <div className="card" style={{ padding: '16px 18px', borderLeft: '4px solid #dc2626' }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 }}>
-              <XCircle size={12} style={{ marginRight: 4, verticalAlign: 'middle' }} /> Total Refunded
-            </div>
-            <div style={{ fontSize: 20, fontWeight: 900, color: '#dc2626' }}>{money(stats.total_refunded || 0)}</div>
-            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Deducted from payable</div>
-          </div>
-        )}
-        <div className="card" style={{ padding: '16px 18px', borderLeft: '4px solid #0891b2' }}>
+        <div className="card" style={{ padding: '16px 18px', borderLeft: '4px solid #dc2626' }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 }}>
-            <CheckCircle2 size={12} style={{ marginRight: 4, verticalAlign: 'middle' }} /> Released to Wallet
+            <XCircle size={12} style={{ marginRight: 4, verticalAlign: 'middle' }} /> Total Refunded
           </div>
-          <div style={{ fontSize: 20, fontWeight: 900, color: '#0891b2' }}>{money(stats.total_released_to_wallet || 0)}</div>
-          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Made available to wallet · not paid out</div>
-        </div>
-        <div className="card" style={{ padding: '16px 18px', borderLeft: '4px solid #2563eb' }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 }}>
-            <DollarSign size={12} style={{ marginRight: 4, verticalAlign: 'middle' }} /> Withdrawn
-          </div>
-          <div style={{ fontSize: 20, fontWeight: 900, color: '#2563eb' }}>{money(stats.total_withdrawn || 0)}</div>
-          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Payouts disbursed</div>
+          <div style={{ fontSize: 20, fontWeight: 900, color: '#dc2626' }}>{money(stats.total_refunded || 0)}</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Deducted from payable</div>
         </div>
       </div>
 
