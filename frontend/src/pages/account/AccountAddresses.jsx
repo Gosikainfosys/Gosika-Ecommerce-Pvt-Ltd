@@ -8,6 +8,7 @@ import ConfirmDialog from '../../components/ui/ConfirmDialog'
 import LocationMapPicker from '../../components/common/LocationMapPicker'
 import { useToast } from '../../context/ToastContext'
 import { errorMessage } from '../../utils/format'
+import { checkDeliveryCoverage, coverageMessage } from '../../utils/deliveryCoverage'
 import { AccountPage, AccountEmpty, AccountError, AccountSkeleton } from './AccountUI'
 
 const EMPTY_FORM = {
@@ -22,6 +23,7 @@ const EMPTY_FORM = {
   province: '',
   district: '',
   municipality: '',
+  ward_number: '',
   latitude: '',
   longitude: '',
   is_default: false,
@@ -44,6 +46,7 @@ export default function AccountAddresses() {
   const [apiDistricts, setApiDistricts] = useState([])
   const [apiMunicipalities, setApiMunicipalities] = useState([])
   const [resolvingIds, setResolvingIds] = useState(false)
+  const [coverage, setCoverage] = useState(null)
 
   const load = () => {
     setLoading(true)
@@ -65,11 +68,13 @@ export default function AccountAddresses() {
   const openAdd = () => {
     setEditing(null)
     setForm({ ...EMPTY_FORM })
+    setCoverage(null)
     setModalOpen(true)
   }
 
   const openEdit = (a) => {
     setEditing(a)
+    setCoverage(null)
     setForm({
       address_type: a.address_type || 'shipping',
       label: a.label || '',
@@ -82,6 +87,7 @@ export default function AccountAddresses() {
       province: a.province?.name || '',
       district: a.district?.name || '',
       municipality: a.municipality?.name || '',
+      ward_number: a.ward?.ward_number ? String(a.ward.ward_number) : '',
       latitude: a.latitude || '',
       longitude: a.longitude || '',
       is_default: !!a.is_default,
@@ -136,10 +142,36 @@ export default function AccountAddresses() {
       province_id: geo.provinceId,
       district_id: geo.districtId,
       municipality_id: geo.municipalityId,
+      ward_number: form.ward_number ? Number(form.ward_number) : null,
       is_default: form.is_default,
     }
     if (form.latitude) payload.latitude = String(form.latitude)
     if (form.longitude) payload.longitude = String(form.longitude)
+
+    if ((form.address_type || 'shipping') === 'shipping') {
+      setResolvingIds(true)
+      try {
+        const assessment = await checkDeliveryCoverage({
+          provinceId: geo.provinceId,
+          districtId: geo.districtId,
+          municipalityId: geo.municipalityId,
+          wardNumber: form.ward_number,
+          lat: form.latitude,
+          lng: form.longitude,
+        })
+        setCoverage(assessment)
+        if (!assessment?.serviceable) {
+          toast.error(coverageMessage(assessment))
+          return
+        }
+      } catch (err) {
+        toast.error(errorMessage(err, 'Unable to verify delivery coverage.'))
+        return
+      } finally {
+        setResolvingIds(false)
+      }
+    }
+
     setSaving(true)
     try {
       if (editing) {
@@ -282,6 +314,33 @@ export default function AccountAddresses() {
                 }))
               }}
             />
+
+            {form.address_type === 'shipping' && coverage && (
+              <div
+                className="text-sm"
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: 8,
+                  background: coverage.serviceable ? 'rgba(16,185,129,0.10)' : 'rgba(239,68,68,0.10)',
+                  color: coverage.serviceable ? '#047857' : '#b91c1c',
+                }}
+              >
+                <strong>{coverage.serviceable ? 'Delivery available' : 'Delivery unavailable'}</strong>
+                <div className="muted text-xs mt-1">{coverageMessage(coverage)}</div>
+              </div>
+            )}
+
+            {form.address_type === 'shipping' && (
+              <Input
+                label="Ward Number (Optional)"
+                type="number"
+                min={1}
+                max={99}
+                value={form.ward_number}
+                onChange={(e) => setForm({ ...form, ward_number: e.target.value })}
+                placeholder="e.g. 4"
+              />
+            )}
 
             <div className="form-row">
               <Input label="Address Line 2 / Apt / Unit (Optional)" value={form.address_line_2} onChange={(e) => setForm({ ...form, address_line_2: e.target.value })} placeholder="e.g. Floor 2, Suite 4B" />

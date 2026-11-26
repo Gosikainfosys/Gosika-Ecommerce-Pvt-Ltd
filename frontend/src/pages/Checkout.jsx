@@ -18,6 +18,7 @@ import { Skeleton } from '../components/ui/Skeleton'
 import EmptyState from '../components/ui/EmptyState'
 import LocationMapPicker from '../components/common/LocationMapPicker'
 import { getDistrictsForProvince, getMunicipalitiesForDistrict } from '../utils/nepalLocations'
+import { checkDeliveryCoverage, coverageMessage } from '../utils/deliveryCoverage'
 
 const STEPS = [
   { id: 1, label: 'Delivery Address' },
@@ -91,8 +92,10 @@ export default function Checkout() {
   const [notes, setNotes] = useState('')
 
   const [addOpen, setAddOpen] = useState(false)
-  const [form, setForm] = useState({ label: '', name: '', phone: '', province: '', district: '', municipality: '', street: '', is_default: false })
+  const [form, setForm] = useState({ label: '', name: '', phone: '', province: '', district: '', municipality: '', ward_number: '', street: '', is_default: false })
   const [formSaving, setFormSaving] = useState(false)
+  const [coverage, setCoverage] = useState(null)
+  const [coverageChecking, setCoverageChecking] = useState(false)
 
   useEffect(() => {
     if (!user) {
@@ -136,6 +139,30 @@ export default function Checkout() {
       .then((s) => setSummary(s.data.data))
       .catch((e) => toast.error(errorMessage(e)))
   }, [itemsKey])
+
+  useEffect(() => {
+    const address = addresses.find((item) => item.id === shippingId)
+    if (!address) {
+      setCoverage(null)
+      return undefined
+    }
+
+    let cancelled = false
+    setCoverageChecking(true)
+    checkDeliveryCoverage({
+      provinceId: address.province?.id || address.province_id,
+      districtId: address.district?.id || address.district_id,
+      municipalityId: address.municipality?.id || address.municipality_id,
+      wardNumber: address.ward?.ward_number,
+      lat: address.latitude,
+      lng: address.longitude,
+    })
+      .then((assessment) => { if (!cancelled) setCoverage(assessment) })
+      .catch(() => { if (!cancelled) setCoverage(null) })
+      .finally(() => { if (!cancelled) setCoverageChecking(false) })
+
+    return () => { cancelled = true }
+  }, [shippingId, addresses])
 
   const isConfigTrue = (v) => v === true || v === 'true' || v === 1 || v === '1'
   const codEnabled = isConfigTrue(config?.checkout?.cod_enabled)
@@ -214,6 +241,19 @@ export default function Checkout() {
     setFormSaving(true)
     try {
       const geo = await resolveGeoIds(form)
+      const assessment = await checkDeliveryCoverage({
+        provinceId: geo.provinceId,
+        districtId: geo.districtId,
+        municipalityId: geo.municipalityId,
+        wardNumber: form.ward_number,
+        lat: form.latitude,
+        lng: form.longitude,
+      })
+      if (!assessment?.serviceable) {
+        toast.error(coverageMessage(assessment))
+        return
+      }
+
       await api.post('/customer/addresses', {
         address_type: 'shipping',
         label: form.label || 'Home',
@@ -224,6 +264,7 @@ export default function Checkout() {
         province_id: geo.provinceId,
         district_id: geo.districtId,
         municipality_id: geo.municipalityId,
+        ward_number: form.ward_number ? Number(form.ward_number) : null,
         postal_code: '',
         landmark: form.landmark || '',
         latitude: form.latitude != null ? String(form.latitude) : null,
@@ -239,7 +280,7 @@ export default function Checkout() {
         setBillingId(saved.id)
       }
       setAddOpen(false)
-      setForm({ label: '', name: '', phone: '', province: '', district: '', municipality: '', street: '', is_default: false })
+      setForm({ label: '', name: '', phone: '', province: '', district: '', municipality: '', ward_number: '', street: '', is_default: false })
       toast.success('Address added successfully')
     } catch (err) {
       toast.error(errorMessage(err))
@@ -249,6 +290,11 @@ export default function Checkout() {
   }
 
   const submitCheckout = async () => {
+    if (coverage && !coverage.serviceable) {
+      toast.error(coverageMessage(coverage))
+      return
+    }
+
     setSubmitting(true)
     try {
       const res = await api.post('/checkout', {
@@ -521,7 +567,7 @@ export default function Checkout() {
                 <button
                   className="btn btn-primary"
                   onClick={() => setStep(2)}
-                  disabled={!selectedAddress}
+                  disabled={!selectedAddress || (coverage && !coverage.serviceable)}
                 >
                   Continue to Payment <ArrowRight size={15} />
                 </button>
@@ -618,6 +664,17 @@ export default function Checkout() {
                       {selectedAddress?.address_line_1 && `${selectedAddress.address_line_1}, `}{selectedAddress?.municipality?.name || selectedAddress?.municipality || ''}{selectedAddress?.district?.name || selectedAddress?.district ? `, ${selectedAddress?.district?.name || selectedAddress?.district}` : ''}{selectedAddress?.province?.name || selectedAddress?.province ? `, ${selectedAddress?.province?.name || selectedAddress?.province}` : ''}
                     </div>
                     <div className="muted text-xs mt-1">Phone: {selectedAddress?.phone}</div>
+                    {coverageChecking ? (
+                      <div className="muted text-xs mt-1">Checking delivery coverage…</div>
+                    ) : coverage ? (
+                      <div
+                        className="text-xs mt-2"
+                        style={{ color: coverage.serviceable ? '#047857' : '#b91c1c', fontWeight: 700 }}
+                      >
+                        {coverage.serviceable ? '✓ Delivery available' : '✕ Delivery unavailable'}
+                        <div className="muted" style={{ fontWeight: 400 }}>{coverageMessage(coverage)}</div>
+                      </div>
+                    ) : null}
                   </div>
                   <div>
                     <span className="muted text-xs uppercase font-semibold">Payment Option</span>
@@ -667,7 +724,7 @@ export default function Checkout() {
                 <button
                   className="btn btn-primary btn-lg"
                   onClick={submitCheckout}
-                  disabled={submitting}
+                  disabled={submitting || Boolean(coverage && !coverage.serviceable)}
                   style={{ minWidth: 200 }}
                 >
                   {submitting ? (
@@ -771,6 +828,16 @@ export default function Checkout() {
                 longitude: loc.longitude,
               }))
             }}
+          />
+
+          <Input
+            label="Ward Number (Optional)"
+            type="number"
+            min={1}
+            max={99}
+            value={form.ward_number}
+            onChange={(e) => setForm({ ...form, ward_number: e.target.value })}
+            placeholder="e.g. 4"
           />
 
           <div className="checkbox-row mb-2">

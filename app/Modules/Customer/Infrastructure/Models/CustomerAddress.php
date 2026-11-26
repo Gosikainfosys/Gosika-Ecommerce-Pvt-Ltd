@@ -7,6 +7,7 @@ use App\Modules\Platform\Infrastructure\Models\Country;
 use App\Modules\Platform\Infrastructure\Models\District;
 use App\Modules\Platform\Infrastructure\Models\Municipality;
 use App\Modules\Platform\Infrastructure\Models\Province;
+use App\Modules\Platform\Infrastructure\Models\Ward;
 use App\Modules\Shared\Infrastructure\Models\BaseModel;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -27,6 +28,7 @@ class CustomerAddress extends BaseModel
         'province_id',
         'district_id',
         'municipality_id',
+        'ward_id',
         'postal_code',
         'landmark',
         'latitude',
@@ -65,6 +67,11 @@ class CustomerAddress extends BaseModel
     public function municipality(): BelongsTo
     {
         return $this->belongsTo(Municipality::class);
+    }
+
+    public function ward(): BelongsTo
+    {
+        return $this->belongsTo(Ward::class);
     }
 
     public function scopeForUser($query, $userId)

@@ -6,6 +6,7 @@ use App\Modules\Platform\Infrastructure\Models\Country;
 use App\Modules\Platform\Infrastructure\Models\District;
 use App\Modules\Platform\Infrastructure\Models\Municipality;
 use App\Modules\Platform\Infrastructure\Models\Province;
+use App\Modules\Platform\Infrastructure\Models\Ward;
 use App\Modules\Shared\Presentation\Http\Response;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -57,6 +58,19 @@ class GeoController extends Controller
             ->get(['id', 'uuid', 'district_id', 'name', 'type', 'ward_count']);
 
         return Response::success($municipalities, 'Municipalities retrieved.');
+    }
+
+    public function wards(Request $request): JsonResponse
+    {
+        $municipalityId = $request->input('municipality_id');
+
+        $wards = Ward::query()
+            ->where('is_active', true)
+            ->when($municipalityId, fn ($query) => $query->where('municipality_id', $municipalityId))
+            ->orderBy('ward_number')
+            ->get(['id', 'uuid', 'municipality_id', 'ward_number', 'name', 'code']);
+
+        return Response::success($wards, 'Wards retrieved.');
     }
 
     public function reverseGeocode(Request $request): JsonResponse

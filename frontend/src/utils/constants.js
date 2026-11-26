@@ -300,6 +300,7 @@ export const ADMIN_NAV = [
   { to: '/admin/fulfillment/partners', label: 'Delivery Partners', icon: 'Truck' },
   { to: '/admin/fulfillment/assignments', label: 'Order Dispatch', icon: 'Send' },
   { to: '/admin/fulfillment/zones', label: 'Shipping & Delivery', icon: 'MapPin' },
+  { to: '/admin/fulfillment/coverage', label: 'Delivery Coverage', icon: 'Layers' },
   { to: '/admin/fulfillment/cod', label: 'COD Reconciliation', icon: 'Banknote' },
 
   { section: 'Finance' },
@@ -379,6 +380,7 @@ export const ADMIN_PERMISSION_MAP = {
   '/admin/fulfillment/partners': ['delivery_partners.manage'],
   '/admin/fulfillment/assignments': ['deliveries.manage'],
   '/admin/fulfillment/zones': ['deliveries.manage'],
+  '/admin/fulfillment/coverage': ['deliveries.manage'],
   '/admin/fulfillment/cod': ['payments.view', 'reconciliation.manage'],
   
   // Finance

@@ -222,7 +222,7 @@ export default function LocationMapPicker({
 
     try {
       // 1. Try Backend API
-      const res = await api.get('/platform/geo/reverse-geocode', { params: { lat, lng } })
+      const res = await api.get('/platform/reverse-geocode', { params: { lat, lng } })
       if (res.data?.data) {
         applyResolvedLocation(res.data.data, lat, lng)
         return

@@ -9,6 +9,7 @@ use App\Modules\Platform\Infrastructure\Models\Country;
 use App\Modules\Platform\Infrastructure\Models\District;
 use App\Modules\Platform\Infrastructure\Models\Municipality;
 use App\Modules\Platform\Infrastructure\Models\Province;
+use App\Modules\Platform\Infrastructure\Models\Ward;
 use Illuminate\Database\Eloquent\Collection;
 
 class CustomerService
@@ -41,7 +42,7 @@ class CustomerService
 
     public function listAddresses(User $user): Collection
     {
-        return CustomerAddress::with(['country', 'province', 'district', 'municipality'])
+        return CustomerAddress::with(['country', 'province', 'district', 'municipality', 'ward'])
             ->forUser($user->id)
             ->orderByDesc('is_default')
             ->orderByDesc('updated_at')
@@ -65,7 +66,7 @@ class CustomerService
             $this->setDefaultAddress($user, $address);
         }
 
-        return $address->fresh(['country', 'province', 'district', 'municipality']);
+        return $address->fresh(['country', 'province', 'district', 'municipality', 'ward']);
     }
 
     public function updateAddress(User $user, CustomerAddress $address, array $data): CustomerAddress
@@ -79,7 +80,7 @@ class CustomerService
             $this->setDefaultAddress($user, $address);
         }
 
-        return $address->fresh(['country', 'province', 'district', 'municipality']);
+        return $address->fresh(['country', 'province', 'district', 'municipality', 'ward']);
     }
 
     public function deleteAddress(User $user, CustomerAddress $address): void
@@ -146,6 +147,7 @@ class CustomerService
             'province_id' => Province::class,
             'district_id' => District::class,
             'municipality_id' => Municipality::class,
+            'ward_id' => Ward::class,
         ];
 
         foreach ($map as $field => $model) {

@@ -1,0 +1,53 @@
+{
+  "country": "Nepal",
+  "provider": "geoBoundaries",
+  "retrieved_at": "2026-11-26",
+  "coordinate_system": "WGS84 longitude/latitude",
+  "note": "Full-resolution geometry is used for authoritative validation. Simplified geometry is for map display only. Ward-level (ADM4) geometry is not published for Nepal by this provider and is deliberately not fabricated.",
+  "datasets": [
+    {
+      "level": "province",
+      "adm": "ADM1",
+      "file": "adm1.geojson",
+      "simplified_file": "adm1.simplified.geojson",
+      "sha256": "83D4B7DCBC65700ECF150CCF515C0487A1222D3B7A28103F3B5542B03F575965",
+      "simplified_sha256": "85CB56907EEDA7ACC62694B721C77201BBC0CEC6EBD69DF03FCF3DF6339CB667",
+      "version": "NPL-ADM1-97224137 / 2020",
+      "build_date": "2026-11-02",
+      "source": "Survey Department of Nepal (via HDX)",
+      "source_url": "https://data.humdata.org/dataset/administrative-bounadries-of-nepal",
+      "license": "CC BY 3.0 IGO",
+      "expected_units": 7
+    },
+    {
+      "level": "district",
+      "adm": "ADM2",
+      "file": "adm2.geojson",
+      "simplified_file": "adm2.simplified.geojson",
+      "sha256": "E7364DEAD4E4E481DFA509ACF770B37269935964FC982868035F8E6187683C8A",
+      "simplified_sha256": "B97C6C447DD74AB45F53DCC13F19F29488075785476C66405717C32D76C1E2CC",
+      "version": "NPL-ADM2-51301551 / 2006",
+      "build_date": "2026-11-06",
+      "source": "Wikimedia Commons",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Nepal_districts.png",
+      "license": "Public Domain",
+      "expected_units": 77,
+      "caveat": "This published dataset contains 75 features and older names; duplicates and unmatched features must be reported by the importer."
+    },
+    {
+      "level": "municipality",
+      "adm": "ADM3",
+      "file": "adm3.geojson",
+      "simplified_file": "adm3.simplified.geojson",
+      "sha256": "788CD3DF3C1EABB0EF0AECB061D64CCEA6E82E95E4F18B7AAD576A1B5A651ADE",
+      "simplified_sha256": "CB4A727FF6B3F9FA9D8783714113CCE270037137FCE97DE6CA4A18DB276ECBD6",
+      "version": "NPL-ADM3-57384666 / 2020",
+      "build_date": "2026-11-06",
+      "source": "Open Knowledge Nepal",
+      "source_url": "https://localboundries.oknp.org/",
+      "license": "CC BY 4.0",
+      "expected_units": 753,
+      "caveat": "The published dataset contains 777 features including protected areas; unmatched features are skipped and reported."
+    }
+  ]
+}

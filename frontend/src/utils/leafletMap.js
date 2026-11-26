@@ -14,6 +14,21 @@ export function createOpenStreetMap(container, center, zoom = 12) {
   return map
 }
 
+export function addGeoJsonLayer(map, geometry, options = {}) {
+  const { style, ...rest } = options
+
+  return L.geoJSON(geometry, {
+    style: {
+      color: '#ff5500',
+      weight: 2,
+      fillColor: '#ff5500',
+      fillOpacity: 0.16,
+      ...(style || {}),
+    },
+    ...rest,
+  }).addTo(map)
+}
+
 export function createRouteMarker(label, color) {
   return L.divIcon({
     className: '',

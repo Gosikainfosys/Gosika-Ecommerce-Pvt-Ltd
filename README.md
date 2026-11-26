@@ -37,6 +37,10 @@ the password in `.env`. For non-interactive seeding, set `QA_TEST_PASSWORD` in
 the process environment. If neither is available, QA fixtures are still seeded
 but their accounts remain suspended.
 
+## Delivery coverage boundary data
+
+Verified Nepal administrative polygons (province, district, municipality) are imported with an audited Artisan command. No ward polygons are fabricated. See [docs/geo-boundary-import.md](docs/geo-boundary-import.md) for sources, checksums, import commands, and known coverage gaps.
+
 ## About Laravel
 
 Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:

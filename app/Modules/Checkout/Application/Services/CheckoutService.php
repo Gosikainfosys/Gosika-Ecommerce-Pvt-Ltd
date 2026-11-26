@@ -8,6 +8,7 @@ use App\Modules\Cart\Infrastructure\Models\CartItem;
 use App\Modules\Checkout\Infrastructure\Models\CheckoutSession;
 use App\Modules\Customer\Infrastructure\Models\CustomerAddress;
 use App\Modules\Identity\Infrastructure\Models\User;
+use App\Modules\Platform\Application\Services\DeliveryCoverageService;
 use App\Modules\Platform\Infrastructure\Models\Setting;
 use App\Modules\Shared\Domain\Enums\PaymentMethod;
 use App\Modules\Shared\Domain\Exceptions\DomainException;
@@ -15,8 +16,10 @@ use Illuminate\Support\Facades\DB;
 
 class CheckoutService
 {
-    public function __construct(protected CartService $cartService)
-    {
+    public function __construct(
+        protected CartService $cartService,
+        protected DeliveryCoverageService $coverage,
+    ) {
     }
 
     public function summary(User $user, ?array $selectedItemUuids = null): array
@@ -65,6 +68,9 @@ class CheckoutService
         if (! $shippingAddress) {
             throw new DomainException('Shipping address not found.', 422);
         }
+
+        $this->assertServiceable($shippingAddress);
+
         $billingAddress = isset($data['billing_address_id'])
             ? $this->ownedAddress($user, $data['billing_address_id'])
             : $shippingAddress;
@@ -137,6 +143,32 @@ class CheckoutService
     protected function ownedAddress(User $user, string $uuid): ?CustomerAddress
     {
         return CustomerAddress::query()->forUser($user->id)->where('uuid', $uuid)->first();
+    }
+
+    protected function assertServiceable(CustomerAddress $address): void
+    {
+        $assessment = $this->coverage->validateAddress([
+            'province_id' => $address->province_id,
+            'district_id' => $address->district_id,
+            'municipality_id' => $address->municipality_id,
+            'ward_id' => $address->ward_id,
+            'lat' => $address->latitude,
+            'lng' => $address->longitude,
+        ]);
+
+        if ($assessment->serviceable) {
+            return;
+        }
+
+        $messages = array_values(array_filter($assessment->messages));
+        $message = $messages
+            ? implode(' ', $messages)
+            : 'Delivery is not available for this shipping address.';
+
+        throw new DomainException($message, 422, [
+            'location' => [$message],
+            'coverage_reason' => [$assessment->reason],
+        ]);
     }
 
     protected function taxFor($items): float

@@ -33,6 +33,11 @@ class CustomerAddressResource extends JsonResource
                 'id' => $this->municipality->uuid,
                 'name' => $this->municipality->name,
             ] : null,
+            'ward' => $this->whenLoaded('ward') && $this->ward ? [
+                'id' => $this->ward->uuid,
+                'ward_number' => $this->ward->ward_number,
+                'label' => $this->ward->label,
+            ] : null,
             'postal_code' => $this->postal_code,
             'landmark' => $this->landmark,
             'latitude' => $this->latitude,
