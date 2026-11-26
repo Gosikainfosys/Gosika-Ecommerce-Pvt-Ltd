@@ -256,10 +256,6 @@ export default function AdminVendorFinance() {
       toast.error('Enter an amount greater than zero and no more than the available balance.')
       return
     }
-    if (!disburseBankAccountId) {
-      toast.error('Select a verified bank account.')
-      return
-    }
     if (!disburseReference.trim() && disburseProofFiles.length === 0) {
       toast.error('Enter a transfer reference or attach at least one receipt or screenshot.')
       return
@@ -273,7 +269,7 @@ export default function AdminVendorFinance() {
     try {
       const formData = new FormData()
       formData.append('amount', String(amount))
-      formData.append('bank_account_id', disburseBankAccountId)
+      if (disburseBankAccountId) formData.append('bank_account_id', disburseBankAccountId)
       if (disburseReference.trim()) formData.append('provider_reference', disburseReference.trim())
       if (disburseNotes.trim()) formData.append('notes', disburseNotes.trim())
       disburseProofFiles.forEach((file) => formData.append('proof_files[]', file))
