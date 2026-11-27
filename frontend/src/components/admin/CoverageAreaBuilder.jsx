@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import L from 'leaflet'
-import { CheckCircle2, Layers, MapPin, Plus, Trash2 } from 'lucide-react'
+import { CheckCircle2, ChevronDown, ChevronRight, Layers, MapPin, Plus, Search, Trash2 } from 'lucide-react'
 import api from '../../api/client'
 import { useToast } from '../../context/ToastContext'
 import { errorMessage } from '../../utils/format'
@@ -32,6 +32,194 @@ function geometryFromPoints(points) {
   return { type: 'Polygon', coordinates: [ring] }
 }
 
+function coverageWardKey(area) {
+  if (area?.ward_id) return String(area.ward_id)
+  if (area?.ward_number) return `n:${area.ward_number}`
+  return ''
+}
+
+function ensureNode(map, key, data) {
+  if (!map.has(key)) map.set(key, { ...data, children: new Map() })
+  return map.get(key)
+}
+
+function attachArea(node, area) {
+  if (area && !node.area) node.area = area
+  return node
+}
+
+function buildCoverageTree(areas, nameMaps) {
+  const roots = new Map()
+
+  areas.forEach((area) => {
+    if (!area.province_id) return
+
+    const province = ensureNode(roots, area.province_id, {
+      key: `province-${area.province_id}`,
+      type: 'province',
+      name: nameMaps.provinces[area.province_id] || area.label || `Province ${area.province_id}`,
+      province_id: area.province_id,
+      district_id: '',
+      municipality_id: '',
+      area: null,
+    })
+    if (!area.district_id) attachArea(province, area)
+
+    if (!area.district_id) return
+
+    const district = ensureNode(province.children, area.district_id, {
+      key: `district-${area.district_id}`,
+      type: 'district',
+      name: nameMaps.districts[area.district_id] || `District ${area.district_id}`,
+      province_id: area.province_id,
+      district_id: area.district_id,
+      municipality_id: '',
+      area: null,
+    })
+    if (!area.municipality_id) attachArea(district, area)
+
+    if (!area.municipality_id) return
+
+    const wardKey = coverageWardKey(area)
+    const municipality = ensureNode(district.children, area.municipality_id, {
+      key: `municipality-${area.municipality_id}`,
+      type: 'municipality',
+      name: nameMaps.municipalities[area.municipality_id] || area.parent_label || `Municipality ${area.municipality_id}`,
+      province_id: area.province_id,
+      district_id: area.district_id,
+      municipality_id: area.municipality_id,
+      area: null,
+    })
+    if (!wardKey) attachArea(municipality, area)
+
+    if (!wardKey) return
+
+    ensureNode(municipality.children, wardKey, {
+      key: `ward-${area.municipality_id}-${wardKey}`,
+      type: 'ward',
+      name: area.ward_number ? `Ward ${area.ward_number}` : (area.label || 'Ward'),
+      province_id: area.province_id,
+      district_id: area.district_id,
+      municipality_id: area.municipality_id,
+      area,
+    })
+  })
+
+  const materialize = (map) => [...map.values()].map((node) => ({
+    ...node,
+    children: materialize(node.children),
+  }))
+
+  return materialize(roots)
+}
+
+function nodeMatchesSearch(node, needle) {
+  return [node.name, node.area?.name, node.area?.label, node.area?.parent_label]
+    .some((value) => String(value || '').toLowerCase().includes(needle))
+}
+
+function filterCoverageTree(nodes, query) {
+  const needle = query.trim().toLowerCase()
+  if (!needle) return nodes
+
+  return nodes.reduce((acc, node) => {
+    const children = filterCoverageTree(node.children, needle)
+    if (nodeMatchesSearch(node, needle) || children.length > 0) {
+      acc.push({ ...node, children })
+    }
+    return acc
+  }, [])
+}
+
+function CoverageTreeRows({ nodes, depth, collapsed, onToggle, onAddChild, onDelete, onVerify }) {
+  return nodes.map((node) => {
+    const hasChildren = node.children.length > 0
+    const isCollapsed = collapsed.has(node.key)
+    const area = node.area
+    const live = area?.verification_status === 'verified' && area?.is_active
+
+    return (
+      <React.Fragment key={node.key}>
+        <tr>
+          <td>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: depth * 20 }}>
+              {hasChildren ? (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-xs"
+                  style={{ width: 24, padding: 0, flexShrink: 0 }}
+                  onClick={() => onToggle(node.key)}
+                  title={isCollapsed ? `Expand ${node.name}` : `Collapse ${node.name}`}
+                >
+                  {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                </button>
+              ) : (
+                <span style={{ width: 24, flexShrink: 0 }} />
+              )}
+              <span style={{ color: 'var(--primary)' }}>{depth > 0 ? '↳' : <Layers size={14} />}</span>
+              <div style={{ minWidth: 0 }}>
+                <div className="font-bold text-sm text-ink">{node.name}</div>
+                <div className="muted text-xs">
+                  {depth === 0 ? 'Province' : node.type === 'district' ? 'District level' : node.type === 'municipality' ? 'Municipality level' : 'Ward level'}
+                  {hasChildren ? ` · ${node.children.length} child${node.children.length === 1 ? '' : 'ren'}` : ''}
+                </div>
+              </div>
+            </div>
+          </td>
+          <td className="muted text-xs">{area?.name || '—'}</td>
+          <td>
+            <span className="chip chip-sm">
+              {area ? (area.is_coverage_area ? 'Coverage area' : 'Custom polygon') : 'Group'}
+            </span>
+          </td>
+          <td>
+            <span
+              className="chip chip-sm"
+              style={{
+                background: live ? 'rgba(16,185,129,0.12)' : 'rgba(245,158,11,0.12)',
+                color: live ? '#047857' : '#b45309',
+                fontWeight: 800,
+              }}
+            >
+              {area ? (live ? 'Live' : area.verification_status) : '—'}
+            </span>
+          </td>
+          <td style={{ textAlign: 'right' }}>
+            <div style={{ display: 'inline-flex', gap: 5, alignItems: 'center' }}>
+              {node.type !== 'ward' && (
+                <button type="button" className="btn btn-outline btn-xs" onClick={() => onAddChild(node)} title={`Add child under ${node.name}`}>
+                  <Plus size={12} /> Child
+                </button>
+              )}
+              {area && area.verification_status !== 'verified' && (
+                <button type="button" className="btn btn-outline btn-xs" onClick={() => onVerify(area)}>
+                  Verify
+                </button>
+              )}
+              {area && (
+                <button type="button" className="btn btn-danger-outline btn-xs" onClick={() => onDelete(area)} title="Delete coverage area">
+                  <Trash2 size={12} />
+                </button>
+              )}
+            </div>
+          </td>
+        </tr>
+        {hasChildren && !isCollapsed && (
+          <CoverageTreeRows
+            nodes={node.children}
+            depth={depth + 1}
+            collapsed={collapsed}
+            onToggle={onToggle}
+            onAddChild={onAddChild}
+            onDelete={onDelete}
+            onVerify={onVerify}
+          />
+        )}
+      </React.Fragment>
+    )
+  })
+}
+
 function SelectField({ label, value, onChange, options, disabled, placeholder }) {
   return (
     <label className="flex flex-col gap-2" style={{ minWidth: 0 }}>
@@ -52,11 +240,17 @@ export default function CoverageAreaBuilder() {
   const mapRef = useRef(null)
   const previewLayerRef = useRef(null)
   const drawingLayerRef = useRef(null)
+  const formRef = useRef(null)
+  const nameInputRef = useRef(null)
 
   const [provinces, setProvinces] = useState([])
   const [districts, setDistricts] = useState([])
   const [municipalities, setMunicipalities] = useState([])
   const [wards, setWards] = useState([])
+  const [districtNames, setDistrictNames] = useState({})
+  const [municipalityNames, setMunicipalityNames] = useState({})
+  const [treeSearch, setTreeSearch] = useState('')
+  const [collapsedNodes, setCollapsedNodes] = useState(() => new Set())
   const [form, setForm] = useState(EMPTY_FORM)
   const [points, setPoints] = useState([])
   const [drawing, setDrawing] = useState(false)
@@ -70,6 +264,19 @@ export default function CoverageAreaBuilder() {
     { deps: [refreshKey] }
   )
 
+  const nameMaps = useMemo(() => ({
+    provinces: Object.fromEntries(provinces.map((item) => [item.id, item.name])),
+    districts: districtNames,
+    municipalities: municipalityNames,
+  }), [provinces, districtNames, municipalityNames])
+
+  const areaTree = useMemo(() => buildCoverageTree(areas, nameMaps), [areas, nameMaps])
+  const filteredTree = useMemo(() => filterCoverageTree(areaTree, treeSearch), [areaTree, treeSearch])
+
+  useEffect(() => {
+    setCollapsedNodes(new Set(areaTree.filter((node) => node.type === 'province').map((node) => node.key)))
+  }, [areaTree])
+
   const isWardArea = Boolean(form.ward_id || form.ward_number)
 
   useEffect(() => {
@@ -77,6 +284,25 @@ export default function CoverageAreaBuilder() {
     api.get('/platform/provinces', { skipCache: true })
       .then((res) => { if (!cancelled) setProvinces(api.unwrapList(res.data)) })
       .catch((err) => { if (!cancelled) setGeoError(errorMessage(err, 'Unable to load provinces.')) })
+    return () => { cancelled = true }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    api.get('/platform/districts', { skipCache: true })
+      .then((res) => {
+        if (!cancelled) {
+          setDistrictNames(Object.fromEntries(api.unwrapList(res.data).map((item) => [item.id, item.name])))
+        }
+      })
+      .catch(() => {})
+    api.get('/platform/municipalities', { skipCache: true })
+      .then((res) => {
+        if (!cancelled) {
+          setMunicipalityNames(Object.fromEntries(api.unwrapList(res.data).map((item) => [item.id, item.name])))
+        }
+      })
+      .catch(() => {})
     return () => { cancelled = true }
   }, [])
 
@@ -353,6 +579,34 @@ export default function CoverageAreaBuilder() {
       .catch((err) => toast.error(errorMessage(err)))
   }
 
+  const toggleNode = (key) => {
+    setCollapsedNodes((current) => {
+      const next = new Set(current)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  const addChild = (node) => {
+    setForm({
+      ...EMPTY_FORM,
+      province_id: String(node.province_id || ''),
+      district_id: String(node.district_id || ''),
+      municipality_id: String(node.municipality_id || ''),
+    })
+    setPoints([])
+    setDrawing(false)
+    setPreview(null)
+    setGeoError('')
+    formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    nameInputRef.current?.focus()
+  }
+
+  const collectKeys = (nodes) => nodes.flatMap((node) => [node.key, ...collectKeys(node.children)])
+  const collapseAll = () => setCollapsedNodes(new Set(collectKeys(areaTree)))
+  const expandAll = () => setCollapsedNodes(new Set())
+
   return (
     <div className="flex flex-col gap-4">
       <div className="card" style={{ padding: 18, margin: 0 }}>
@@ -370,7 +624,7 @@ export default function CoverageAreaBuilder() {
           </span>
         </div>
 
-        <form onSubmit={saveArea} className="flex flex-col gap-3">
+        <form ref={formRef} onSubmit={saveArea} className="flex flex-col gap-3">
           <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))' }}>
             <SelectField
               label="Province"
@@ -434,6 +688,7 @@ export default function CoverageAreaBuilder() {
             <label className="flex flex-col gap-2" style={{ minWidth: 0 }}>
               <span className="muted text-xs font-bold uppercase" style={{ letterSpacing: '0.04em' }}>Coverage area name</span>
               <input
+                ref={nameInputRef}
                 className="input"
                 required
                 value={form.name}
@@ -522,8 +777,28 @@ export default function CoverageAreaBuilder() {
 
       <div className="card card-pad-none" style={{ overflow: 'hidden', margin: 0 }}>
         <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)' }}>
-          <h3 style={{ fontSize: 14, fontWeight: 800, margin: 0 }}>Created coverage areas</h3>
-          <p className="muted text-xs mt-1 mb-0">These polygons are overlaid openly on the Delivery Coverage map.</p>
+          <div className="flex items-center justify-between wrap gap-3">
+            <div>
+              <h3 style={{ fontSize: 14, fontWeight: 800, margin: 0 }}>Created coverage areas</h3>
+              <p className="muted text-xs mt-1 mb-0">Province → district → municipality → ward tree. Add children at any level.</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button type="button" className="btn btn-outline btn-xs" onClick={expandAll}>Expand all</button>
+              <button type="button" className="btn btn-outline btn-xs" onClick={collapseAll}>Collapse all</button>
+            </div>
+          </div>
+          <div style={{ maxWidth: 320, marginTop: 10 }}>
+            <div style={{ position: 'relative' }}>
+              <Search size={13} style={{ position: 'absolute', left: 10, top: 11, color: 'var(--muted)' }} />
+              <input
+                className="input"
+                style={{ paddingLeft: 30 }}
+                value={treeSearch}
+                onChange={(event) => setTreeSearch(event.target.value)}
+                placeholder="Search coverage tree…"
+              />
+            </div>
+          </div>
         </div>
         {loading ? (
           <div style={{ padding: 14 }}><span className="muted text-xs">Loading coverage areas…</span></div>
@@ -531,55 +806,30 @@ export default function CoverageAreaBuilder() {
           <ErrorState onRetry={reload} />
         ) : !areas.length ? (
           <EmptyState icon={Layers} title="No coverage areas yet" message="Create an area above. Until then, delivery is denied everywhere by default." />
+        ) : !filteredTree.length ? (
+          <EmptyState icon={Layers} title="No matching areas" message="Try a different search term." />
         ) : (
           <div className="table-wrap" style={{ border: 'none', borderRadius: 0 }}>
             <table className="table" style={{ minWidth: 720 }}>
               <thead>
                 <tr>
                   <th>Area</th>
-                  <th>Hierarchy</th>
+                  <th>Name</th>
                   <th>Type</th>
                   <th>Status</th>
                   <th style={{ textAlign: 'right' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {areas.map((area) => (
-                  <tr key={area.uuid}>
-                    <td>
-                      <span className="font-bold text-ink text-sm">{area.name}</span>
-                      {area.description ? <div className="muted text-xs">{area.description}</div> : null}
-                    </td>
-                    <td className="muted text-xs">{area.label || area.parent_label || '—'}</td>
-                    <td className="muted text-xs">{area.is_coverage_area ? 'Coverage area' : 'Custom polygon'}</td>
-                    <td>
-                      <span
-                        className="chip chip-sm"
-                        style={{
-                          background: area.verification_status === 'verified' && area.is_active
-                            ? 'rgba(16,185,129,0.12)'
-                            : 'rgba(245,158,11,0.12)',
-                          color: area.verification_status === 'verified' && area.is_active ? '#047857' : '#b45309',
-                          fontWeight: 800,
-                        }}
-                      >
-                        {area.verification_status === 'verified' && area.is_active ? 'Live' : area.verification_status}
-                      </span>
-                    </td>
-                    <td style={{ textAlign: 'right' }}>
-                      <div style={{ display: 'inline-flex', gap: 6 }}>
-                        {area.verification_status !== 'verified' && (
-                          <button type="button" className="btn btn-outline btn-xs" onClick={() => verifyArea(area)}>
-                            Verify
-                          </button>
-                        )}
-                        <button type="button" className="btn btn-danger-outline btn-xs" onClick={() => deleteArea(area)}>
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                <CoverageTreeRows
+                  nodes={filteredTree}
+                  depth={0}
+                  collapsed={treeSearch ? new Set() : collapsedNodes}
+                  onToggle={toggleNode}
+                  onAddChild={addChild}
+                  onDelete={deleteArea}
+                  onVerify={verifyArea}
+                />
               </tbody>
             </table>
           </div>

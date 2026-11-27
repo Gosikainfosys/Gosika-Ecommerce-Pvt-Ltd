@@ -27,6 +27,7 @@ class DeliveryPartner extends BaseModel
         'vehicle_year',
         'insurance_expiry',
         'service_areas',
+        'shipping_zone_ids',
         'status',
         'is_online',
         'rating_avg',
@@ -44,6 +45,7 @@ class DeliveryPartner extends BaseModel
         return [
             'status' => DeliveryPartnerStatus::class,
             'service_areas' => 'array',
+            'shipping_zone_ids' => 'array',
             'is_online' => 'boolean',
             'rating_avg' => 'decimal:2',
             'rating_count' => 'integer',
