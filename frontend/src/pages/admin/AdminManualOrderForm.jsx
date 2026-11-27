@@ -371,11 +371,12 @@ export default function AdminManualOrderForm() {
       toast.error('Reload the form to retry loading the current shipping settings.')
       return
     }
-    if (!customerId && !manualCustomer) {
-      toast.error('Select an existing customer or choose "Create new customer".')
+    const useNewCustomer = !customerId && (manualCustomer || customerQuery.trim().length >= 2)
+    if (!customerId && !useNewCustomer) {
+      toast.error('Type a customer name to create a walk-in customer, or select an existing customer.')
       return
     }
-    if (manualCustomer && (!shippingAddress.full_name.trim() || !shippingAddress.phone.trim())) {
+    if (useNewCustomer && (!shippingAddress.full_name.trim() || !shippingAddress.phone.trim())) {
       toast.error('Enter the walk-in customer name and phone in the shipping address.')
       return
     }
@@ -483,7 +484,7 @@ export default function AdminManualOrderForm() {
             ) : null}
             hint={manualCustomer
               ? 'A new customer will be created from the shipping name and phone entered below.'
-              : 'Select an existing customer, or type a new name and choose “Create new customer”.'}
+              : 'Select an existing customer, or just type a new name to create a walk-in customer.'}
           />
           <Select label="Payment method" value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)}>
             <option value="cod">Cash on delivery</option>
@@ -612,7 +613,7 @@ export default function AdminManualOrderForm() {
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <button type="button" className="btn btn-outline" onClick={() => navigate('/admin/orders')} disabled={saving}>Cancel</button>
-          <button type="submit" className="btn btn-primary" disabled={saving || loading || Boolean(loadError) || products.length === 0 || (!customerId && !manualCustomer)}>
+          <button type="submit" className="btn btn-primary" disabled={saving || loading || Boolean(loadError) || products.length === 0 || (!customerId && customerQuery.trim().length < 2)}>
             <Save size={15} /> {saving ? 'Creating…' : 'Create Order'}
           </button>
         </div>
