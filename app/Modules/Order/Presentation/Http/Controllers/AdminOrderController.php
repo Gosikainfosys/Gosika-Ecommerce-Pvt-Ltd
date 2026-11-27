@@ -4,6 +4,8 @@ namespace App\Modules\Order\Presentation\Http\Controllers;
 
 use App\Modules\Administration\Application\Services\AuditLogService;
 use App\Modules\Identity\Domain\Permissions;
+use App\Modules\Identity\Domain\Roles;
+use App\Modules\Identity\Infrastructure\Models\User;
 use App\Modules\Order\Application\Services\OrderService;
 use App\Modules\Order\Application\Services\ReturnService;
 use App\Modules\Order\Infrastructure\Models\Order;
@@ -17,6 +19,7 @@ use App\Modules\Shared\Domain\Enums\OrderPaymentStatus;
 use App\Modules\Shared\Domain\Enums\OrderStatus;
 use App\Modules\Shared\Domain\Enums\PaymentMethod;
 use App\Modules\Shared\Domain\Enums\ReturnStatus;
+use App\Modules\Shared\Domain\Enums\UserStatus;
 use App\Modules\Shared\Domain\Exceptions\DomainException;
 use App\Modules\Shared\Infrastructure\Services\ReferenceNumber;
 use App\Modules\Shared\Presentation\Http\Filters\ListingDateRange;
@@ -25,6 +28,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 class AdminOrderController extends Controller
@@ -619,12 +623,74 @@ class AdminOrderController extends Controller
 
     // ─── Admin: Create manual order ───────────────────────────────────────────
 
+    private function resolveManualOrderCustomer(array $data, Request $request): User
+    {
+        if (! empty($data['customer_id'])) {
+            return User::where('uuid', $data['customer_id'])->firstOrFail();
+        }
+
+        $customerInput = $data['customer'] ?? [];
+        $email = ! empty($customerInput['email']) ? $customerInput['email'] : null;
+        $phone = ! empty($customerInput['phone']) ? $customerInput['phone'] : null;
+
+        if ($email && $existing = User::where('email', $email)->first()) {
+            return $existing;
+        }
+
+        if ($phone && $existing = User::where('phone', $phone)->first()) {
+            return $existing;
+        }
+
+        $fullName = trim($customerInput['full_name'] ?? '');
+        $nameParts = preg_split('/\s+/', $fullName, 2) ?: [];
+        $firstName = $nameParts[0] ?? 'Walk-in';
+        $lastName = $nameParts[1] ?? '';
+
+        $generatedEmail = $this->manualCustomerEmail($phone);
+
+        $customer = User::create([
+            'uuid' => (string) Str::uuid(),
+            'first_name' => $firstName,
+            'last_name' => $lastName,
+            'email' => $generatedEmail,
+            'phone' => $phone,
+            'password' => Str::random(32),
+            'status' => UserStatus::ACTIVE,
+            'meta' => [
+                'manual_order_customer' => true,
+                'created_by' => $request->user()->uuid,
+            ],
+        ]);
+        $customer->assignRole(Roles::CUSTOMER);
+
+        return $customer;
+    }
+
+    private function manualCustomerEmail(?string $phone): string
+    {
+        $digits = $phone ? preg_replace('/\D/', '', $phone) : '';
+        $base = is_string($digits) && $digits !== ''
+            ? 'manual-'.$digits
+            : 'manual-customer-'.Str::lower(Str::random(10));
+
+        $email = $base.'@customers.gosika.local';
+        while (User::where('email', $email)->exists()) {
+            $email = $base.'-'.Str::lower(Str::random(4)).'@customers.gosika.local';
+        }
+
+        return $email;
+    }
+
     public function manualCreate(Request $request): JsonResponse
     {
         abort_unless($request->user()->hasPermissionTo(Permissions::ORDERS_MANAGE), 403, 'Insufficient permissions.');
 
         $data = $request->validate([
-            'customer_id'         => ['required', 'string', 'exists:users,uuid'],
+            'customer_id'         => ['nullable', 'string', 'exists:users,uuid'],
+            'customer'            => ['required_without:customer_id', 'array'],
+            'customer.full_name'  => ['required_without:customer_id', 'string', 'max:180'],
+            'customer.phone'      => ['nullable', 'string', 'max:20'],
+            'customer.email'      => ['nullable', 'email', 'max:255'],
             'payment_method'      => ['required', Rule::in(['cod', 'khalti', 'esewa'])],
             'payment_status'      => ['required', Rule::enum(OrderPaymentStatus::class)],
             'customer_notes'      => ['nullable', 'string', 'max:1000'],
@@ -650,9 +716,9 @@ class AdminOrderController extends Controller
             'tax'                 => ['nullable', 'numeric', 'min:0'],
         ]);
 
-        $customer = \App\Modules\Identity\Infrastructure\Models\User::where('uuid', $data['customer_id'])->firstOrFail();
+        $order = \Illuminate\Support\Facades\DB::transaction(function () use ($data, $request) {
+            $customer = $this->resolveManualOrderCustomer($data, $request);
 
-        $order = \Illuminate\Support\Facades\DB::transaction(function () use ($data, $customer, $request) {
             $subtotal = collect($data['items'])->sum(fn ($i) => $i['unit_price'] * $i['quantity']);
             $discount = (float) ($data['discount'] ?? 0);
             $deliveryCharge = (float) ($data['delivery_charge'] ?? 0);
@@ -756,6 +822,8 @@ class AdminOrderController extends Controller
 
             return $order->fresh(['user', 'items.product.primaryImage', 'vendorOrders']);
         });
+
+        $customer = $order->user;
 
         app(AuditLogService::class)->record(
             $request->user(),

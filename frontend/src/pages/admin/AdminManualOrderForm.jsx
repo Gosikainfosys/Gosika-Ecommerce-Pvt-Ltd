@@ -39,6 +39,8 @@ function SearchPicker({
   onBlur,
   onSelect,
   renderOption,
+  footer,
+  hint,
 }) {
   return (
     <div className="form-group" style={{ position: 'relative' }}>
@@ -72,27 +74,31 @@ function SearchPicker({
         >
           {loading ? (
             <div className="muted text-sm p-2">Searching…</div>
-          ) : options.length ? (
-            options.map((option) => (
-              <button
-                key={option.id}
-                type="button"
-                role="option"
-                className="btn btn-ghost"
-                style={{ width: '100%', justifyContent: 'flex-start', textAlign: 'left', whiteSpace: 'normal' }}
-                onMouseDown={(event) => {
-                  event.preventDefault()
-                  onSelect(option)
-                }}
-              >
-                {renderOption(option)}
-              </button>
-            ))
           ) : (
-            <div className="muted text-sm p-2">No matching results.</div>
+            <React.Fragment>
+              {options.length ? options.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  role="option"
+                  className="btn btn-ghost"
+                  style={{ width: '100%', justifyContent: 'flex-start', textAlign: 'left', whiteSpace: 'normal' }}
+                  onMouseDown={(event) => {
+                    event.preventDefault()
+                    onSelect(option)
+                  }}
+                >
+                  {renderOption(option)}
+                </button>
+              )) : (
+                <div className="muted text-sm p-2">No matching results.</div>
+              )}
+              {footer}
+            </React.Fragment>
           )}
         </div>
       )}
+      {hint && <div className="muted text-xs mt-1">{hint}</div>}
     </div>
   )
 }
@@ -106,6 +112,7 @@ export default function AdminManualOrderForm() {
   const [saving, setSaving] = useState(false)
   const [loadError, setLoadError] = useState('')
   const [customerId, setCustomerId] = useState('')
+  const [manualCustomer, setManualCustomer] = useState(false)
   const [customerQuery, setCustomerQuery] = useState('')
   const [customerSearchResults, setCustomerSearchResults] = useState([])
   const [customerSearchLoading, setCustomerSearchLoading] = useState(false)
@@ -314,6 +321,7 @@ export default function AdminManualOrderForm() {
 
   const selectCustomer = (id) => {
     setCustomerId(id)
+    setManualCustomer(false)
     const customer = [...customers, ...customerSearchResults].find((candidate) => candidate.id === id)
     if (customer) {
       setCustomers((current) => (
@@ -327,6 +335,21 @@ export default function AdminManualOrderForm() {
       setCustomerQuery(customer.name || `${customer.first_name || ''} ${customer.last_name || ''}`.trim())
     }
     setCustomerDropdownOpen(false)
+  }
+
+  const chooseManualCustomer = () => {
+    const name = customerQuery.trim()
+    if (name.length < 2) {
+      toast.error('Type a customer name first, then choose "Create new customer".')
+      return
+    }
+    setCustomerId('')
+    setManualCustomer(true)
+    setCustomerDropdownOpen(false)
+    setShippingAddress((current) => ({
+      ...current,
+      full_name: current.full_name || name,
+    }))
   }
 
   const handleMapAddressChange = (location) => {
@@ -348,8 +371,12 @@ export default function AdminManualOrderForm() {
       toast.error('Reload the form to retry loading the current shipping settings.')
       return
     }
-    if (!customerId) {
-      toast.error('Search for and select a customer before creating the order.')
+    if (!customerId && !manualCustomer) {
+      toast.error('Select an existing customer or choose "Create new customer".')
+      return
+    }
+    if (manualCustomer && (!shippingAddress.full_name.trim() || !shippingAddress.phone.trim())) {
+      toast.error('Enter the walk-in customer name and phone in the shipping address.')
       return
     }
     if (items.some((item) => !item.product_id || Number(item.quantity) < 1)) {
@@ -364,7 +391,14 @@ export default function AdminManualOrderForm() {
     setSaving(true)
     try {
       const response = await api.post('/admin/orders', {
-        customer_id: customerId,
+        ...(customerId
+          ? { customer_id: customerId }
+          : {
+            customer: {
+              full_name: shippingAddress.full_name || customerQuery.trim(),
+              phone: shippingAddress.phone || null,
+            },
+          }),
         payment_method: paymentMethod,
         payment_status: paymentStatus,
         customer_notes: customerNotes,
@@ -393,7 +427,7 @@ export default function AdminManualOrderForm() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <PageHeader
         title="Create Manual Order"
-        description="Create an order on behalf of an existing customer."
+        description="Create an order for an existing customer or a walk-in customer."
         breadcrumbs={[
           { label: 'Orders', to: '/admin/orders' },
           { label: 'Create Order' },
@@ -422,6 +456,7 @@ export default function AdminManualOrderForm() {
             onChange={(query) => {
               setCustomerQuery(query)
               setCustomerId('')
+              setManualCustomer(false)
               setCustomerDropdownOpen(true)
             }}
             onSelect={(customer) => selectCustomer(customer.id)}
@@ -433,6 +468,22 @@ export default function AdminManualOrderForm() {
                 </span>
               </span>
             )}
+            footer={customerQuery.trim().length >= 2 && !manualCustomer && !customerId ? (
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                style={{ width: '100%', justifyContent: 'flex-start' }}
+                onMouseDown={(event) => {
+                  event.preventDefault()
+                  chooseManualCustomer()
+                }}
+              >
+                <Plus size={14} /> Create new customer “{customerQuery.trim()}”
+              </button>
+            ) : null}
+            hint={manualCustomer
+              ? 'A new customer will be created from the shipping name and phone entered below.'
+              : 'Select an existing customer, or type a new name and choose “Create new customer”.'}
           />
           <Select label="Payment method" value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)}>
             <option value="cod">Cash on delivery</option>
@@ -561,7 +612,7 @@ export default function AdminManualOrderForm() {
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <button type="button" className="btn btn-outline" onClick={() => navigate('/admin/orders')} disabled={saving}>Cancel</button>
-          <button type="submit" className="btn btn-primary" disabled={saving || loading || Boolean(loadError) || customers.length === 0 || products.length === 0}>
+          <button type="submit" className="btn btn-primary" disabled={saving || loading || Boolean(loadError) || products.length === 0 || (!customerId && !manualCustomer)}>
             <Save size={15} /> {saving ? 'Creating…' : 'Create Order'}
           </button>
         </div>

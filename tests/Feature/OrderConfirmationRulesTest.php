@@ -2220,6 +2220,51 @@ class OrderConfirmationRulesTest extends TestCase
         ]);
     }
 
+    public function test_admin_can_create_manual_order_for_a_new_walk_in_customer(): void
+    {
+        $response = $this->actingAs($this->adminUser)
+            ->postJson('/api/v1/admin/orders', [
+                'customer' => [
+                    'full_name' => 'Walk In Customer',
+                    'phone' => '9800000099',
+                ],
+                'payment_method' => 'cod',
+                'payment_status' => 'pending',
+                'shipping_address' => [
+                    'full_name' => 'Walk In Customer',
+                    'phone' => '9800000099',
+                    'address_line_1' => '2 Market Road',
+                    'latitude' => 27.7172,
+                    'longitude' => 85.3240,
+                ],
+                'items' => [[
+                    'product_id' => $this->product->uuid,
+                    'quantity' => 2,
+                    'unit_price' => 600,
+                ]],
+                'delivery_charge' => 80,
+            ])
+            ->assertCreated()
+            ->assertJsonPath('data.customer.name', 'Walk In Customer')
+            ->assertJsonPath('data.customer.phone', '9800000099')
+            ->assertJsonPath('data.grand_total', '1280.00');
+
+        $customer = User::where('phone', '9800000099')->firstOrFail();
+
+        $this->assertTrue($customer->hasRole(Roles::CUSTOMER));
+        $this->assertTrue((bool) data_get($customer->meta, 'manual_order_customer'));
+        $this->assertDatabaseHas('orders', [
+            'uuid' => $response->json('data.id'),
+            'user_id' => $customer->id,
+            'status' => OrderStatus::CONFIRMED->value,
+        ]);
+
+        $this->actingAs($this->adminUser)
+            ->getJson('/api/v1/admin/customers?status=active&search=Walk%20In')
+            ->assertOk()
+            ->assertJsonPath('data.0.id', $customer->uuid);
+    }
+
     public function test_matured_earnings_require_paid_and_delivered_order_status(): void
     {
         Setting::set('return.window_days', 7, 'return', 'integer', true);
