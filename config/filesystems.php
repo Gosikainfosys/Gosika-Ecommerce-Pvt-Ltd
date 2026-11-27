@@ -33,7 +33,10 @@ return [
         'local' => [
             'driver' => 'local',
             'root' => storage_path('app/private'),
-            'serve' => true,
+            // Private files are not served publicly. Keeping this disabled also
+            // prevents Laravel's signed /storage route from shadowing the
+            // public disk route in routes/web.php.
+            'serve' => false,
             'throw' => false,
             'report' => false,
         ],

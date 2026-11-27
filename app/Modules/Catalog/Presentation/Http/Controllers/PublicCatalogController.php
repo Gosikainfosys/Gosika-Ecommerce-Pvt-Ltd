@@ -31,6 +31,7 @@ class PublicCatalogController extends Controller
         $data = Cache::remember($cacheKey, 300, function () use ($withChildren) {
             $categories = Category::query()
                 ->active()
+                ->with('parent')
                 ->withCount(['products' => fn ($q) => $q->where('status', ProductStatus::PUBLISHED)])
                 ->when($withChildren, fn ($q) => $q->with('children'))
                 ->orderBy('sort_order')

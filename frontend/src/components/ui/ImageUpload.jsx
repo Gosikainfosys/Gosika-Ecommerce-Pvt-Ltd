@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react'
 import { UploadCloud, Image as ImageIcon, X, Link2, Loader2, Check } from 'lucide-react'
 import api from '../../api/client'
-import { apiImage, errorMessage } from '../../utils/format'
+import { apiImage, errorMessage, handleImgError } from '../../utils/format'
 import { useToast } from '../../context/ToastContext'
 
 export default function ImageUpload({
@@ -149,6 +149,7 @@ export default function ImageUpload({
           <img
             src={apiImage(value)}
             alt="Preview"
+            onError={handleImgError}
             style={{
               width: '100%',
               height: '100%',

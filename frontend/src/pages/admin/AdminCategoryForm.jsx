@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import React, { useEffect, useMemo, useState } from 'react'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   FolderTree, Image, Save, ArrowLeft, Percent
 } from 'lucide-react'
@@ -22,11 +22,59 @@ const PRESET_CAT_IMAGES = [
 
 const TAX_PRESETS = [0, 1, 5, 13, 15, 20]
 
+function buildCategoryTree(list) {
+  const nodes = new Map(list.map((category) => [category.id, { ...category, children: [] }]))
+  const roots = []
+
+  nodes.forEach((node) => {
+    const parent = node.parent_id ? nodes.get(node.parent_id) : null
+    if (parent && parent.id !== node.id) parent.children.push(node)
+    else roots.push(node)
+  })
+
+  const sortNodes = (items) => {
+    items.sort((a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0) || a.name.localeCompare(b.name))
+    items.forEach((item) => sortNodes(item.children))
+  }
+  sortNodes(roots)
+
+  return roots
+}
+
+function flattenCategoryTree(nodes, depth = 0) {
+  return nodes.flatMap((node) => [
+    {
+      ...node,
+      depth,
+      optionLabel: `${depth > 0 ? `${'— '.repeat(depth)}↳ ` : ''}${node.name}`,
+    },
+    ...flattenCategoryTree(node.children || [], depth + 1),
+  ])
+}
+
+function findCategoryNode(nodes, id) {
+  for (const node of nodes) {
+    if (node.id === id) return node
+    const match = findCategoryNode(node.children || [], id)
+    if (match) return match
+  }
+  return null
+}
+
+function collectDescendantIds(node, ids) {
+  ;(node.children || []).forEach((child) => {
+    ids.add(child.id)
+    collectDescendantIds(child, ids)
+  })
+}
+
 export default function AdminCategoryForm() {
   const navigate = useNavigate()
   const { id } = useParams()
+  const [searchParams] = useSearchParams()
   const toast = useToast()
   const editing = Boolean(id)
+  const presetParentId = searchParams.get('parent')
 
   const [form, setForm] = useState({
     parent_id: '',
@@ -71,6 +119,35 @@ export default function AdminCategoryForm() {
       .finally(() => setLoading(false))
   }, [id, editing, toast])
 
+  const tree = useMemo(() => buildCategoryTree(categories), [categories])
+  const flatOptions = useMemo(() => flattenCategoryTree(tree), [tree])
+
+  // A category may never become its own descendant's child.
+  const forbiddenParentIds = useMemo(() => {
+    const ids = new Set(editing && id ? [id] : [])
+    if (editing && id) {
+      const current = findCategoryNode(tree, id)
+      if (current) collectDescendantIds(current, ids)
+    }
+    return ids
+  }, [tree, id, editing])
+
+  const parentOptions = flatOptions.filter((category) => !forbiddenParentIds.has(category.id))
+
+  useEffect(() => {
+    if (editing || !presetParentId || !categories.length) return
+    const parent = categories.find((category) => category.id === presetParentId)
+    if (!parent || forbiddenParentIds.has(parent.id)) return
+
+    setForm((current) => current.parent_id === presetParentId
+      ? current
+      : {
+        ...current,
+        parent_id: presetParentId,
+        tax_rate: Number(parent.tax_rate ?? current.tax_rate),
+      })
+  }, [presetParentId, categories, editing, forbiddenParentIds])
+
   const slugify = (v) => v.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
 
   const handleName = (e) => {
@@ -82,14 +159,22 @@ export default function AdminCategoryForm() {
     }))
   }
 
-  const parentOptions = categories.filter((c) => !editing || c.id !== id)
+  const handleParentChange = (e) => {
+    const parentId = e.target.value
+    const parent = categories.find((category) => category.id === parentId)
+    setForm((f) => ({
+      ...f,
+      parent_id: parentId,
+      tax_rate: editing || !parent ? f.tax_rate : Number(parent.tax_rate ?? f.tax_rate),
+    }))
+  }
 
   const save = async (e) => {
     e.preventDefault()
     setSaving(true)
     try {
       const payload = {
-        parent_id: form.parent_id || undefined,
+        parent_id: form.parent_id || null,
         name: form.name,
         slug: form.slug || undefined,
         icon: form.icon,
@@ -167,13 +252,14 @@ export default function AdminCategoryForm() {
                 <select
                   className="input"
                   value={form.parent_id || ''}
-                  onChange={(e) => setForm({ ...form, parent_id: e.target.value })}
+                  onChange={handleParentChange}
                 >
                   <option value="">— Top Level (no parent) —</option>
-                  {parentOptions.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
+                  {parentOptions.map((category) => (
+                    <option key={category.id} value={category.id}>{category.optionLabel}</option>
                   ))}
                 </select>
+                <p className="helper">Choose any category or subcategory to create a nested department. New subcategories inherit the parent VAT rate.</p>
               </div>
             </div>
 
@@ -226,7 +312,7 @@ export default function AdminCategoryForm() {
                   value={form.sort_order}
                   onChange={(e) => setForm({ ...form, sort_order: e.target.value })}
                 />
-                <p className="helper">Lower numbers appear first in the navigation.</p>
+                <p className="helper">Lower numbers appear first within the same parent.</p>
               </div>
             </div>
 

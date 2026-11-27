@@ -306,6 +306,7 @@ class AdminCatalogController extends Controller
         $categories = Category::query()
             ->when($request->boolean('trashed'), fn ($q) => $q->onlyTrashed())
             ->when($request->boolean('with_children'), fn ($q) => $q->with('children'))
+            ->with('parent')
             ->withCount('products')
             ->orderBy('sort_order')
             ->get();
@@ -378,8 +379,16 @@ class AdminCatalogController extends Controller
             'sort_order' => ['nullable', 'integer', 'min:0'],
         ]);
 
+        if (! empty($validated['parent_id'])) {
+            $this->assertValidCategoryParent($category, $validated['parent_id']);
+        }
+
         $category->update([
-            'parent_id' => isset($validated['parent_id']) ? Category::query()->where('uuid', $validated['parent_id'])->value('id') : null,
+            'parent_id' => array_key_exists('parent_id', $validated)
+                ? ($validated['parent_id']
+                    ? Category::query()->where('uuid', $validated['parent_id'])->value('id')
+                    : null)
+                : $category->parent_id,
             'name' => $validated['name'],
             'slug' => $validated['slug'] ?? $category->slug,
             'description' => $validated['description'] ?? null,
@@ -515,6 +524,33 @@ class AdminCatalogController extends Controller
         }
 
         return $category;
+    }
+
+    protected function assertValidCategoryParent(Category $category, string $parentUuid): void
+    {
+        if ($parentUuid === $category->uuid) {
+            throw new DomainException(
+                'A category cannot be its own parent.',
+                422,
+                ['parent_id' => ['A category cannot be its own parent.']]
+            );
+        }
+
+        $cursor = Category::query()->where('uuid', $parentUuid)->first();
+        $visited = [];
+
+        while ($cursor && ! isset($visited[$cursor->id])) {
+            if ((int) $cursor->id === (int) $category->id) {
+                throw new DomainException(
+                    'A category cannot have one of its descendants as a parent.',
+                    422,
+                    ['parent_id' => ['A category cannot have one of its descendants as a parent.']]
+                );
+            }
+
+            $visited[$cursor->id] = true;
+            $cursor = $cursor->parent()->first();
+        }
     }
 
     protected function findBrand(string $brandId): Brand

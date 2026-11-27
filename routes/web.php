@@ -4,6 +4,7 @@ use App\Http\Controllers\SpaController;
 use App\Modules\Payment\Presentation\Http\Controllers\PaymentController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Storage;
 
 /*
 |--------------------------------------------------------------------------
@@ -61,6 +62,30 @@ Route::get('/deploy-clear', function (Request $request) {
         'timestamp' => now()->toISOString(),
     ]);
 });
+
+// ── Public uploaded files ────────────────────────────────────────────────
+// Serves the public disk when the public/storage symlink is unavailable.
+// Static files still win when the symlink exists.
+Route::get('/storage/{path}', function (string $path) {
+    if (
+        str_starts_with($path, '/')
+        || str_contains($path, "\0")
+        || preg_match('#(?:^|/)\.\.(?:/|$)#', $path)
+    ) {
+        abort(404);
+    }
+
+    $disk = Storage::disk('public');
+    if (! $disk->exists($path)) {
+        abort(404);
+    }
+
+    return $disk->response($path, null, [
+        'Content-Type' => $disk->mimeType($path) ?: 'application/octet-stream',
+        'Cache-Control' => 'public, max-age=86400',
+        'X-Content-Type-Options' => 'nosniff',
+    ], 'inline');
+})->where('path', '.*')->name('storage.public');
 
 // ── SPA fallback for all other public GET requests ───────────────────────
 Route::fallback(function (Request $request) {

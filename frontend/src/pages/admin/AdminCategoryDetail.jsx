@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
-  Pencil, ArrowLeft, Percent, Layers, Package, FolderTree, Globe, Trash2, Calendar
+  Pencil, ArrowLeft, Percent, Layers, Package, FolderTree, Globe, Trash2, Calendar, Plus
 } from 'lucide-react'
 import api from '../../api/client'
 import PageHeader from '../../components/admin/PageHeader'
@@ -9,7 +9,7 @@ import StatusBadge from '../../components/commerce/StatusBadge'
 import { Skeleton } from '../../components/ui/Skeleton'
 import ErrorState from '../../components/ui/ErrorState'
 import EmptyState from '../../components/ui/EmptyState'
-import { errorMessage, formatDate, handleImgError } from '../../utils/format'
+import { apiImage, errorMessage, formatDate, handleImgError } from '../../utils/format'
 import { useToast } from '../../context/ToastContext'
 
 export default function AdminCategoryDetail() {
@@ -67,6 +67,9 @@ export default function AdminCategoryDetail() {
             <button type="button" className="btn btn-outline btn-sm flex items-center gap-1" onClick={() => navigate('/admin/marketplace/categories')}>
               <ArrowLeft size={14} /> Back
             </button>
+            <button type="button" className="btn btn-outline btn-sm flex items-center gap-1" onClick={() => navigate(`/admin/marketplace/categories/new?parent=${encodeURIComponent(category.id)}`)}>
+              <Plus size={14} /> Add Subcategory
+            </button>
             <button type="button" className="btn btn-primary btn-sm flex items-center gap-1" onClick={() => navigate(`/admin/marketplace/categories/${category.id}/edit`)}>
               <Pencil size={14} /> Edit Category
             </button>
@@ -77,7 +80,7 @@ export default function AdminCategoryDetail() {
       <div className="card card-pad-none" style={{ overflow: 'hidden', marginBottom: 18 }}>
         <div style={{ height: 170, position: 'relative' }}>
           <img
-            src={category.image || 'https://images.unsplash.com/photo-1523381210434-271e8be1f52b?w=1200&q=80'}
+            src={apiImage(category.image || 'https://images.unsplash.com/photo-1523381210434-271e8be1f52b?w=1200&q=80')}
             alt={category.name}
             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
             onError={handleImgError}
