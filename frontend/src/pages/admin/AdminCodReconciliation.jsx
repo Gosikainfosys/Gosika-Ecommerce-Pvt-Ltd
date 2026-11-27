@@ -433,7 +433,12 @@ export default function AdminCodReconciliation() {
         </div>
       </div>
 
-      <Drawer open={!!selectedId} onClose={closeProfile} title={profile?.name ? `${profile.name} · COD Profile` : 'COD Partner Profile'}>
+      <Drawer
+        open={!!selectedId}
+        onClose={closeProfile}
+        title={profile?.name ? `${profile.name} · COD Profile` : 'COD Partner Profile'}
+        panelClassName="cod-profile-drawer"
+      >
         {detailLoading && !detail ? (
           <Skeleton height={220} />
         ) : detailError && !detail ? (

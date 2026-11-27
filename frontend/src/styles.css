@@ -892,6 +892,15 @@ button {
   left: 0;
   animation: slideInLeft 0.22s ease;
 }
+/* Keep partner profiles as a side drawer, never a full-screen panel. */
+.cod-profile-drawer {
+  width: min(560px, calc(100vw - 80px));
+}
+@media (max-width: 640px) {
+  .cod-profile-drawer {
+    width: min(420px, calc(100vw - 56px));
+  }
+}
 .drawer-header {
   display: flex;
   align-items: center;
