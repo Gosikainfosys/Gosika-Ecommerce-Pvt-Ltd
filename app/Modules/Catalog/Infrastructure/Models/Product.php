@@ -24,6 +24,7 @@ class Product extends BaseModel
         'short_description',
         'sku',
         'barcode',
+        'demo_video_url',
         'status',
         'stock_status',
         'quantity',
@@ -97,7 +98,7 @@ class Product extends BaseModel
 
     public function images(): HasMany
     {
-        return $this->hasMany(ProductImage::class);
+        return $this->hasMany(ProductImage::class)->orderBy('sort_order');
     }
 
     public function attributes(): HasMany

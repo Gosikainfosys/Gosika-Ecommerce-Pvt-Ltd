@@ -8,6 +8,7 @@ use App\Modules\Catalog\Application\Services\CatalogService;
 use App\Modules\Catalog\Infrastructure\Models\BrandRequest;
 use App\Modules\Catalog\Infrastructure\Models\Product;
 use App\Modules\Catalog\Presentation\Http\Requests\BrandRequestCreateRequest;
+use App\Modules\Catalog\Presentation\Http\Requests\ProductImageReorderRequest;
 use App\Modules\Catalog\Presentation\Http\Requests\ProductRequest;
 use App\Modules\Catalog\Presentation\Resources\BrandRequestResource;
 use App\Modules\Catalog\Presentation\Resources\ProductResource;
@@ -17,6 +18,7 @@ use App\Modules\Shared\Presentation\Http\Response;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
+use Illuminate\Support\Facades\DB;
 
 class VendorProductController extends Controller
 {
@@ -83,6 +85,69 @@ class VendorProductController extends Controller
         $product->load(['category', 'brand', 'images', 'primaryImage', 'variants', 'attributes.values']);
 
         return Response::success(new ProductResource($product), 'Product updated.');
+    }
+
+    public function reorderImages(ProductImageReorderRequest $request, string $productId): JsonResponse
+    {
+        $vendor = $this->vendorFor($request);
+        $product = $this->findOwned($vendor->id, $productId);
+        $images = $product->images()->whereNull('variant_id')->orderBy('sort_order')->get();
+        $orderedIds = array_values($request->input('images', []));
+        $availableIds = $images->pluck('uuid')->all();
+        $primaryId = $request->input('primary_image_id');
+
+        if (count($orderedIds) !== count($availableIds)
+            || array_diff($orderedIds, $availableIds)
+            || array_diff($availableIds, $orderedIds)) {
+            throw new DomainException('Send every product image exactly once when reordering.', 422);
+        }
+
+        if ($primaryId && ! in_array($primaryId, $orderedIds, true)) {
+            throw new DomainException('The cover image must be part of the product gallery.', 422);
+        }
+
+        DB::transaction(function () use ($images, $orderedIds, $primaryId): void {
+            $primaryId = $primaryId ?: $orderedIds[0];
+
+            foreach ($orderedIds as $index => $uuid) {
+                $images->firstWhere('uuid', $uuid)->update([
+                    'sort_order' => $index,
+                    'is_primary' => $uuid === $primaryId,
+                ]);
+            }
+        });
+
+        $product->load(['category', 'brand', 'images', 'primaryImage', 'variants', 'attributes.values']);
+
+        return Response::success(new ProductResource($product), 'Product images updated.');
+    }
+
+    public function deleteImage(Request $request, string $productId, string $imageId): JsonResponse
+    {
+        $vendor = $this->vendorFor($request);
+        $product = $this->findOwned($vendor->id, $productId);
+        $image = $product->images()->whereNull('variant_id')->where('uuid', $imageId)->first();
+
+        if (! $image) {
+            throw new DomainException('Product image not found.', 404);
+        }
+
+        DB::transaction(function () use ($product, $image): void {
+            $wasPrimary = (bool) $image->is_primary;
+            $image->delete();
+
+            $remaining = $product->images()->whereNull('variant_id')->orderBy('sort_order')->get();
+            foreach ($remaining as $index => $remainingImage) {
+                $remainingImage->update([
+                    'sort_order' => $index,
+                    'is_primary' => $wasPrimary ? $index === 0 : (bool) $remainingImage->is_primary,
+                ]);
+            }
+        });
+
+        $product->load(['category', 'brand', 'images', 'primaryImage', 'variants', 'attributes.values']);
+
+        return Response::success(new ProductResource($product), 'Product image removed.');
     }
 
     public function submit(Request $request, string $productId): JsonResponse

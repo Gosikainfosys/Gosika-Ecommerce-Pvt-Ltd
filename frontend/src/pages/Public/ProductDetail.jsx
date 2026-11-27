@@ -84,6 +84,19 @@ export default function ProductDetail() {
               </div>
             </div>
 
+            {/* Demo Video */}
+            {product.demo_video_url && (
+              <div className="mt-6">
+                <h3 style={{ fontSize: 16, marginBottom: 12 }}>Demo Video</h3>
+                <video
+                  controls
+                  preload="metadata"
+                  src={product.demo_video_url}
+                  style={{ width: '100%', maxHeight: 400, borderRadius: 12, background: '#000' }}
+                />
+              </div>
+            )}
+
             {/* Variant Selection */}
             {variants.length > 0 && (
               <div className="mt-4">

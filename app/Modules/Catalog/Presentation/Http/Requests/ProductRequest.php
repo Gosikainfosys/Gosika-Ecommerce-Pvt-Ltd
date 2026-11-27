@@ -10,6 +10,19 @@ use Illuminate\Validation\Validator;
 
 class ProductRequest extends FormRequest
 {
+    protected function prepareForValidation(): void
+    {
+        $meta = $this->input('meta');
+
+        if (is_string($meta)) {
+            $decoded = json_decode($meta, true);
+
+            if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                $this->merge(['meta' => $decoded]);
+            }
+        }
+    }
+
     public function authorize(): bool
     {
         return true;
@@ -42,6 +55,7 @@ class ProductRequest extends FormRequest
             'brand_id' => ['nullable', 'string', 'exists:brands,uuid'],
             'sku' => ['nullable', 'string', 'max:80', $skuRule],
             'barcode' => ['nullable', 'string', 'max:80'],
+            'demo_video_url' => ['nullable', 'url', 'max:2048'],
             'status' => ['nullable', Rule::enum(ProductStatus::class)],
             'quantity' => ['nullable', 'integer', 'min:0'],
             'low_stock_threshold' => ['nullable', 'integer', 'min:0'],

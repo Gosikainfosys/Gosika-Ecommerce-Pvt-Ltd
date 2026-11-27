@@ -543,4 +543,133 @@ class VendorProductValidationTest extends TestCase
         ]);
         $this->assertDatabaseCount('product_variants', 2);
     }
+
+    private function approvedVendorWithStore(): User
+    {
+        Role::findOrCreate(Roles::VENDOR_ADMIN, 'web');
+        $vendor = User::factory()->create();
+        $vendor->assignRole(Roles::VENDOR_ADMIN);
+        $vendorProfile = Vendor::query()->create([
+            'user_id' => $vendor->id,
+            'company_name' => 'Media Vendor',
+            'business_email' => 'media-vendor@example.test',
+            'status' => VendorStatus::APPROVED,
+        ]);
+        Store::query()->create([
+            'vendor_id' => $vendorProfile->id,
+            'name' => 'Media Store',
+            'slug' => 'media-store',
+            'status' => 'active',
+        ]);
+
+        return $vendor;
+    }
+
+    public function test_vendor_product_form_accepts_metadata_sent_as_a_json_string(): void
+    {
+        $vendor = $this->approvedVendorWithStore();
+
+        $this->actingAs($vendor)
+            ->post('/api/v1/vendor/products', [
+                'name' => 'Product with metadata',
+                'sku' => 'TEST-META-001',
+                'price' => '150',
+                'meta' => '{"material":"cotton","care":["machine wash","dry flat"]}',
+                'image_urls' => ['https://example.test/meta-product.jpg'],
+            ])
+            ->assertCreated();
+
+        $this->assertDatabaseHas('products', [
+            'sku' => 'TEST-META-001',
+            'meta' => json_encode([
+                'material' => 'cotton',
+                'care' => ['machine wash', 'dry flat'],
+            ]),
+        ]);
+    }
+
+    public function test_vendor_can_store_and_update_a_demo_video_url(): void
+    {
+        $vendor = $this->approvedVendorWithStore();
+
+        $productId = $this->actingAs($vendor)
+            ->postJson('/api/v1/vendor/products', [
+                'name' => 'Product with demo video',
+                'sku' => 'TEST-DEMO-VIDEO-001',
+                'price' => '150',
+                'demo_video_url' => 'https://example.test/demo-one.mp4',
+                'image_urls' => ['https://example.test/demo-one.jpg'],
+            ])
+            ->assertCreated()
+            ->assertJsonPath('data.demo_video_url', 'https://example.test/demo-one.mp4')
+            ->json('data.id');
+
+        $this->assertDatabaseHas('products', [
+            'uuid' => $productId,
+            'demo_video_url' => 'https://example.test/demo-one.mp4',
+        ]);
+
+        $this->actingAs($vendor)
+            ->post('/api/v1/vendor/products/'.$productId, [
+                '_method' => 'PUT',
+                'name' => 'Product with demo video',
+                'sku' => 'TEST-DEMO-VIDEO-001',
+                'price' => '150',
+                'quantity' => '0',
+                'demo_video_url' => 'https://example.test/demo-two.mp4',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.demo_video_url', 'https://example.test/demo-two.mp4');
+
+        $this->assertDatabaseHas('products', [
+            'uuid' => $productId,
+            'demo_video_url' => 'https://example.test/demo-two.mp4',
+        ]);
+    }
+
+    public function test_vendor_can_reorder_remove_and_choose_cover_images(): void
+    {
+        $vendor = $this->approvedVendorWithStore();
+
+        $productId = $this->actingAs($vendor)
+            ->postJson('/api/v1/vendor/products', [
+                'name' => 'Gallery product',
+                'sku' => 'TEST-GALLERY-001',
+                'price' => '150',
+                'image_urls' => [
+                    'https://example.test/gallery-one.jpg',
+                    'https://example.test/gallery-two.jpg',
+                    'https://example.test/gallery-three.jpg',
+                ],
+                'primary_image_url' => 'https://example.test/gallery-one.jpg',
+            ])
+            ->assertCreated()
+            ->json('data.id');
+
+        $product = $this->actingAs($vendor)
+            ->getJson('/api/v1/vendor/products/'.$productId)
+            ->assertOk()
+            ->json('data');
+
+        $first = $product['images'][0]['id'];
+        $second = $product['images'][1]['id'];
+        $third = $product['images'][2]['id'];
+
+        $this->actingAs($vendor)
+            ->putJson('/api/v1/vendor/products/'.$productId.'/images', [
+                'images' => [$third, $second, $first],
+                'primary_image_id' => $second,
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.images.0.id', $third)
+            ->assertJsonPath('data.images.1.is_primary', true)
+            ->assertJsonPath('data.images.2.id', $first);
+
+        $this->actingAs($vendor)
+            ->deleteJson('/api/v1/vendor/products/'.$productId.'/images/'.$first)
+            ->assertOk()
+            ->assertJsonCount(2, 'data.images')
+            ->assertJsonPath('data.images.0.id', $third)
+            ->assertJsonPath('data.images.1.is_primary', true);
+    }
 }

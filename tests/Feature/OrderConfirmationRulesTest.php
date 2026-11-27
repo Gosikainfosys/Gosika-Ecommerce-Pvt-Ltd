@@ -2122,6 +2122,7 @@ class OrderConfirmationRulesTest extends TestCase
                 'slug' => 'admin-created-wool-scarf',
                 'sku' => 'ADMIN-SCARF-001',
                 'barcode' => '1234567890123',
+                'demo_video_url' => 'https://example.test/scarf-demo.mp4',
                 'price' => 1200,
                 'compare_at_price' => 1500,
                 'cost_price' => 600,
@@ -2156,6 +2157,7 @@ class OrderConfirmationRulesTest extends TestCase
             ->assertCreated()
             ->assertJsonPath('data.name', 'Admin-created wool scarf')
             ->assertJsonPath('data.short_description', 'A handwoven wool scarf.')
+            ->assertJsonPath('data.demo_video_url', 'https://example.test/scarf-demo.mp4')
             ->assertJsonPath('data.is_featured', true)
             ->assertJsonPath('data.variants.0.options.color', 'Blue')
             ->assertJsonPath('data.attributes.0.name', 'Material');

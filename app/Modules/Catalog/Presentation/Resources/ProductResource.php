@@ -17,6 +17,7 @@ class ProductResource extends JsonResource
             'short_description' => $this->short_description,
             'sku' => $this->sku,
             'barcode' => $this->barcode,
+            'demo_video_url' => $this->demo_video_url,
             'status' => $this->status,
             'stock_status' => $this->stock_status,
             'quantity' => $this->quantity,
@@ -55,6 +56,7 @@ class ProductResource extends JsonResource
                 'company_name' => $this->vendor->company_name,
             ]),
             'images' => $this->when($this->relationLoaded('images'), fn () => $this->images->map(fn ($image) => [
+                'id' => $image->uuid,
                 'url' => $image->file_path,
                 'sort_order' => $image->sort_order,
                 'is_primary' => $image->is_primary,

@@ -1,283 +1,427 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Trash2, Plus, Image as ImageIcon, Upload, CheckCircle2 } from 'lucide-react'
+import {
+  ArrowLeft,
+  FileText,
+  Image as ImageIcon,
+  Layers,
+  Plus,
+  Save,
+  Settings2,
+  Tag,
+  Trash2,
+  Truck,
+} from 'lucide-react'
 import api from '../../api/client'
 import Input from '../../components/ui/Input'
 import Select from '../../components/ui/Select'
 import Textarea from '../../components/ui/Textarea'
+import FormSection from '../../components/ui/FormSection'
+import ProductImageGallery from '../../components/ui/ProductImageGallery'
+import ProductVariantBuilder from '../../components/ui/ProductVariantBuilder'
+import RichTextEditor from '../../components/ui/RichTextEditor'
 import Button from '../../components/ui/Button'
 import Spinner from '../../components/ui/Spinner'
 import { useToast } from '../../context/ToastContext'
-import { errorMessage, apiImage } from '../../utils/format'
+import useUnsavedChangesWarning from '../../hooks/useUnsavedChangesWarning'
+import { errorMessage } from '../../utils/format'
+import {
+  attributeValues,
+  formatVariantOptions,
+  newImageId,
+  parseVariantOptions,
+  slugify,
+} from '../../utils/productForm'
 
-const emptyForm = {
+const emptyForm = (preserve = {}) => ({
   name: '',
   slug: '',
   sku: '',
   price: '',
   compare_at_price: '',
   quantity: '0',
-  low_stock_threshold: '5',
+  low_stock_threshold: preserve.low_stock_threshold ?? '5',
   description: '',
   short_description: '',
-  category_id: '',
-  brand_id: '',
-  weight_grams: '0',
+  category_id: preserve.category_id || '',
+  brand_id: preserve.brand_id || '',
+  weight_grams: preserve.weight_grams ?? '0',
   dimensions: '',
   barcode: '',
+  demo_video_url: '',
   cost_price: '',
   hs_code: '',
   manufacturer: '',
-  tax_rate: '',
-  primary_image: '',
+  tax_rate: preserve.tax_rate ?? '',
   images: [],
   is_negotiable: false,
   is_featured: false,
+  is_variant: false,
   variants: [],
-}
+  attributes: [],
+  meta_json: '{}',
+})
 
 export default function VendorProductForm() {
   const { id } = useParams()
   const navigate = useNavigate()
   const toast = useToast()
   const isEdit = Boolean(id)
+
   const [form, setForm] = useState(emptyForm)
+  const [slugTouched, setSlugTouched] = useState(false)
   const [categories, setCategories] = useState([])
   const [brands, setBrands] = useState([])
   const [fieldErrors, setFieldErrors] = useState({})
   const [formError, setFormError] = useState('')
   const [imageError, setImageError] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(isEdit)
   const [loadFailed, setLoadFailed] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const [dirty, setDirty] = useState(false)
   const [productStatus, setProductStatus] = useState('')
-  const [customImageUrl, setCustomImageUrl] = useState('')
-  const [existingImageUrls, setExistingImageUrls] = useState([])
+  const [baselineImageIds, setBaselineImageIds] = useState([])
+  const [removedImageIds, setRemovedImageIds] = useState([])
+  const guardNavigation = useUnsavedChangesWarning(dirty)
 
   useEffect(() => {
-    api.get('/categories').then((r) => setCategories(r.data.data || [])).catch(() => {})
-    api.get('/brands').then((r) => setBrands(r.data.data || [])).catch(() => {})
+    api.get('/categories').then((response) => setCategories(api.unwrapList(response.data))).catch(() => {})
+    api.get('/brands').then((response) => setBrands(api.unwrapList(response.data))).catch(() => {})
 
-    if (isEdit) {
-      setLoading(true)
-      api
-        .get(`/vendor/products/${id}`)
-        .then((r) => {
-          const p = r.data.data
-          setProductStatus(p.status)
-          const images = (p.images || []).map((img) => ({ url: img.url || img, file: null }))
-          setExistingImageUrls(images.map((img) => img.url))
-          setForm({
-            name: p.name,
-            slug: p.slug || '',
-            sku: p.sku,
-            price: String(p.price ?? ''),
-            compare_at_price: String(p.compare_at_price ?? ''),
-            quantity: String(p.quantity ?? '0'),
-            low_stock_threshold: String(p.low_stock_threshold ?? '5'),
-            description: p.description || '',
-            short_description: p.short_description || '',
-            category_id: p.category?.id || '',
-            brand_id: p.brand?.id || '',
-            weight_grams: String(p.weight_grams ?? '0'),
-            dimensions: p.dimensions || '',
-            barcode: p.barcode || '',
-            cost_price: String(p.cost_price ?? ''),
-            hs_code: p.hs_code || '',
-            manufacturer: p.manufacturer || '',
-            tax_rate: String(p.tax_rate ?? ''),
-            primary_image: p.primary_image?.url || p.images?.[0]?.url || '',
-            images,
-            is_negotiable: !!p.is_negotiable,
-            is_featured: !!p.is_featured,
-            variants: (p.variants || []).map((v) => ({
-              sku: v.sku,
-              name: v.name || '',
-              price: String(v.price ?? ''),
-              compare_at_price: String(v.compare_at_price ?? ''),
-              quantity: String(v.quantity ?? '0'),
-              options: Object.entries(v.options || {}).map(([k, val]) => `${k}=${val}`).join(', '),
-            })),
-          })
+    if (!isEdit) return
+
+    let active = true
+    api.get(`/vendor/products/${id}`)
+      .then((response) => {
+        if (!active) return
+        const product = response.data.data
+        const images = (product.images || []).map((image, index) => ({
+          id: image.id || newImageId(),
+          existingId: image.id || null,
+          url: image.url || image,
+          file: null,
+          isPrimary: Boolean(image.is_primary || (index === 0 && !(product.images || []).some((item) => item.is_primary))),
+        }))
+
+        setProductStatus(product.status)
+        setBaselineImageIds(images.map((image) => image.existingId).filter(Boolean))
+        setSlugTouched(true)
+        setForm({
+          name: product.name || '',
+          slug: product.slug || '',
+          sku: product.sku || '',
+          price: String(product.price ?? ''),
+          compare_at_price: String(product.compare_at_price ?? ''),
+          quantity: String(product.quantity ?? '0'),
+          low_stock_threshold: String(product.low_stock_threshold ?? '5'),
+          description: product.description || '',
+          short_description: product.short_description || '',
+          category_id: product.category?.id || '',
+          brand_id: product.brand?.id || '',
+          weight_grams: String(product.weight_grams ?? '0'),
+          dimensions: product.dimensions || '',
+          barcode: product.barcode || '',
+          demo_video_url: product.demo_video_url || '',
+          cost_price: String(product.cost_price ?? ''),
+          hs_code: product.hs_code || '',
+          manufacturer: product.manufacturer || '',
+          tax_rate: String(product.tax_rate ?? ''),
+          images,
+          is_negotiable: !!product.is_negotiable,
+          is_featured: !!product.is_featured,
+          is_variant: !!product.is_variant,
+          variants: (product.variants || []).map((variant) => ({
+            sku: variant.sku || '',
+            name: variant.name || '',
+            price: String(variant.price ?? ''),
+            compare_at_price: String(variant.compare_at_price ?? ''),
+            quantity: String(variant.quantity ?? '0'),
+            options: formatVariantOptions(variant.options),
+            image: null,
+          })),
+          attributes: (product.attributes || []).map((attribute) => ({
+            name: attribute.name || '',
+            type: attribute.type || 'text',
+            values: (attribute.values || []).join(', '),
+          })),
+          meta_json: '{}',
         })
-        .catch(() => setLoadFailed(true))
-        .finally(() => setLoading(false))
-    }
+      })
+      .catch(() => setLoadFailed(true))
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+
+    return () => { active = false }
   }, [id, isEdit])
 
-  const updateField = (key, value) => {
+  const update = (key, value) => {
     setForm((current) => ({ ...current, [key]: value }))
     setFieldErrors((current) => {
       const next = { ...current }
       delete next[key]
-      if (key === 'category_id') delete next.category_id
       return next
     })
     setFormError('')
+    setDirty(true)
   }
 
-  const set = (k) => (e) => updateField(k, e.target.value)
-
-  const handleFileUpload = (e) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    if (file.size > 5 * 1024 * 1024) {
-      setImageError('Each product image must be 5 MB or smaller.')
-      e.target.value = ''
-      return
-    }
-    const reader = new FileReader()
-    reader.onload = () => {
-      const dataUrl = reader.result
-      const entry = { url: dataUrl, file }
-      setForm((current) => ({
-        ...current,
-        primary_image: current.primary_image || dataUrl,
-        images: [...current.images, entry],
-      }))
-      setImageError('')
-      toast.success('Image added')
-    }
-    reader.readAsDataURL(file)
-    e.target.value = ''
-  }
-
-  const addCustomImage = () => {
-    if (!customImageUrl.trim()) return
-    const url = customImageUrl.trim()
-    try {
-      const parsed = new URL(url)
-      if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Invalid image URL')
-    } catch {
-      setImageError('Enter a valid image URL starting with http:// or https://.')
-      return
-    }
+  const updateName = (value) => {
     setForm((current) => ({
       ...current,
-      primary_image: current.primary_image || url,
-      images: [...current.images, { url, file: null }],
+      name: value,
+      slug: slugTouched ? current.slug : slugify(value),
     }))
-    setImageError('')
-    setCustomImageUrl('')
-    toast.success('Image added to gallery')
-  }
-
-  const setCoverImage = (url) => {
-    setForm((current) => ({ ...current, primary_image: url }))
-    toast.info('Cover image updated')
-  }
-
-  const removeImage = (indexToRemove) => {
-    setForm((current) => {
-      const removed = current.images[indexToRemove]
-      const updated = current.images.filter((_, idx) => idx !== indexToRemove)
-      return {
-        ...current,
-        images: updated,
-        primary_image: current.primary_image === removed?.url ? (updated[0]?.url || '') : current.primary_image,
-      }
+    setFieldErrors((current) => {
+      const next = { ...current }
+      delete next.name
+      return next
     })
-    setImageError('')
+    setFormError('')
+    setDirty(true)
   }
 
-  const parseVariantOptions = (str) => {
-    const opts = {}
-    String(str || '').split(',').map((s) => s.trim()).filter(Boolean).forEach((s) => {
-      const idx = s.indexOf('=')
-      if (idx > 0) opts[s.slice(0, idx).trim()] = s.slice(idx + 1).trim()
-    })
-    return opts
+  const setVariant = (index, key, value) => {
+    update('variants', form.variants.map((variant, variantIndex) => (
+      variantIndex === index ? { ...variant, [key]: value } : variant
+    )))
   }
 
-  const handleSubmit = async (e) => {
-    e.preventDefault()
-    if (!isEdit && form.images.length === 0) {
-      setImageError('Add at least one product image before saving.')
-      return
+  const addAttribute = () => update('attributes', [
+    ...form.attributes,
+    { name: '', type: 'text', values: '' },
+  ])
+
+  const setAttribute = (index, key, value) => {
+    update('attributes', form.attributes.map((attribute, attributeIndex) => (
+      attributeIndex === index ? { ...attribute, [key]: value } : attribute
+    )))
+  }
+
+  const changeImages = (images) => {
+    const removed = form.images
+      .filter((image) => image.existingId && !images.some((candidate) => candidate.existingId === image.existingId))
+      .map((image) => image.existingId)
+
+    if (removed.length) {
+      setRemovedImageIds((current) => Array.from(new Set([...current, ...removed])))
     }
-    setImageError('')
+    update('images', images)
+  }
+
+  const validate = () => {
     setFormError('')
     setFieldErrors({})
-    setSaving(true)
+    setImageError('')
 
-    const fd = new FormData()
-    const put = (k, v) => {
-      if (v !== undefined && v !== null && v !== '') fd.append(k, v)
+    if (!form.name.trim()) {
+      setFieldErrors({ name: ['Enter a product name.'] })
+      setFormError('Enter a product name before saving.')
+      return false
     }
-    const putNullable = (k, v) => fd.append(k, v ?? '')
-    put('name', form.name)
-    putNullable('slug', form.slug)
-    putNullable('description', form.description)
-    putNullable('short_description', form.short_description)
-    putNullable('category_id', form.category_id)
-    putNullable('brand_id', form.brand_id)
-    if (isEdit && form.sku) put('sku', form.sku)
-    put('price', form.price)
-    putNullable('compare_at_price', form.compare_at_price)
-    put('quantity', form.quantity)
-    put('low_stock_threshold', form.low_stock_threshold)
-    put('weight_grams', form.weight_grams)
-    putNullable('dimensions', form.dimensions)
-    putNullable('barcode', form.barcode)
-    putNullable('cost_price', form.cost_price)
-    putNullable('hs_code', form.hs_code)
-    putNullable('manufacturer', form.manufacturer)
-    putNullable('tax_rate', form.tax_rate)
-    fd.append('is_featured', form.is_featured ? '1' : '0')
-    fd.append('is_negotiable', form.is_negotiable ? '1' : '0')
-    fd.append('variants_present', '1')
-    form.variants
-      .filter((v) => v.price !== '')
-      .forEach((v, i) => {
-        if (v.sku) put(`variants[${i}][sku]`, v.sku)
-        put(`variants[${i}][name]`, v.name)
-        put(`variants[${i}][price]`, v.price)
-        putNullable(`variants[${i}][compare_at_price]`, v.compare_at_price)
-        put(`variants[${i}][quantity]`, v.quantity)
-        const opts = parseVariantOptions(v.options)
-        Object.keys(opts).forEach((key) => fd.append(`variants[${i}][options][${key}]`, opts[key]))
-      })
-    let uploadIndex = 0
-    let primaryUploadIndex = null
-    let primaryImageUrl = null
-    form.images.forEach((img) => {
-      if (img.file) {
-        fd.append('images[]', img.file)
-        if (img.url === form.primary_image) primaryUploadIndex = uploadIndex
-        uploadIndex += 1
-      } else if (!existingImageUrls.includes(img.url) && /^https?:\/\//i.test(img.url)) {
-        fd.append('image_urls[]', img.url)
-      }
-    })
-    if (form.images.some((image) => image.url === form.primary_image && !image.file)) {
-      primaryImageUrl = form.primary_image
+    if (form.price === '' || Number(form.price) < 0) {
+      setFieldErrors({ price: ['Enter a valid selling price.'] })
+      setFormError('Enter a valid selling price before saving.')
+      return false
     }
-    if (primaryImageUrl) fd.append('primary_image_url', primaryImageUrl)
-    if (primaryUploadIndex !== null) fd.append('primary_image_upload_index', String(primaryUploadIndex))
+    if (!isEdit && !form.images.length) {
+      setImageError('Add at least one product image before saving.')
+      return false
+    }
+    if (form.is_variant && !form.variants.some((variant) => variant.price !== '')) {
+      setFormError('Add at least one priced variant or turn off the variant setting.')
+      return false
+    }
+    if (form.variants.length && form.variants.some((variant) => variant.price === '')) {
+      setFormError('Every variant needs a price. Remove any incomplete variant and try again.')
+      return false
+    }
 
     try {
-      if (isEdit) {
-        fd.append('_method', 'PUT')
-        await api.post(`/vendor/products/${id}`, fd)
-        toast.success('Product updated successfully')
-      } else {
-        await api.post('/vendor/products', fd)
-        toast.success('Product created successfully')
+      const meta = JSON.parse(form.meta_json || '{}')
+      if (!meta || Array.isArray(meta) || typeof meta !== 'object') {
+        throw new Error('Product metadata must be a JSON object.')
       }
-      navigate('/vendor/products')
-    } catch (err) {
-      const d = err.response?.data
-      if (d?.errors) {
-        setFieldErrors(d.errors)
-        setFormError(d.message || errorMessage(err))
-        if (d.errors.images) setImageError(d.errors.images[0])
+    } catch {
+      setFormError('Product metadata must be a valid JSON object.')
+      return false
+    }
+
+    return true
+  }
+
+  const buildPayload = (status) => {
+    const data = new FormData()
+    const append = (key, value) => {
+      if (value !== undefined && value !== null && value !== '') data.append(key, String(value))
+    }
+    const appendNullable = (key, value) => data.append(key, value ?? '')
+
+    append('name', form.name)
+    appendNullable('slug', form.slug)
+    appendNullable('description', form.description)
+    appendNullable('short_description', form.short_description)
+    appendNullable('category_id', form.category_id)
+    appendNullable('brand_id', form.brand_id)
+    if (status) append('status', status)
+    if (isEdit && form.sku) append('sku', form.sku)
+    append('price', form.price)
+    appendNullable('compare_at_price', form.compare_at_price)
+    append('quantity', form.quantity)
+    append('low_stock_threshold', form.low_stock_threshold)
+    append('weight_grams', form.weight_grams)
+    appendNullable('dimensions', form.dimensions)
+    appendNullable('barcode', form.barcode)
+    appendNullable('demo_video_url', form.demo_video_url)
+    appendNullable('cost_price', form.cost_price)
+    appendNullable('hs_code', form.hs_code)
+    appendNullable('manufacturer', form.manufacturer)
+    appendNullable('tax_rate', form.tax_rate)
+    append('is_variant', form.is_variant ? '1' : '0')
+    data.append('is_featured', form.is_featured ? '1' : '0')
+    data.append('is_negotiable', form.is_negotiable ? '1' : '0')
+    data.append('variants_present', '1')
+    data.append('meta', JSON.stringify(JSON.parse(form.meta_json || '{}')))
+
+    form.variants.forEach((variant, index) => {
+      append(`variants[${index}][sku]`, variant.sku)
+      append(`variants[${index}][name]`, variant.name)
+      append(`variants[${index}][price]`, variant.price)
+      appendNullable(`variants[${index}][compare_at_price]`, variant.compare_at_price)
+      append(`variants[${index}][quantity]`, variant.quantity)
+      Object.entries(parseVariantOptions(variant.options)).forEach(([key, value]) => {
+        append(`variants[${index}][options][${key}]`, value)
+      })
+      if (variant.image) data.append(`variants[${index}][image]`, variant.image)
+    })
+
+    form.attributes.filter((attribute) => attribute.name.trim()).forEach((attribute, index) => {
+      append(`attributes[${index}][name]`, attribute.name.trim())
+      append(`attributes[${index}][type]`, attribute.type)
+      attributeValues(attribute.values).forEach((value, valueIndex) => {
+        append(`attributes[${index}][values][${valueIndex}]`, value)
+      })
+    })
+
+    let uploadIndex = 0
+    form.images.forEach((image) => {
+      if (image.file) {
+        data.append('images[]', image.file)
+        if (image.isPrimary) data.append('primary_image_upload_index', String(uploadIndex))
+        uploadIndex += 1
+      } else if (image.existingId) {
+        return
+      } else if (image.url) {
+        data.append('image_urls[]', image.url)
+        if (image.isPrimary) data.append('primary_image_url', image.url)
+      }
+    })
+
+    return data
+  }
+
+  const syncImageChanges = async (savedProduct) => {
+    if (!isEdit) return
+
+    for (const imageId of removedImageIds) {
+      await api.delete(`/vendor/products/${id}/images/${imageId}`)
+    }
+
+    if (!form.images.length) {
+      setRemovedImageIds([])
+      setBaselineImageIds([])
+      return
+    }
+
+    const refreshed = await api.get(`/vendor/products/${id}`)
+    const finalImages = refreshed.data.data.images || []
+    const baseline = new Set(baselineImageIds)
+    const newSaved = finalImages.filter((image) => !baseline.has(image.id))
+    const savedFileImages = newSaved.filter((image) => !/^https?:\/\//i.test(image.url || ''))
+    const savedUrlImages = newSaved.filter((image) => /^https?:\/\//i.test(image.url || ''))
+    const idForLocalImage = new Map()
+
+    form.images.filter((image) => image.file).forEach((image, index) => {
+      if (savedFileImages[index]) idForLocalImage.set(image.id, savedFileImages[index].id)
+    })
+    form.images.filter((image) => !image.file && !image.existingId).forEach((image, index) => {
+      if (savedUrlImages[index]) idForLocalImage.set(image.id, savedUrlImages[index].id)
+    })
+
+    const orderedIds = form.images
+      .map((image) => image.existingId || idForLocalImage.get(image.id))
+      .filter((imageId) => finalImages.some((finalImage) => finalImage.id === imageId))
+
+    if (orderedIds.length !== finalImages.length) return
+
+    const desiredPrimary = form.images.find((image) => image.isPrimary) || form.images[0]
+    const primaryId = desiredPrimary?.existingId || idForLocalImage.get(desiredPrimary?.id)
+    await api.put(`/vendor/products/${id}/images`, {
+      images: orderedIds,
+      primary_image_id: primaryId || undefined,
+    })
+
+    setRemovedImageIds([])
+    setBaselineImageIds(finalImages.map((image) => image.id))
+  }
+
+  const submit = async (mode, event) => {
+    event?.preventDefault()
+    if (saving || loading) return
+    if (!validate()) return
+
+    setSaving(true)
+    setUploadProgress(0)
+    try {
+      const data = buildPayload(mode === 'draft' ? 'draft' : undefined)
+      const endpoint = isEdit ? `/vendor/products/${id}` : '/vendor/products'
+      if (isEdit) data.append('_method', 'PUT')
+      const response = await api.post(endpoint, data, {
+        onUploadProgress: (progressEvent) => {
+          if (!progressEvent.total) return
+          setUploadProgress(Math.min(100, Math.round((progressEvent.loaded * 100) / progressEvent.total)))
+        },
+      })
+      setDirty(false)
+
+      if (isEdit) {
+        await syncImageChanges(response.data.data)
+        setProductStatus(response.data.data.status || productStatus)
+      }
+
+      if (mode === 'another' && !isEdit) {
+        toast.success('Product created. Add another product below.')
+        setForm(emptyForm({
+          category_id: form.category_id,
+          brand_id: form.brand_id,
+          low_stock_threshold: form.low_stock_threshold,
+          tax_rate: form.tax_rate,
+          weight_grams: form.weight_grams,
+        }))
+        setSlugTouched(false)
+        setRemovedImageIds([])
+        setBaselineImageIds([])
+        setUploadProgress(0)
+        window.scrollTo({ top: 0, behavior: 'smooth' })
       } else {
-        const message = errorMessage(err)
+        toast.success(isEdit ? 'Product updated successfully' : 'Product created successfully')
+        navigate('/vendor/products')
+      }
+    } catch (error) {
+      const responseData = error.response?.data
+      if (responseData?.errors) {
+        setFieldErrors(responseData.errors)
+        setFormError(responseData.message || errorMessage(error))
+        if (responseData.errors.images) setImageError(responseData.errors.images[0])
+      } else {
+        const message = errorMessage(error)
         setFormError(message)
         toast.error(message)
       }
     } finally {
       setSaving(false)
+      setUploadProgress(0)
     }
   }
 
@@ -286,20 +430,10 @@ export default function VendorProductForm() {
       await api.post(`/vendor/products/${id}/submit`)
       toast.success('Product submitted for administrative review')
       navigate('/vendor/products')
-    } catch (err) {
-      toast.error(errorMessage(err))
+    } catch (error) {
+      toast.error(errorMessage(error))
     }
   }
-
-  const setVariant = (idx, key, value) => {
-    setForm((current) => {
-      const variants = [...current.variants]
-      variants[idx] = { ...variants[idx], [key]: value }
-      return { ...current, variants }
-    })
-  }
-  const addVariant = () => setForm((current) => ({ ...current, variants: [...current.variants, { sku: '', name: '', price: '', compare_at_price: '', quantity: '0', options: '' }] }))
-  const removeVariant = (idx) => setForm((current) => ({ ...current, variants: current.variants.filter((_, i) => i !== idx) }))
 
   if (isEdit && loadFailed) {
     return <div className="alert alert-error">Product not found.</div>
@@ -310,248 +444,232 @@ export default function VendorProductForm() {
   }
 
   return (
-    <div>
+    <div className="product-create-page">
       <div className="flex items-center gap-2 mb-3">
         <Link to="/vendor/products" className="icon-btn"><ArrowLeft size={16} /></Link>
         <h1 style={{ fontSize: 22, margin: 0 }}>{isEdit ? 'Edit Product' : 'Create New Product'}</h1>
+        {productStatus && <span className={`badge badge-${productStatus}`}>{productStatus.replaceAll('_', ' ')}</span>}
       </div>
 
-      <form onSubmit={handleSubmit}>
+      <form onSubmit={(event) => submit('product', event)} style={{ display: 'grid', gap: 14 }}>
         {formError && (
-          <div className="alert alert-error mb-3" role="alert">
+          <div className="alert alert-error" role="alert">
             {formError}
             {fieldErrors.store && (
               <div className="mt-2">
-                <Link to="/vendor/stores" className="btn btn-primary btn-sm">
-                  Review Store Profile
-                </Link>
+                <Link to="/vendor/stores" className="btn btn-primary btn-sm">Review Store Profile</Link>
               </div>
             )}
           </div>
         )}
-        {/* Basic Information */}
-        <div className="card mb-3">
-          <h3 style={{ fontSize: 16, marginBottom: 14 }}>Basic Information</h3>
+        {dirty && <div className="alert alert-info text-xs">You have unsaved changes.</div>}
+
+        <FormSection
+          title="Basic product information"
+          description="Name, category, and URL are all you need to start."
+          icon={Tag}
+        >
           <div className="form-row">
             <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-              <label className="label">Product Name <span className="req">*</span></label>
-              <input className="input" required value={form.name} onChange={set('name')} placeholder="e.g. Handwoven Himalayan Cashmere Shawl" />
+              <label className="label">Product name <span className="req">*</span></label>
+              <input
+                className={`input${fieldErrors.name ? ' has-error' : ''}`}
+                required
+                value={form.name}
+                onChange={(event) => updateName(event.target.value)}
+                placeholder="e.g. Handwoven Himalayan Cashmere Shawl"
+              />
               {fieldErrors.name && <div className="field-error">{fieldErrors.name[0]}</div>}
             </div>
-            <div className="form-group">
-              <label className="label">SKU (Stock Keeping Unit)</label>
-              <div className="input" style={{ color: 'var(--muted)', background: 'var(--bg)' }}>
-                {isEdit ? form.sku : 'Generated automatically when saved'}
-              </div>
-              <small className="muted text-xs">Product SKUs are generated by Gosika and cannot be edited.</small>
-            </div>
-            <Input label="Slug / URL Key (optional)" value={form.slug} onChange={set('slug')} hint="auto-generated if left blank" error={fieldErrors.slug?.[0]} />
-            <Input label="Regular Price (NPR)" type="number" step="0.01" min="0" required value={form.price} onChange={set('price')} placeholder="1500" error={fieldErrors.price?.[0]} />
-            <Input label="Compare-At / Strike-Through Price" type="number" step="0.01" value={form.compare_at_price} onChange={set('compare_at_price')} placeholder="2000" error={fieldErrors.compare_at_price?.[0]} />
-            <Input label="Stock Quantity Available" type="number" min="0" value={form.quantity} onChange={set('quantity')} error={fieldErrors.quantity?.[0]} disabled={form.variants.length > 0} hint={form.variants.length > 0 ? 'Set stock quantities on each variant below.' : ''} />
-            <Input label="Low Stock Warning Threshold" type="number" min="0" value={form.low_stock_threshold} onChange={set('low_stock_threshold')} error={fieldErrors.low_stock_threshold?.[0]} />
-            <Select label="Product Category" value={form.category_id} onChange={set('category_id')} error={fieldErrors.category_id?.[0]}>
+            <Input
+              label="URL slug"
+              value={form.slug}
+              onChange={(event) => {
+                setSlugTouched(true)
+                update('slug', event.target.value)
+              }}
+              hint="Generated from the product name; you can edit it."
+              error={fieldErrors.slug?.[0]}
+            />
+            <Input label="SKU" value={isEdit && form.sku ? form.sku : 'Generated automatically when saved'} disabled hint="Gosika assigns a unique SKU." />
+            <Select label="Product category" value={form.category_id} onChange={(event) => update('category_id', event.target.value)} error={fieldErrors.category_id?.[0]}>
               <option value="">Select a category</option>
-              {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
             </Select>
-            <Select label="Brand" value={form.brand_id} onChange={set('brand_id')} error={fieldErrors.brand_id?.[0]}>
+            <Select label="Brand" value={form.brand_id} onChange={(event) => update('brand_id', event.target.value)} error={fieldErrors.brand_id?.[0]}>
               <option value="">Select / Unbranded</option>
-              {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+              {brands.map((brand) => <option key={brand.id} value={brand.id}>{brand.name}</option>)}
             </Select>
-            <Input label="Shipping Weight (grams)" type="number" min="0" value={form.weight_grams} onChange={set('weight_grams')} placeholder="500" error={fieldErrors.weight_grams?.[0]} />
-            <Input label="Dimensions (LxWxH cm)" value={form.dimensions} onChange={set('dimensions')} placeholder="e.g. 25x15x8 cm" error={fieldErrors.dimensions?.[0]} />
-            <Input label="Barcode" value={form.barcode} onChange={set('barcode')} error={fieldErrors.barcode?.[0]} />
-            <Input label="Cost Price (NPR)" type="number" min="0" step="0.01" value={form.cost_price} onChange={set('cost_price')} error={fieldErrors.cost_price?.[0]} />
-            <Input label="HS Code" value={form.hs_code} onChange={set('hs_code')} error={fieldErrors.hs_code?.[0]} />
-            <Input label="Manufacturer" value={form.manufacturer} onChange={set('manufacturer')} error={fieldErrors.manufacturer?.[0]} />
-            <Input label="Tax Rate (%)" type="number" min="0" max="100" value={form.tax_rate} onChange={set('tax_rate')} error={fieldErrors.tax_rate?.[0]} />
           </div>
+          <label className="checkbox-row" style={{ marginTop: 4 }}>
+            <input type="checkbox" checked={form.is_variant} onChange={(event) => update('is_variant', event.target.checked)} />
+            <span>This product has variants (size, color, material, custom options)</span>
+          </label>
+        </FormSection>
 
-          <Textarea label="Short Summary (shown at top of product detail)" rows={2} value={form.short_description} onChange={set('short_description')} placeholder="Brief 1-2 sentence highlight of the product…" error={fieldErrors.short_description?.[0]} />
-          <Textarea label="Full Detailed Description" rows={5} value={form.description} onChange={set('description')} placeholder="Detail the materials, care instructions, origin, and features…" error={fieldErrors.description?.[0]} />
+        <FormSection
+          title="Product images"
+          description="Drag to reorder, set a cover, upload files, or paste image URLs."
+          icon={ImageIcon}
+          badge={`${form.images.length}/10`}
+        >
+          <ProductImageGallery
+            images={form.images}
+            onChange={changeImages}
+            error={imageError || fieldErrors['images.0']?.[0]}
+            disabled={saving}
+            uploadProgress={uploadProgress}
+          />
+          <Input
+            label="Demo video URL"
+            value={form.demo_video_url}
+            onChange={(event) => update('demo_video_url', event.target.value)}
+            error={fieldErrors.demo_video_url?.[0]}
+            hint="Optional https:// video link shown with the listing."
+            placeholder="https://…"
+          />
+        </FormSection>
 
-          <div className="flex items-center gap-4 wrap mt-2">
+        <FormSection
+          title="Pricing & inventory"
+          description="The fields you use on every product."
+          icon={Truck}
+        >
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <Input label="Selling price (NPR)" type="number" min="0" step="0.01" required value={form.price} onChange={(event) => update('price', event.target.value)} error={fieldErrors.price?.[0]} placeholder="1500" />
+            <Input label="Compare-at price" type="number" min="0" step="0.01" value={form.compare_at_price} onChange={(event) => update('compare_at_price', event.target.value)} error={fieldErrors.compare_at_price?.[0]} placeholder="2000" />
+            <Input label="Stock quantity" type="number" min="0" value={form.quantity} onChange={(event) => update('quantity', event.target.value)} error={fieldErrors.quantity?.[0]} disabled={form.is_variant} hint={form.is_variant ? 'Stock comes from variants.' : ''} />
+            <Input label="Low stock threshold" type="number" min="0" value={form.low_stock_threshold} onChange={(event) => update('low_stock_threshold', event.target.value)} error={fieldErrors.low_stock_threshold?.[0]} />
+          </div>
+          <details className="product-advanced">
+            <summary>Advanced pricing & shipping</summary>
+            <div className="grid md:grid-cols-2 gap-4 mt-3">
+              <Input label="Cost price (NPR)" type="number" min="0" step="0.01" value={form.cost_price} onChange={(event) => update('cost_price', event.target.value)} error={fieldErrors.cost_price?.[0]} hint="Private — not shown to buyers." />
+              <Input label="Tax rate (%)" type="number" min="0" max="100" value={form.tax_rate} onChange={(event) => update('tax_rate', event.target.value)} error={fieldErrors.tax_rate?.[0]} />
+              <Input label="Shipping weight (grams)" type="number" min="0" value={form.weight_grams} onChange={(event) => update('weight_grams', event.target.value)} error={fieldErrors.weight_grams?.[0]} placeholder="500" />
+              <Input label="Dimensions (L × W × H)" value={form.dimensions} onChange={(event) => update('dimensions', event.target.value)} error={fieldErrors.dimensions?.[0]} placeholder="25 x 15 x 8 cm" />
+              <Input label="Barcode" value={form.barcode} onChange={(event) => update('barcode', event.target.value)} error={fieldErrors.barcode?.[0]} />
+              <Input label="HS code" value={form.hs_code} onChange={(event) => update('hs_code', event.target.value)} error={fieldErrors.hs_code?.[0]} />
+              <Input label="Manufacturer" value={form.manufacturer} onChange={(event) => update('manufacturer', event.target.value)} error={fieldErrors.manufacturer?.[0]} />
+            </div>
+          </details>
+        </FormSection>
+
+        {form.is_variant && (
+          <FormSection
+            title="Product variants"
+            description="Generate size/color/material combinations or add them manually."
+            icon={Layers}
+            badge={`${form.variants.length} variants`}
+          >
+            <ProductVariantBuilder
+              variants={form.variants}
+              onChange={(variants) => update('variants', variants)}
+              errors={fieldErrors}
+              disabled={saving}
+              allowImage
+              allowSku
+              defaultPrice={form.price}
+            />
+          </FormSection>
+        )}
+
+        <FormSection
+          title="Product description"
+          description="Write a quick summary and a formatted full description."
+          icon={FileText}
+        >
+          <Textarea
+            label="Short description"
+            rows={2}
+            value={form.short_description}
+            onChange={(event) => update('short_description', event.target.value)}
+            error={fieldErrors.short_description?.[0]}
+            placeholder="Brief 1–2 sentence highlight of the product…"
+          />
+          <RichTextEditor
+            label="Full description"
+            rows={6}
+            value={form.description}
+            onChange={(value) => update('description', value)}
+            error={fieldErrors.description?.[0]}
+            disabled={saving}
+            hint="Use bold, lists, and links to explain materials, care, and features."
+          />
+        </FormSection>
+
+        <FormSection
+          title="Additional product details"
+          description="Optional attributes, flags, and metadata."
+          icon={Settings2}
+          defaultOpen={false}
+        >
+          <div className="flex flex-wrap gap-5 mb-4">
             <label className="checkbox-row">
-              <input type="checkbox" checked={form.is_negotiable} onChange={(e) => updateField('is_negotiable', e.target.checked)} />
-              <span>Allow price negotiation / inquiries</span>
-            </label>
-            <label className="checkbox-row">
-              <input type="checkbox" checked={form.is_featured} onChange={(e) => updateField('is_featured', e.target.checked)} />
+              <input type="checkbox" checked={form.is_featured} onChange={(event) => update('is_featured', event.target.checked)} />
               <span>Feature this product in store showcase</span>
             </label>
-          </div>
-        </div>
-
-        {/* Product Media & Cover Images */}
-        <div className="card mb-3">
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <h3 style={{ fontSize: 16, margin: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
-                <ImageIcon size={18} color="var(--primary)" /> Product Images & Cover Photo
-              </h3>
-              <p className="muted text-xs m-0 mt-1">Set a primary cover image and multiple gallery photos for buyers</p>
-            </div>
+            <label className="checkbox-row">
+              <input type="checkbox" checked={form.is_negotiable} onChange={(event) => update('is_negotiable', event.target.checked)} />
+              <span>Allow price negotiation / inquiries</span>
+            </label>
           </div>
 
-          {/* Primary Cover Image Preview */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))', gap: 20, alignItems: 'start', marginBottom: 20 }}>
+          <div className="flex items-center justify-between gap-2 mb-2">
             <div>
-            <span className="label">Primary Cover Image {!isEdit && <span className="req">*</span>}</span>
-              <div
-                style={{
-                  width: '100%',
-                  height: 200,
-                  borderRadius: 'var(--radius)',
-                  border: '2px dashed var(--border)',
-                  background: 'var(--bg)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  overflow: 'hidden',
-                  position: 'relative',
-                }}
-              >
-                {form.primary_image ? (
-                  <img
-                    src={apiImage(form.primary_image)}
-                    alt="Cover preview"
-                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                  />
-                ) : (
-                  <div className="text-center p-3">
-                    <ImageIcon size={32} className="muted mb-1" />
-                    <div className="muted text-xs">No cover selected</div>
-                  </div>
-                )}
-              </div>
+              <strong className="text-sm">Product attributes</strong>
+              <p className="muted text-xs m-0">Material, color, size, and other customer-facing filters.</p>
             </div>
-
-            <div>
-              <span className="label">Add a real product photo {!isEdit && <span className="req">*</span>}</span>
-              <div className="flex gap-2 mb-2">
-                <input
-                  type="url"
-                  className="input flex-1"
-                  placeholder="Paste image URL (https://…)"
-                  value={customImageUrl}
-                  onChange={(e) => setCustomImageUrl(e.target.value)}
-                  aria-label="Product image URL"
-                />
-                <button type="button" className="btn btn-outline btn-sm" onClick={addCustomImage}>
-                  Add URL
-                </button>
-              </div>
-
-              <div className="flex items-center gap-2 mb-3">
-                <label className="btn btn-soft btn-sm" style={{ cursor: 'pointer' }}>
-                  <Upload size={14} /> Upload Local Image
-                  <input type="file" accept="image/*" onChange={handleFileUpload} style={{ display: 'none' }} />
-                </label>
-                <span className="muted text-xs">Supports JPG, PNG, WEBP up to 5MB</span>
-              </div>
-
-              <p className="muted text-xs m-0">Use your own product photo. Photos are required; generic category pictures are not added automatically.</p>
-              {imageError && <div className="field-error" role="alert">{imageError}</div>}
-            </div>
+            <button type="button" className="btn btn-outline btn-sm" onClick={addAttribute} disabled={saving}>
+              <Plus size={14} /> Add attribute
+            </button>
           </div>
-
-          {/* Gallery Images Strip */}
-          {form.images.length > 0 && (
-            <div>
-              <span className="label">Gallery Images ({form.images.length})</span>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: 12 }}>
-                {form.images.map((img, idx) => {
-                  const imgUrl = img.url
-                  const isPrimary = form.primary_image === imgUrl
-                  return (
-                    <div
-                      key={idx}
-                      style={{
-                        position: 'relative',
-                        borderRadius: 'var(--radius)',
-                        overflow: 'hidden',
-                        height: 100,
-                        border: isPrimary ? '3px solid var(--primary)' : '1px solid var(--border)',
-                      }}
-                    >
-                      <img src={apiImage(imgUrl)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                      {isPrimary && (
-                        <span style={{ position: 'absolute', top: 4, left: 4, background: 'var(--primary)', color: '#fff', fontSize: 9, padding: '2px 4px', borderRadius: 4, fontWeight: 700 }}>
-                          COVER
-                        </span>
-                      )}
-                      <div style={{ position: 'absolute', bottom: 4, right: 4, display: 'flex', gap: 2 }}>
-                          <button
-                            type="button"
-                            className="icon-btn icon-btn-sm"
-                            style={{ background: 'rgba(0,0,0,0.7)', color: '#fff', width: 22, height: 22 }}
-                            title="Set as cover"
-                            onClick={() => setCoverImage(imgUrl)}
-                          >
-                            <CheckCircle2 size={12} />
-                          </button>
-                        <button
-                          type="button"
-                          className="icon-btn icon-btn-sm"
-                          style={{ background: 'rgba(220,38,38,0.85)', color: '#fff', width: 22, height: 22 }}
-                          title="Remove image"
-                          onClick={() => removeImage(idx)}
-                        >
-                          <Trash2 size={11} />
-                        </button>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Variants Section */}
-        <div className="card mb-3">
-          <div className="flex items-center justify-between mb-2">
-            <h3 style={{ fontSize: 16, margin: 0 }}>Product Variants <span className="muted text-xs font-normal">(Sizes, Colors, Options)</span></h3>
-            <Button type="button" variant="outline" size="sm" icon={Plus} onClick={addVariant}>Add Variant</Button>
-          </div>
-
-          {form.variants.map((v, idx) => (
-            <div key={idx} className="card" style={{ padding: 14, marginBottom: 10, background: 'var(--bg)' }}>
-              <div className="flex items-center justify-between mb-1">
-                <span className="font-semibold text-sm">Variant #{idx + 1}</span>
-                <button type="button" className="btn btn-ghost btn-xs text-danger" onClick={() => removeVariant(idx)}><Trash2 size={13} /> Remove</button>
-              </div>
-              <div className="form-row">
-                <div className="form-group">
-                  <label className="label">Variant SKU</label>
-                  <div className="input" style={{ color: 'var(--muted)', background: 'var(--bg)' }}>
-                    {v.sku || 'Generated automatically when saved'}
-                  </div>
-                  <small className="muted text-xs">Variant SKUs are generated by Gosika.</small>
-                </div>
-                <Input label="Variant Title" value={v.name} onChange={(e) => setVariant(idx, 'name', e.target.value)} placeholder="e.g. Red / Medium" />
-                <Input label="Price (NPR)" type="number" step="0.01" value={v.price} onChange={(e) => setVariant(idx, 'price', e.target.value)} />
-                <Input label="Compare-at Price (NPR)" type="number" min="0" step="0.01" value={v.compare_at_price} onChange={(e) => setVariant(idx, 'compare_at_price', e.target.value)} />
-                <Input label="Stock Quantity" type="number" min="0" value={v.quantity} onChange={(e) => setVariant(idx, 'quantity', e.target.value)} />
-              </div>
-              <Input label="Options (key=value, separated by comma)" value={v.options} onChange={(e) => setVariant(idx, 'options', e.target.value)} placeholder="color=Red, size=M" />
+          {form.attributes.map((attribute, index) => (
+            <div key={index} className="variant-definition-row mb-2">
+              <input className="input" value={attribute.name} onChange={(event) => setAttribute(index, 'name', event.target.value)} placeholder="Attribute name" aria-label={`Attribute ${index + 1} name`} disabled={saving} />
+              <select className="select" value={attribute.type} onChange={(event) => setAttribute(index, 'type', event.target.value)} aria-label={`Attribute ${index + 1} type`} disabled={saving}>
+                <option value="text">Text</option>
+                <option value="select">Select</option>
+                <option value="color">Color</option>
+                <option value="size">Size</option>
+              </select>
+              <input className="input" value={attribute.values} onChange={(event) => setAttribute(index, 'values', event.target.value)} placeholder="Cotton, Wool" aria-label={`Attribute ${index + 1} values`} disabled={saving} />
+              <button type="button" className="icon-btn icon-btn-sm text-danger" onClick={() => update('attributes', form.attributes.filter((_, attributeIndex) => attributeIndex !== index))} disabled={saving} title="Remove attribute">
+                <Trash2 size={13} />
+              </button>
             </div>
           ))}
-        </div>
 
-        {/* Submit Actions */}
-        <div className="flex items-center gap-3 mt-4" style={{ position: 'sticky', bottom: 0, zIndex: 5, padding: '12px 0', background: 'var(--surface, #fff)', borderTop: '1px solid var(--border)' }}>
-          <Button type="submit" size="lg" disabled={saving}>
-            {saving ? <Spinner size={16} color="#fff" /> : isEdit ? 'Update Product' : 'Save Product'}
-          </Button>
+          <details className="product-advanced">
+            <summary>Advanced product metadata (JSON)</summary>
+            <div className="mt-3">
+              <Textarea label="Metadata" rows={5} value={form.meta_json} onChange={(event) => update('meta_json', event.target.value)} hint="Optional JSON object for custom integrations." disabled={saving} />
+            </div>
+          </details>
+        </FormSection>
+
+        <div className="product-action-bar">
+          {dirty && <span className="muted text-xs" style={{ marginRight: 'auto' }}>Unsaved changes</span>}
+          <button type="button" className="btn btn-outline" onClick={() => guardNavigation(navigate, '/vendor/products')} disabled={saving}>
+            Cancel
+          </button>
+          <button type="button" className="btn btn-soft" onClick={() => submit('draft')} disabled={saving}>
+            Save as Draft
+          </button>
+          {!isEdit && (
+            <button type="button" className="btn btn-outline" onClick={() => submit('another')} disabled={saving}>
+              <Plus size={15} /> Save & Add Another
+            </button>
+          )}
           {isEdit && ['draft', 'hidden'].includes(productStatus) && (
-            <Button type="button" variant="soft" size="lg" onClick={submitForReview}>
+            <Button type="button" variant="soft" onClick={submitForReview} disabled={saving}>
               Submit for Admin Review
             </Button>
           )}
-          <Link to="/vendor/products" className="btn btn-outline btn-lg">
-            Cancel
-          </Link>
+          <Button type="submit" disabled={saving}>
+            {saving ? <Spinner size={16} color="#fff" /> : <Save size={16} />}
+            {saving ? 'Saving…' : isEdit ? 'Update Product' : 'Save Product'}
+          </Button>
         </div>
       </form>
     </div>

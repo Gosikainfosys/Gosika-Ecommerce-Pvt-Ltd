@@ -23,6 +23,8 @@ Route::prefix('v1/vendor')->middleware(['auth:sanctum', 'ensure:vendor'])->group
     Route::post('products', [VendorProductController::class, 'store']);
     Route::get('products/{product}', [VendorProductController::class, 'show']);
     Route::put('products/{product}', [VendorProductController::class, 'update']);
+    Route::put('products/{product}/images', [VendorProductController::class, 'reorderImages']);
+    Route::delete('products/{product}/images/{image}', [VendorProductController::class, 'deleteImage']);
     Route::post('products/{product}/submit', [VendorProductController::class, 'submit']);
     Route::delete('products/{product}', [VendorProductController::class, 'destroy']);
 
