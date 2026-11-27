@@ -892,14 +892,11 @@ button {
   left: 0;
   animation: slideInLeft 0.22s ease;
 }
-/* Keep partner profiles as a side drawer, never a full-screen panel. */
+/* Partner profiles open full screen instead of a side drawer. */
 .cod-profile-drawer {
-  width: min(560px, calc(100vw - 80px));
-}
-@media (max-width: 640px) {
-  .cod-profile-drawer {
-    width: min(420px, calc(100vw - 56px));
-  }
+  width: 100vw;
+  max-width: 100vw;
+  border-radius: 0;
 }
 .drawer-header {
   display: flex;
