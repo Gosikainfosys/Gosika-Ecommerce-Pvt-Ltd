@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { Package, ArrowLeft, Check, XCircle, Calendar, Eye, Edit, Trash2, Search, Heart, Star, Image, Mail, MailOpen, Clock } from 'lucide-react'
 import api from '../../api/client'
 import { useToast } from '../../context/ToastContext'
-import { money, formatDate, errorMessage } from '../../utils/format'
+import { money, formatDate, errorMessage, apiMedia } from '../../utils/format'
 import ProductCard from '../../components/commerce/ProductCard'
 import EmptyState from '../../components/ui/EmptyState'
 import ErrorState from '../../components/ui/ErrorState'
@@ -91,7 +91,7 @@ export default function ProductDetail() {
                 <video
                   controls
                   preload="metadata"
-                  src={product.demo_video_url}
+                  src={apiMedia(product.demo_video_url)}
                   style={{ width: '100%', maxHeight: 400, borderRadius: 12, background: '#000' }}
                 />
               </div>

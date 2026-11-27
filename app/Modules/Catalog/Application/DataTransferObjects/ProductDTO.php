@@ -2,6 +2,8 @@
 
 namespace App\Modules\Catalog\Application\DataTransferObjects;
 
+use Illuminate\Http\UploadedFile;
+
 final class ProductDTO
 {
     public function __construct(
@@ -14,6 +16,8 @@ final class ProductDTO
         public readonly ?string $sku,
         public readonly ?string $barcode,
         public readonly ?string $demo_video_url,
+        public readonly ?UploadedFile $demo_video,
+        public readonly bool $remove_demo_video,
         public readonly ?string $status,
         public readonly ?int $quantity,
         public readonly ?int $low_stock_threshold,
@@ -50,6 +54,8 @@ final class ProductDTO
             sku: isset($data['sku']) && trim((string) $data['sku']) !== '' ? trim((string) $data['sku']) : null,
             barcode: $data['barcode'] ?? null,
             demo_video_url: $data['demo_video_url'] ?? null,
+            demo_video: $data['demo_video'] ?? null,
+            remove_demo_video: (bool) ($data['remove_demo_video'] ?? false),
             status: $data['status'] ?? null,
             quantity: isset($data['quantity']) ? (int) $data['quantity'] : null,
             low_stock_threshold: isset($data['low_stock_threshold']) ? (int) $data['low_stock_threshold'] : null,

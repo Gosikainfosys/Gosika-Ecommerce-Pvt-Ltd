@@ -17,6 +17,7 @@ import Input from '../../components/ui/Input'
 import Select from '../../components/ui/Select'
 import Textarea from '../../components/ui/Textarea'
 import FormSection from '../../components/ui/FormSection'
+import DemoVideoUpload from '../../components/ui/DemoVideoUpload'
 import ProductImageGallery from '../../components/ui/ProductImageGallery'
 import ProductVariantBuilder from '../../components/ui/ProductVariantBuilder'
 import RichTextEditor from '../../components/ui/RichTextEditor'
@@ -32,6 +33,8 @@ const makeForm = (preserve = {}) => ({
   slug: '',
   sku: '',
   demo_video_url: '',
+  demo_video: null,
+  demo_video_removed: false,
   category_id: preserve.category_id || '',
   brand_id: preserve.brand_id || '',
   status: preserve.status || 'published',
@@ -194,7 +197,7 @@ export default function AdminProductForm() {
     }
 
     ;[
-      'vendor_id', 'store_id', 'name', 'slug', 'demo_video_url', 'category_id', 'brand_id',
+      'vendor_id', 'store_id', 'name', 'slug', 'category_id', 'brand_id',
       'price', 'compare_at_price', 'cost_price', 'quantity', 'low_stock_threshold',
       'tax_rate', 'weight_grams', 'dimensions', 'hs_code', 'manufacturer',
       'short_description', 'description',
@@ -204,6 +207,9 @@ export default function AdminProductForm() {
     append('is_featured', form.is_featured ? '1' : '0')
     append('is_negotiable', form.is_negotiable ? '1' : '0')
     append('meta', JSON.stringify(JSON.parse(form.meta_json || '{}')))
+
+    if (form.demo_video) data.append('demo_video', form.demo_video)
+    else if (form.demo_video_removed) data.append('remove_demo_video', '1')
 
     const uploadedImages = form.images.filter((image) => image.file)
     const uploadIndexes = new Map()
@@ -403,13 +409,21 @@ export default function AdminProductForm() {
             disabled={saving}
             uploadProgress={uploadProgress}
           />
-          <Input
-            label="Demo video URL"
+          <DemoVideoUpload
             value={form.demo_video_url}
-            onChange={(event) => update('demo_video_url', event.target.value)}
-            error={fieldErrors.demo_video_url?.[0]}
-            hint="Optional https:// video link shown with the listing."
-            placeholder="https://…"
+            file={form.demo_video}
+            onChange={(file) => update('demo_video', file)}
+            onRemove={() => {
+              setForm((current) => ({
+                ...current,
+                demo_video: null,
+                demo_video_url: '',
+                demo_video_removed: true,
+              }))
+              setDirty(true)
+            }}
+            error={fieldErrors.demo_video?.[0]}
+            disabled={saving}
           />
         </FormSection>
 

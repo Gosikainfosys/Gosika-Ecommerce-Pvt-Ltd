@@ -17,6 +17,7 @@ import Input from '../../components/ui/Input'
 import Select from '../../components/ui/Select'
 import Textarea from '../../components/ui/Textarea'
 import FormSection from '../../components/ui/FormSection'
+import DemoVideoUpload from '../../components/ui/DemoVideoUpload'
 import ProductImageGallery from '../../components/ui/ProductImageGallery'
 import ProductVariantBuilder from '../../components/ui/ProductVariantBuilder'
 import RichTextEditor from '../../components/ui/RichTextEditor'
@@ -49,6 +50,8 @@ const emptyForm = (preserve = {}) => ({
   dimensions: '',
   barcode: '',
   demo_video_url: '',
+  demo_video: null,
+  demo_video_removed: false,
   cost_price: '',
   hs_code: '',
   manufacturer: '',
@@ -123,6 +126,8 @@ export default function VendorProductForm() {
           dimensions: product.dimensions || '',
           barcode: product.barcode || '',
           demo_video_url: product.demo_video_url || '',
+          demo_video: null,
+          demo_video_removed: false,
           cost_price: String(product.cost_price ?? ''),
           hs_code: product.hs_code || '',
           manufacturer: product.manufacturer || '',
@@ -273,7 +278,6 @@ export default function VendorProductForm() {
     append('weight_grams', form.weight_grams)
     appendNullable('dimensions', form.dimensions)
     appendNullable('barcode', form.barcode)
-    appendNullable('demo_video_url', form.demo_video_url)
     appendNullable('cost_price', form.cost_price)
     appendNullable('hs_code', form.hs_code)
     appendNullable('manufacturer', form.manufacturer)
@@ -283,6 +287,9 @@ export default function VendorProductForm() {
     data.append('is_negotiable', form.is_negotiable ? '1' : '0')
     data.append('variants_present', '1')
     data.append('meta', JSON.stringify(JSON.parse(form.meta_json || '{}')))
+
+    if (form.demo_video) data.append('demo_video', form.demo_video)
+    else if (form.demo_video_removed) data.append('remove_demo_video', '1')
 
     form.variants.forEach((variant, index) => {
       append(`variants[${index}][sku]`, variant.sku)
@@ -520,13 +527,21 @@ export default function VendorProductForm() {
             disabled={saving}
             uploadProgress={uploadProgress}
           />
-          <Input
-            label="Demo video URL"
+          <DemoVideoUpload
             value={form.demo_video_url}
-            onChange={(event) => update('demo_video_url', event.target.value)}
-            error={fieldErrors.demo_video_url?.[0]}
-            hint="Optional https:// video link shown with the listing."
-            placeholder="https://…"
+            file={form.demo_video}
+            onChange={(file) => update('demo_video', file)}
+            onRemove={() => {
+              setForm((current) => ({
+                ...current,
+                demo_video: null,
+                demo_video_url: '',
+                demo_video_removed: true,
+              }))
+              setDirty(true)
+            }}
+            error={fieldErrors.demo_video?.[0]}
+            disabled={saving}
           />
         </FormSection>
 

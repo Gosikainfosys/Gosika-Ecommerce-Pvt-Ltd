@@ -627,6 +627,57 @@ class VendorProductValidationTest extends TestCase
         ]);
     }
 
+    public function test_vendor_can_upload_replace_and_remove_a_demo_video_file(): void
+    {
+        Storage::fake('public');
+        $vendor = $this->approvedVendorWithStore();
+
+        $productId = $this->actingAs($vendor)
+            ->post('/api/v1/vendor/products', [
+                'name' => 'Video upload product',
+                'sku' => 'TEST-VIDEO-UPLOAD-001',
+                'price' => '150',
+                'image_urls' => ['https://example.test/video-product.jpg'],
+                'demo_video' => UploadedFile::fake()->create('demo.mp4', 128, 'video/mp4'),
+            ])
+            ->assertCreated()
+            ->json('data.id');
+
+        $product = Product::query()->where('uuid', $productId)->firstOrFail();
+        $firstPath = $product->demo_video_url;
+        $this->assertNotNull($firstPath);
+        $this->assertStringEndsWith('.mp4', $firstPath);
+        Storage::disk('public')->assertExists($firstPath);
+
+        $this->actingAs($vendor)
+            ->post('/api/v1/vendor/products/'.$productId, [
+                '_method' => 'PUT',
+                'name' => 'Video upload product',
+                'price' => '150',
+                'demo_video' => UploadedFile::fake()->create('second.webm', 128, 'video/webm'),
+            ])
+            ->assertOk();
+
+        $product->refresh();
+        $secondPath = $product->demo_video_url;
+        $this->assertStringEndsWith('.webm', $secondPath);
+        Storage::disk('public')->assertExists($secondPath);
+        Storage::disk('public')->assertMissing($firstPath);
+
+        $this->actingAs($vendor)
+            ->post('/api/v1/vendor/products/'.$productId, [
+                '_method' => 'PUT',
+                'name' => 'Video upload product',
+                'price' => '150',
+                'remove_demo_video' => '1',
+            ])
+            ->assertOk();
+
+        $product->refresh();
+        $this->assertNull($product->demo_video_url);
+        Storage::disk('public')->assertMissing($secondPath);
+    }
+
     public function test_vendor_can_reorder_remove_and_choose_cover_images(): void
     {
         $vendor = $this->approvedVendorWithStore();

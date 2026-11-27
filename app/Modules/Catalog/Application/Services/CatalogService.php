@@ -23,6 +23,7 @@ use App\Modules\Vendor\Infrastructure\Models\Store;
 use App\Modules\Vendor\Infrastructure\Models\Vendor;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 class CatalogService
@@ -77,6 +78,7 @@ class CatalogService
 
             $this->syncVariants($product, $dto->variants);
             $this->syncAttributes($product, $dto->attributes ?? []);
+            $this->syncDemoVideo($product, $dto);
             $this->storeImages(
                 $product,
                 $dto->images,
@@ -113,7 +115,6 @@ class CatalogService
                 'short_description' => $dto->short_description,
                 'sku' => $dto->sku ?? $product->sku,
                 'barcode' => $dto->barcode ?? $product->barcode,
-                'demo_video_url' => $dto->demo_video_url ?? $product->demo_video_url,
                 'status' => $dto->status ?: $product->status,
                 'quantity' => $dto->quantity ?? $product->quantity,
                 'low_stock_threshold' => $dto->low_stock_threshold ?? $product->low_stock_threshold,
@@ -130,6 +131,8 @@ class CatalogService
                 'is_negotiable' => $dto->is_negotiable,
                 'meta' => $dto->meta ?: $product->meta,
             ]);
+
+            $this->syncDemoVideo($product, $dto);
 
             if ($dto->variants_provided) {
                 $this->syncVariants($product, $dto->variants, deleteMissing: true);
@@ -400,6 +403,39 @@ class CatalogService
                 ]);
             }
         }
+    }
+
+    protected function syncDemoVideo(Product $product, ProductDTO $dto): void
+    {
+        if ($dto->demo_video instanceof UploadedFile) {
+            $this->deleteStoredDemoVideo($product->demo_video_url);
+            $path = $dto->demo_video->store('products/'.$product->uuid.'/videos', 'public');
+            $product->update(['demo_video_url' => $path]);
+
+            return;
+        }
+
+        if ($dto->remove_demo_video) {
+            $this->deleteStoredDemoVideo($product->demo_video_url);
+            $product->update(['demo_video_url' => null]);
+
+            return;
+        }
+
+        // Legacy API clients may still send an absolute video URL.
+        if ($dto->demo_video_url !== null && $dto->demo_video_url !== $product->demo_video_url) {
+            $this->deleteStoredDemoVideo($product->demo_video_url);
+            $product->update(['demo_video_url' => $dto->demo_video_url]);
+        }
+    }
+
+    protected function deleteStoredDemoVideo(?string $path): void
+    {
+        if (! $path || preg_match('#^(https?:|data:|/)#i', $path)) {
+            return;
+        }
+
+        Storage::disk('public')->delete($path);
     }
 
     protected function storeImages(

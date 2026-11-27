@@ -2086,6 +2086,29 @@ class OrderConfirmationRulesTest extends TestCase
             ->assertJsonPath('data.net_earnings', '1800.00');
     }
 
+    public function test_admin_can_upload_a_demo_video_when_creating_a_product(): void
+    {
+        Storage::fake('public');
+
+        $response = $this->actingAs($this->adminUser)
+            ->post('/api/v1/admin/products', [
+                'vendor_id' => $this->vendor->uuid,
+                'store_id' => $this->store->uuid,
+                'name' => 'Admin product with demo video upload',
+                'price' => 750,
+                'quantity' => 3,
+                'status' => 'published',
+                'images' => [UploadedFile::fake()->image('admin-video-product.png', 100, 100)],
+                'demo_video' => UploadedFile::fake()->create('admin-demo.mp4', 128, 'video/mp4'),
+            ])
+            ->assertCreated()
+            ->json('data');
+
+        $product = Product::query()->where('uuid', $response['id'])->firstOrFail();
+        $this->assertStringEndsWith('.mp4', $product->demo_video_url);
+        Storage::disk('public')->assertExists($product->demo_video_url);
+    }
+
     public function test_admin_can_manually_create_a_product_for_an_approved_vendor_store(): void
     {
         $response = $this->actingAs($this->adminUser)

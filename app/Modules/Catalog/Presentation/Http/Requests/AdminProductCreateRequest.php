@@ -48,6 +48,8 @@ class AdminProductCreateRequest extends FormRequest
                 Rule::unique('products', 'sku')->where(fn ($query) => $query->where('vendor_id', $vendorId)),
             ],
             'barcode' => ['nullable', 'string', 'max:80'],
+            'demo_video' => ['nullable', 'file', 'mimes:mp4,m4v,webm,ogg,mov', 'max:51200'],
+            'remove_demo_video' => ['nullable', 'boolean'],
             'demo_video_url' => ['nullable', 'url', 'max:2048'],
             'status' => ['nullable', Rule::enum(ProductStatus::class)],
             'quantity' => ['required', 'integer', 'min:0'],

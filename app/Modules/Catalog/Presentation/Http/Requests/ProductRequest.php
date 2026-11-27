@@ -55,6 +55,8 @@ class ProductRequest extends FormRequest
             'brand_id' => ['nullable', 'string', 'exists:brands,uuid'],
             'sku' => ['nullable', 'string', 'max:80', $skuRule],
             'barcode' => ['nullable', 'string', 'max:80'],
+            'demo_video' => ['nullable', 'file', 'mimes:mp4,m4v,webm,ogg,mov', 'max:51200'],
+            'remove_demo_video' => ['nullable', 'boolean'],
             'demo_video_url' => ['nullable', 'url', 'max:2048'],
             'status' => ['nullable', Rule::enum(ProductStatus::class)],
             'quantity' => ['nullable', 'integer', 'min:0'],

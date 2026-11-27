@@ -43,6 +43,14 @@ export function apiImage(path) {
   return `/storage/${cleanPath}`
 }
 
+/** Resolve a stored media path (or a legacy absolute URL) to a playable src. */
+export function apiMedia(path) {
+  if (!path) return ''
+  const value = String(path)
+  if (/^https?:\/\//i.test(value) || /^data:/i.test(value) || value.startsWith('/storage/')) return value
+  return `/storage/${value}`
+}
+
 export function getProductImage(product, index = 0, isFallback = false) {
   if (!product) return IMG_PLACEHOLDER
   if (!isFallback) {

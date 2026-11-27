@@ -7441,3 +7441,32 @@ body:has(.auth-card-page) .customer-main {
 
 .product-advanced { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
 .product-advanced summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var(--primary-dark); }
+
+.demo-video-upload { display: flex; flex-direction: column; align-items: flex-start; }
+.demo-video-dropzone {
+  width: 100%;
+  min-height: 138px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px dashed var(--border-dark);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--primary-dark);
+  cursor: pointer;
+}
+.demo-video-dropzone:hover { border-color: var(--primary); background: var(--primary-light); }
+.demo-video-dropzone.is-disabled { cursor: not-allowed; opacity: .6; }
+.demo-video-dropzone input { display: none; }
+.demo-video-preview { width: 100%; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: #000; }
+.demo-video-preview video { width: 100%; max-height: 320px; display: block; background: #000; }
+.demo-video-preview-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  background: #fff;
+}
