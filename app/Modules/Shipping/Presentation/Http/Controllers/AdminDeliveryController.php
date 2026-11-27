@@ -14,6 +14,7 @@ use App\Modules\Shared\Presentation\Http\Response;
 use App\Modules\Shipping\Application\Services\DeliveryService;
 use App\Modules\Shipping\Infrastructure\Models\DeliveryAssignment;
 use App\Modules\Shipping\Infrastructure\Models\DeliveryPartner;
+use App\Modules\Shipping\Infrastructure\Models\ShippingZone;
 use App\Modules\Shipping\Presentation\Http\Requests\AssignDeliveryRequest;
 use App\Modules\Shipping\Presentation\Http\Requests\ReassignDeliveryRequest;
 use App\Modules\Shipping\Presentation\Resources\DeliveryAssignmentResource;
@@ -33,7 +34,7 @@ class AdminDeliveryController extends Controller
         $this->middleware('auth:sanctum');
         $this->middleware('admin');
         $this->middleware('permission:'.Permissions::DELIVERY_PARTNERS_MANAGE.'|'.Permissions::DELIVERIES_MANAGE);
-        $this->middleware('permission:'.Permissions::DELIVERY_PARTNERS_MANAGE)->only(['partners', 'partner', 'approve', 'reject', 'suspend', 'activate']);
+        $this->middleware('permission:'.Permissions::DELIVERY_PARTNERS_MANAGE)->only(['partners', 'partner', 'approve', 'reject', 'suspend', 'activate', 'updateZones']);
     }
 
     public function dashboard(Request $request): JsonResponse
@@ -132,6 +133,8 @@ class AdminDeliveryController extends Controller
             'vehicle_number' => ['nullable', 'string', 'max:30'],
             'service_areas' => ['nullable', 'array'],
             'service_areas.*' => ['string', 'max:120'],
+            'shipping_zone_ids' => ['nullable', 'array'],
+            'shipping_zone_ids.*' => ['string', 'exists:shipping_zones,uuid'],
             'province' => ['nullable', 'string', 'max:120'],
         ]);
 
@@ -158,6 +161,7 @@ class AdminDeliveryController extends Controller
                 'vehicle_type' => $data['vehicle_type'] ?? null,
                 'vehicle_number' => $data['vehicle_number'] ?? null,
                 'service_areas' => $areas,
+                'shipping_zone_ids' => array_values(array_unique((array) ($data['shipping_zone_ids'] ?? []))),
                 'status' => DeliveryPartnerStatus::APPROVED,
                 'is_online' => false,
                 'meta' => ['assigned_province' => $data['province'] ?? null],
@@ -185,6 +189,23 @@ class AdminDeliveryController extends Controller
         $partner = $this->findPartner($partnerId);
 
         return Response::success(new DeliveryPartnerResource($partner->load('user')), 'Delivery partner retrieved.');
+    }
+
+    public function updateZones(Request $request, string $partnerId): JsonResponse
+    {
+        $data = $request->validate([
+            'shipping_zone_ids' => ['nullable', 'array'],
+            'shipping_zone_ids.*' => ['string', 'exists:shipping_zones,uuid'],
+        ]);
+
+        $zoneIds = array_values(array_unique((array) ($data['shipping_zone_ids'] ?? [])));
+        $partner = $this->findPartner($partnerId);
+        $partner->update(['shipping_zone_ids' => $zoneIds]);
+
+        return Response::success(
+            new DeliveryPartnerResource($partner->load('user')),
+            'Delivery partner shipping zones updated.'
+        );
     }
 
     public function approve(string $partnerId): JsonResponse

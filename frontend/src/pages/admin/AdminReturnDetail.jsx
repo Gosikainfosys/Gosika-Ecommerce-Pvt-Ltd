@@ -473,6 +473,8 @@ export default function AdminReturnDetail() {
   const [error, setError] = useState(null)
   const [confirmDialog, setConfirmDialog] = useState({ open: false, action: null, loading: false })
   const [dispatchingExchange, setDispatchingExchange] = useState(false)
+  const [partners, setPartners] = useState([])
+  const [assigningPartner, setAssigningPartner] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -488,6 +490,28 @@ export default function AdminReturnDetail() {
   }, [id])
 
   useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    api.get('/admin/delivery-partners', { params: { status: 'approved', per_page: 100 } })
+      .then(res => setPartners(api.unwrapList(res.data)))
+      .catch(() => setPartners([]))
+  }, [])
+
+  const assignPartner = async (deliveryPartnerId) => {
+    if (!item) return
+    setAssigningPartner(true)
+    try {
+      await api.post(`/admin/orders/returns/${item.uuid || item.id}/assign-delivery-partner`, {
+        delivery_partner_id: deliveryPartnerId || null,
+      })
+      toast.success(deliveryPartnerId ? 'Return pickup partner assigned.' : 'Return pickup partner cleared.')
+      await load()
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to assign return pickup partner.')
+    } finally {
+      setAssigningPartner(false)
+    }
+  }
 
   const handleAction = async (notes) => {
     const { action } = confirmDialog
@@ -722,6 +746,38 @@ export default function AdminReturnDetail() {
               <div><strong>Return method:</strong> {item.return_method === 'pickup' ? 'Courier pickup' : item.return_method === 'drop_off' ? 'Self drop-off' : '—'}</div>
               <div><strong>Pickup collected:</strong> {item.pickup_collected_at ? formatDateTime(item.pickup_collected_at) : 'Not collected'}</div>
               {item.pickup_instructions && <div><strong>Pickup notes:</strong> {item.pickup_instructions}</div>}
+            </div>
+
+            <div style={{ marginTop: 16, padding: 14, border: '1px solid #bfdbfe', background: '#eff6ff', borderRadius: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 800, fontSize: 13, color: '#1e40af', marginBottom: 8 }}>
+                <Truck size={14} /> Pickup Delivery Partner
+              </div>
+              <div style={{ fontSize: 11.5, color: '#1e3a8a', marginBottom: 8 }}>
+                By default this is assigned to the rider who delivered the original order
+                {deliveryName !== 'Not assigned' ? ` (${deliveryName})` : ''}. You can reassign it here.
+              </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <select
+                  className="input"
+                  value={item.assigned_delivery_partner?.id || ''}
+                  onChange={e => assignPartner(e.target.value)}
+                  disabled={assigningPartner}
+                  style={{ flex: 1, height: 38, fontSize: 13 }}
+                >
+                  <option value="">Unassigned</option>
+                  {partners.map(partner => (
+                    <option key={partner.id} value={partner.id}>
+                      {partner.name} · {partner.phone}
+                    </option>
+                  ))}
+                  {item.assigned_delivery_partner && !partners.some(p => p.id === item.assigned_delivery_partner.id) && (
+                    <option value={item.assigned_delivery_partner.id}>
+                      {item.assigned_delivery_partner.name} · {item.assigned_delivery_partner.phone}
+                    </option>
+                  )}
+                </select>
+                {assigningPartner && <span style={{ fontSize: 11, color: '#1e40af' }}>Saving…</span>}
+              </div>
             </div>
 
             {/* Customer media */}

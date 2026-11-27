@@ -178,6 +178,8 @@ class AdminOrderController extends Controller
                 'order.vendorOrders.assignments.deliveryPartner.user',
                 'vendorOrder.store',
                 'vendorOrder.assignments.deliveryPartner.user',
+                'assignedDeliveryPartner.user',
+                'deliveryPartnerAssignedBy',
                 'orderItem.product.primaryImage',
                 'store',
                 'refunds',
@@ -247,6 +249,8 @@ class AdminOrderController extends Controller
                 'order.vendorOrders.assignments.deliveryPartner.user',
                 'vendorOrder.store',
                 'vendorOrder.assignments.deliveryPartner.user',
+                'assignedDeliveryPartner.user',
+                'deliveryPartnerAssignedBy',
                 'orderItem.product.primaryImage',
                 'store',
                 'refunds.payment',
@@ -274,6 +278,15 @@ class AdminOrderController extends Controller
             '.',
             ''
         );
+        $originalAssignment = collect($return->vendorOrder?->assignments ?? [])
+            ->first(fn ($assignment) => $assignment->delivered_at);
+        $data['original_delivery_partner_id'] = $originalAssignment?->delivery_partner_id;
+        $data['delivery_partner_id'] = $return->delivery_partner_id;
+        $data['assigned_delivery_partner'] = $return->assignedDeliveryPartner ? [
+            'id' => $return->assignedDeliveryPartner->uuid,
+            'name' => $return->assignedDeliveryPartner->name,
+            'phone' => $return->assignedDeliveryPartner->phone,
+        ] : null;
         $data['refunds'] = $return->refunds
             ->map(fn ($refund) => (new AdminRefundResource($refund))->resolve())
             ->all();
@@ -289,6 +302,33 @@ class AdminOrderController extends Controller
             : [];
 
         return Response::success($data, 'Return request retrieved.');
+    }
+
+    public function assignReturnDeliveryPartner(Request $request, string $returnId): JsonResponse
+    {
+        $validated = $request->validate([
+            'delivery_partner_id' => ['nullable', 'string'],
+        ]);
+
+        $return = ReturnRequest::query()
+            ->where('uuid', $returnId)
+            ->when(ctype_digit($returnId), fn ($q) => $q->orWhere('id', (int) $returnId))
+            ->firstOrFail();
+
+        $return = $this->returnService->assignDeliveryPartner(
+            $return,
+            $request->user(),
+            $validated['delivery_partner_id'] ?? null
+        );
+
+        $data = $return->toArray();
+        $data['assigned_delivery_partner'] = $return->assignedDeliveryPartner ? [
+            'id' => $return->assignedDeliveryPartner->uuid,
+            'name' => $return->assignedDeliveryPartner->name,
+            'phone' => $return->assignedDeliveryPartner->phone,
+        ] : null;
+
+        return Response::success($data, 'Return delivery partner assigned.');
     }
 
     public function approveReturn(Request $request, string $returnId): JsonResponse

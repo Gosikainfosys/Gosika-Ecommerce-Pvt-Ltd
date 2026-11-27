@@ -42,6 +42,7 @@ class StoreReturnRequest extends FormRequest
             // Optional fields
             'preferred_resolution' => ['nullable', 'string', 'max:80'],
             'return_method'        => ['nullable', Rule::in(['pickup', 'drop_off'])],
+            'delivery_partner_id'  => ['nullable', 'string'],
 
             // Media (photos/videos)
             'media'                => ['nullable', 'array', 'max:10'],

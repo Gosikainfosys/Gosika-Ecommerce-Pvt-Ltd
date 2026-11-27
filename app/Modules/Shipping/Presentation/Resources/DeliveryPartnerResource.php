@@ -22,6 +22,7 @@ class DeliveryPartnerResource extends JsonResource
             'vehicle_year' => $this->vehicle_year !== null ? (int) $this->vehicle_year : null,
             'insurance_expiry' => $this->insurance_expiry?->toDateString(),
             'service_areas' => $this->service_areas,
+            'shipping_zone_ids' => $this->shipping_zone_ids ?? [],
             'documents' => DeliveryPartnerDocumentResource::collection($this->whenLoaded('documents')),
             'status' => $this->status->value,
             'is_online' => (bool) $this->is_online,

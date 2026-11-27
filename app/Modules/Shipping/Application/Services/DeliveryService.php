@@ -1288,14 +1288,17 @@ class DeliveryService
 
     protected function partnerMatchesAreas(DeliveryPartner $partner, array $candidateAreas): bool
     {
-        $areas = array_filter(array_map('trim', (array) ($partner->service_areas ?? [])));
+        $serviceAreas = array_values(array_filter(array_map('trim', (array) ($partner->service_areas ?? []))));
+        $zoneAreas = $this->assignedZoneAreas($partner);
+        $areas = array_values(array_filter(array_unique(array_merge($serviceAreas, $zoneAreas))));
 
-        // If partner has no specific area restrictions, or specified all/wildcard/nepal, they are eligible for all areas
+        // If the partner has no restrictions at all, or explicitly allows all, they are eligible everywhere.
+        $lowerServiceAreas = array_map('strtolower', $serviceAreas);
         if ($areas === []
-            || in_array('*', $areas, true)
-            || in_array('all', array_map('strtolower', $areas), true)
-            || in_array('nepal', array_map('strtolower', $areas), true)
-            || in_array('all areas', array_map('strtolower', $areas), true)) {
+            || in_array('*', $serviceAreas, true)
+            || in_array('all', $lowerServiceAreas, true)
+            || in_array('nepal', $lowerServiceAreas, true)
+            || in_array('all areas', $lowerServiceAreas, true)) {
             return true;
         }
 
@@ -1316,6 +1319,32 @@ class DeliveryService
         }
 
         return false;
+    }
+
+    /**
+     * Coverage labels coming from the shipping zones explicitly assigned to a
+     * delivery partner. These are merged with manual service areas when
+     * deciding whether a partner is eligible for an order.
+     */
+    protected function assignedZoneAreas(DeliveryPartner $partner): array
+    {
+        $zoneIds = array_values(array_filter((array) ($partner->shipping_zone_ids ?? [])));
+        if ($zoneIds === []) {
+            return [];
+        }
+
+        return ShippingZone::query()
+            ->whereIn('uuid', $zoneIds)
+            ->where('is_active', true)
+            ->get()
+            ->flatMap(function (ShippingZone $zone): array {
+                return array_merge((array) ($zone->provinces ?? []), [$zone->name]);
+            })
+            ->map(fn ($area) => trim((string) $area))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
     }
 
     protected function deliveryAreaFor(Order $order): array

@@ -79,6 +79,8 @@ class DeliveryReturnResource extends JsonResource
             'dropoff_address' => $assignment?->pickup_address,
             'recipient_name' => $assignment?->recipient_name,
             'recipient_phone' => $assignment?->recipient_phone,
+            'assigned_delivery_partner_id' => $this->assignedDeliveryPartner?->uuid,
+            'assigned_delivery_partner_name' => $this->assignedDeliveryPartner?->name,
             'pickup_collected_at' => $collectedAtIso,
             'is_cod' => $this->order?->payment_method === 'cod',
             'cod_refund_due' => number_format($cashRefundDue, 2, '.', ''),

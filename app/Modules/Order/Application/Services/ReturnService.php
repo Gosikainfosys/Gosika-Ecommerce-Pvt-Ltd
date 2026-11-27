@@ -15,6 +15,8 @@ use App\Modules\Shared\Domain\Enums\ReturnRequestType;
 use App\Modules\Shared\Domain\Enums\ReturnStatus;
 use App\Modules\Shared\Domain\Exceptions\DomainException;
 use App\Modules\Shared\Infrastructure\Services\ReferenceNumber;
+use App\Modules\Shipping\Infrastructure\Models\DeliveryAssignment;
+use App\Modules\Shipping\Infrastructure\Models\DeliveryPartner;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -123,7 +125,18 @@ class ReturnService
             );
         }
 
-        return DB::transaction(function () use ($actor, $data, $mediaFiles, $order, $orderItem, $vendorOrder, $windowExpiresAt, $adminInitiated) {
+        // Return/refund/exchange pickups are assigned to the rider who
+        // delivered the original order unless the caller explicitly overrides it.
+        $originalDeliveryPartnerId = DeliveryAssignment::query()
+            ->where('vendor_order_id', $orderItem->vendor_order_id)
+            ->whereNotNull('delivered_at')
+            ->latest('id')
+            ->value('delivery_partner_id');
+        $deliveryPartnerId = ! empty($data['delivery_partner_id'])
+            ? $this->resolvePartnerId((string) $data['delivery_partner_id'])
+            : $originalDeliveryPartnerId;
+
+        return DB::transaction(function () use ($actor, $data, $mediaFiles, $order, $orderItem, $vendorOrder, $windowExpiresAt, $adminInitiated, $deliveryPartnerId) {
             $unitPrice = (float) $orderItem->line_total / max(1, (int) $orderItem->quantity);
             $qty = (int) $data['quantity'];
             $initialStatus = $adminInitiated ? ReturnStatus::APPROVED : ReturnStatus::REQUESTED;
@@ -136,6 +149,9 @@ class ReturnService
                 'order_id'             => $order->id,
                 'order_item_id'        => $orderItem->id,
                 'vendor_order_id'      => $orderItem->vendor_order_id,
+                'delivery_partner_id'  => $deliveryPartnerId,
+                'delivery_partner_assigned_at' => $deliveryPartnerId ? now() : null,
+                'delivery_partner_assigned_by' => $deliveryPartnerId ? $actor->id : null,
                 'store_id'             => $vendorOrder?->store_id,
                 'vendor_id'            => $orderItem->vendor_id,
                 'request_type'         => isset($data['request_type']) ? (ReturnRequestType::tryFrom($data['request_type']) ?? ReturnRequestType::RETURN_REFUND) : ReturnRequestType::RETURN_REFUND,
@@ -422,6 +438,53 @@ class ReturnService
 
             return $return->fresh();
         });
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Delivery partner assignment for return / refund / exchange pickups
+    // ═══════════════════════════════════════════════════════════════════════
+
+    public function assignDeliveryPartner(
+        ReturnRequest $return,
+        User $actor,
+        mixed $deliveryPartner
+    ): ReturnRequest {
+        $deliveryPartnerId = $deliveryPartner === null || $deliveryPartner === ''
+            ? null
+            : $this->resolvePartnerId((string) $deliveryPartner);
+
+        $return->delivery_partner_id = $deliveryPartnerId;
+        $return->delivery_partner_assigned_at = $deliveryPartnerId !== null ? now() : null;
+        $return->delivery_partner_assigned_by = $deliveryPartnerId !== null ? $actor->id : null;
+
+        $currentNotes = (string) ($return->review_notes ?? '');
+        $label = $deliveryPartnerId !== null
+            ? (string) DeliveryPartner::query()->whereKey($deliveryPartnerId)->value('name')
+            : 'Unassigned';
+        $return->review_notes = trim(
+            $currentNotes.' [PICKUP_ASSIGNED:'.$label.':'.now()->toISOString().':by:'.$actor->id.']'
+        );
+        $return->save();
+
+        return $return->fresh(['assignedDeliveryPartner']);
+    }
+
+    protected function resolvePartnerId(string $partner): int
+    {
+        $query = DeliveryPartner::query()
+            ->where('uuid', $partner);
+
+        if (ctype_digit($partner)) {
+            $query->orWhere('id', (int) $partner);
+        }
+
+        $id = $query->value('id');
+
+        if (! $id) {
+            throw new DomainException('Delivery partner not found.', 404);
+        }
+
+        return (int) $id;
     }
 
     // ═══════════════════════════════════════════════════════════════════════

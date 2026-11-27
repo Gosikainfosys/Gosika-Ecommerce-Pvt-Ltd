@@ -160,7 +160,7 @@ class DeliveryPartnerController extends Controller
             ->map(fn ($vendorAssignments) => $vendorAssignments->first());
 
         $returns = ReturnRequest::query()
-            ->with(['order', 'orderItem', 'vendorOrder'])
+            ->with(['order', 'orderItem', 'vendorOrder', 'assignedDeliveryPartner'])
             ->withCount('refunds')
             ->withSum([
                 'refunds as cod_refund_due' => fn ($query) => $query
@@ -170,7 +170,10 @@ class DeliveryPartnerController extends Controller
                 'refunds as cod_refund_completed' => fn ($query) => $query
                     ->where('status', RefundStatus::REFUNDED->value),
             ], 'amount')
-            ->whereIn('vendor_order_id', $assignmentByVendorOrder->keys())
+            ->where(function ($query) use ($partner, $assignmentByVendorOrder) {
+                $query->where('delivery_partner_id', $partner->id)
+                    ->orWhereIn('vendor_order_id', $assignmentByVendorOrder->keys());
+            })
             ->whereIn('status', [
                 ReturnStatus::APPROVED->value,
                 ReturnStatus::PICKUP_ARRANGED->value,
@@ -183,7 +186,13 @@ class DeliveryPartnerController extends Controller
             ->paginate(min(max($request->integer('per_page', 100), 1), 100));
 
         $returns->getCollection()->each(function (ReturnRequest $return) use ($assignmentByVendorOrder) {
-            $return->setRelation('pickup_assignment', $assignmentByVendorOrder->get($return->vendor_order_id));
+            $assignment = $assignmentByVendorOrder->get($return->vendor_order_id)
+                ?: DeliveryAssignment::query()
+                    ->where('vendor_order_id', $return->vendor_order_id)
+                    ->whereNotNull('delivered_at')
+                    ->latest('id')
+                    ->first();
+            $return->setRelation('pickup_assignment', $assignment);
         });
 
         return Response::success(
@@ -219,9 +228,18 @@ class DeliveryPartnerController extends Controller
                     ->whereNotNull('delivered_at')
                     ->orderByDesc('delivered_at')
                     ->first();
+                $isAssignedPickup = (int) ($return->delivery_partner_id ?? 0) === (int) $partner->id;
+
+                if (! $assignment && ! $isAssignedPickup) {
+                    throw new DomainException('You are not assigned to this return pickup.', 403);
+                }
 
                 if (! $assignment) {
-                    throw new DomainException('You did not deliver this order.', 403);
+                    $assignment = DeliveryAssignment::query()
+                        ->where('vendor_order_id', $return->vendor_order_id)
+                        ->whereNotNull('delivered_at')
+                        ->latest('id')
+                        ->first();
                 }
 
                 $statusVal = $return->status instanceof ReturnStatus ? $return->status->value : (string) $return->status;
@@ -316,7 +334,7 @@ class DeliveryPartnerController extends Controller
                     );
                 }
 
-                $return->load(['order', 'orderItem', 'vendorOrder', 'refunds.payment']);
+                $return->load(['order', 'orderItem', 'vendorOrder', 'assignedDeliveryPartner', 'refunds.payment']);
                 $return->setRelation('pickup_assignment', $assignment);
                 $return->setAttribute('cod_refund_due', 0);
 

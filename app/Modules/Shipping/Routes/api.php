@@ -54,6 +54,7 @@ Route::prefix('v1/admin/delivery-partners')->middleware(['auth:sanctum', 'ensure
     Route::get('/', [AdminDeliveryController::class, 'partners']);
     Route::post('/', [AdminDeliveryController::class, 'store']);
     Route::get('{partner}', [AdminDeliveryController::class, 'partner']);
+    Route::put('{partner}/zones', [AdminDeliveryController::class, 'updateZones']);
     Route::post('{partner}/approve', [AdminDeliveryController::class, 'approve']);
     Route::post('{partner}/reject', [AdminDeliveryController::class, 'reject']);
     Route::post('{partner}/suspend', [AdminDeliveryController::class, 'suspend']);
@@ -61,6 +62,9 @@ Route::prefix('v1/admin/delivery-partners')->middleware(['auth:sanctum', 'ensure
 });
 
 Route::prefix('v1/admin/deliveries')->middleware(['auth:sanctum', 'ensure:admin'])->group(function () {
+    Route::get('cod-partners', [AdminCodReconciliationController::class, 'partners']);
+    Route::get('cod-partners/{partner}', [AdminCodReconciliationController::class, 'partnerDetail']);
+    Route::post('cod-partners/{partner}/collect', [AdminCodReconciliationController::class, 'collectPartner']);
     Route::get('cod-reconciliation', [AdminCodReconciliationController::class, 'index']);
     Route::post('cod-reconciliation/{assignment}/collect', [AdminCodReconciliationController::class, 'collect']);
     Route::get('dashboard', [AdminDeliveryController::class, 'dashboard']);

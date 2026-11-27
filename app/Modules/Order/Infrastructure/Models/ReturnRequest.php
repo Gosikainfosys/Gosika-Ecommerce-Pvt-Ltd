@@ -7,6 +7,7 @@ use App\Modules\Payment\Infrastructure\Models\Refund;
 use App\Modules\Shared\Domain\Enums\InspectionCondition;
 use App\Modules\Shared\Domain\Enums\ReturnRequestType;
 use App\Modules\Shared\Domain\Enums\ReturnStatus;
+use App\Modules\Shipping\Infrastructure\Models\DeliveryPartner;
 use App\Modules\Shared\Infrastructure\Models\BaseModel;
 use App\Modules\Vendor\Infrastructure\Models\Store;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -44,6 +45,9 @@ class ReturnRequest extends BaseModel
         'cash_refund_amount',
         'cash_refund_handed_at',
         'cash_refund_handed_by',
+        'delivery_partner_id',
+        'delivery_partner_assigned_at',
+        'delivery_partner_assigned_by',
         // Inspection
         'inspection_condition',
         'inspection_notes',
@@ -71,6 +75,7 @@ class ReturnRequest extends BaseModel
             'pickup_collected_at'  => 'datetime',
             'cash_refund_amount'   => 'decimal:2',
             'cash_refund_handed_at' => 'datetime',
+            'delivery_partner_assigned_at' => 'datetime',
             'inspected_at'         => 'datetime',
             'exchange_dispatched_at'    => 'datetime',
             'replacement_dispatched_at' => 'datetime',
@@ -128,6 +133,16 @@ class ReturnRequest extends BaseModel
     public function exchangeOrder(): BelongsTo
     {
         return $this->belongsTo(Order::class, 'exchange_order_id');
+    }
+
+    public function assignedDeliveryPartner(): BelongsTo
+    {
+        return $this->belongsTo(DeliveryPartner::class, 'delivery_partner_id');
+    }
+
+    public function deliveryPartnerAssignedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'delivery_partner_assigned_by');
     }
 
     public function refunds(): HasMany

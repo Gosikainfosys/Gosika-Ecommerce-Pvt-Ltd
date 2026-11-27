@@ -7,6 +7,7 @@ use App\Modules\Catalog\Infrastructure\Models\ProductVariant;
 use App\Modules\Customer\Infrastructure\Models\CustomerAddress;
 use App\Modules\Identity\Domain\Roles;
 use App\Modules\Identity\Infrastructure\Models\User;
+use App\Modules\Order\Application\Services\ReturnService;
 use App\Modules\Order\Infrastructure\Models\Order;
 use App\Modules\Order\Infrastructure\Models\OrderItem;
 use App\Modules\Order\Infrastructure\Models\ReturnRequest;
@@ -27,6 +28,7 @@ use App\Modules\Shared\Domain\Enums\UserStatus;
 use App\Modules\Shared\Domain\Enums\VendorStatus;
 use App\Modules\Shipping\Infrastructure\Models\DeliveryAssignment;
 use App\Modules\Shipping\Infrastructure\Models\DeliveryPartner;
+use App\Modules\Shipping\Infrastructure\Models\ShippingZone;
 use App\Modules\Vendor\Infrastructure\Models\Store;
 use App\Modules\Vendor\Infrastructure\Models\StoreAddress;
 use App\Modules\Vendor\Infrastructure\Models\Vendor;
@@ -1170,5 +1172,167 @@ class DeliveryAssignmentTest extends TestCase
         $this->assertSame($this->riderUser1->id, $return->fresh()->cash_refund_handed_by);
         $this->assertNotNull($return->fresh()->cash_refund_handed_at);
         $this->assertNotNull($assignment->fresh()->delivered_at);
+    }
+
+    public function test_admin_can_assign_multiple_shipping_zones_to_a_delivery_partner(): void
+    {
+        $zone1 = ShippingZone::create([
+            'uuid' => (string) Str::uuid(),
+            'name' => 'Kathmandu Valley Zone',
+            'provinces' => ['Kathmandu'],
+            'standard_charge' => 150,
+            'express_charge' => 250,
+            'estimated_days' => 2,
+            'is_active' => true,
+        ]);
+        $zone2 = ShippingZone::create([
+            'uuid' => (string) Str::uuid(),
+            'name' => 'Bhaktapur Zone',
+            'provinces' => ['Bhaktapur'],
+            'standard_charge' => 180,
+            'express_charge' => 280,
+            'estimated_days' => 3,
+            'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($this->adminUser)
+            ->putJson("/api/v1/admin/delivery-partners/{$this->rider1->uuid}/zones", [
+                'shipping_zone_ids' => [$zone1->uuid, $zone2->uuid],
+            ]);
+
+        $response->assertOk()
+            ->assertJsonPath('data.shipping_zone_ids.0', $zone1->uuid)
+            ->assertJsonPath('data.shipping_zone_ids.1', $zone2->uuid);
+        $this->assertEqualsCanonicalizing(
+            [$zone1->uuid, $zone2->uuid],
+            $this->rider1->fresh()->shipping_zone_ids
+        );
+
+        // Assigned zones participate in dispatch eligibility even when manual service areas are empty.
+        $this->rider1->update(['service_areas' => []]);
+        [, $vendorOrder] = $this->createTestOrder(OrderStatus::READY_FOR_PICKUP);
+
+        $this->actingAs($this->riderUser1)
+            ->getJson('/api/v1/delivery-partner/available-jobs')
+            ->assertOk()
+            ->assertJsonPath('data.0.id', $vendorOrder->uuid);
+    }
+
+    public function test_return_pickups_default_to_original_deliverer_and_can_be_reassigned(): void
+    {
+        [$order, $vendorOrder] = $this->createTestOrder(OrderStatus::DELIVERED);
+        $item = $order->items()->firstOrFail();
+
+        DeliveryAssignment::create([
+            'uuid' => (string) Str::uuid(),
+            'vendor_order_id' => $vendorOrder->id,
+            'delivery_partner_id' => $this->rider1->id,
+            'status' => DeliveryStatus::DELIVERED,
+            'delivery_fee' => 100,
+            'pickup_address' => 'Vendor store address',
+            'dropoff_address' => 'Customer delivery address',
+            'recipient_name' => 'Ram Shrestha',
+            'recipient_phone' => '9812345678',
+            'delivered_at' => now()->subDay(),
+        ]);
+
+        $return = app(ReturnService::class)->createRequest($order->user, [
+            'order_id' => $order->uuid,
+            'order_item_id' => $item->uuid,
+            'request_type' => 'return_refund',
+            'reason_type' => 'damaged',
+            'reason' => 'Item arrived damaged',
+            'quantity' => 1,
+            'preferred_resolution' => 'refund',
+        ]);
+
+        $this->assertSame($this->rider1->id, (int) $return->delivery_partner_id);
+
+        $this->actingAs($this->adminUser)
+            ->postJson("/api/v1/admin/orders/returns/{$return->uuid}/assign-delivery-partner", [
+                'delivery_partner_id' => $this->rider2->uuid,
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.assigned_delivery_partner.id', $this->rider2->uuid);
+
+        $this->assertSame($this->rider2->id, (int) $return->fresh()->delivery_partner_id);
+
+        $return->update(['status' => ReturnStatus::APPROVED]);
+
+        $this->actingAs($this->riderUser2)
+            ->getJson('/api/v1/delivery-partner/returns')
+            ->assertOk()
+            ->assertJsonPath('data.0.assigned_delivery_partner_id', $this->rider2->uuid);
+
+        $this->actingAs($this->riderUser2)
+            ->postJson("/api/v1/delivery-partner/returns/{$return->uuid}/collect")
+            ->assertOk()
+            ->assertJsonPath('data.status', 'collected');
+
+        $this->assertSame($this->riderUser2->id, $return->fresh()->pickup_collected_by);
+    }
+
+    public function test_cod_reconciliation_groups_orders_by_partner_and_collects_everything_at_once(): void
+    {
+        foreach ([1, 2] as $index) {
+            [, $vendorOrder] = $this->createTestOrder(OrderStatus::DELIVERED, isCod: true);
+            DeliveryAssignment::create([
+                'uuid' => (string) Str::uuid(),
+                'vendor_order_id' => $vendorOrder->id,
+                'delivery_partner_id' => $this->rider1->id,
+                'status' => DeliveryStatus::DELIVERED,
+                'cod_amount' => 2650,
+                'delivery_fee' => 100,
+                'pickup_address' => 'Vendor store address',
+                'dropoff_address' => 'Customer delivery address',
+                'recipient_name' => 'Ram Shrestha',
+                'recipient_phone' => '9812345678',
+                'delivered_at' => now()->subDays($index),
+            ]);
+        }
+
+        [, $otherVendorOrder] = $this->createTestOrder(OrderStatus::DELIVERED, isCod: true);
+        DeliveryAssignment::create([
+            'uuid' => (string) Str::uuid(),
+            'vendor_order_id' => $otherVendorOrder->id,
+            'delivery_partner_id' => $this->rider2->id,
+            'status' => DeliveryStatus::DELIVERED,
+            'cod_amount' => 1000,
+            'delivery_fee' => 100,
+            'pickup_address' => 'Vendor store address',
+            'dropoff_address' => 'Customer delivery address',
+            'recipient_name' => 'Ram Shrestha',
+            'recipient_phone' => '9812345678',
+            'delivered_at' => now()->subDay(),
+        ]);
+
+        $this->actingAs($this->adminUser)
+            ->getJson('/api/v1/admin/deliveries/cod-partners?status=pending')
+            ->assertOk()
+            ->assertJsonPath('data.0.name', $this->rider1->name)
+            ->assertJsonPath('data.0.pending_orders', 2)
+            ->assertJsonPath('data.0.pending_amount', 5300)
+            ->assertJsonPath('data.0.order_count', 2);
+
+        $this->actingAs($this->adminUser)
+            ->getJson("/api/v1/admin/deliveries/cod-partners/{$this->rider1->uuid}")
+            ->assertOk()
+            ->assertJsonPath('data.0.cod_amount', 2650)
+            ->assertJsonPath('meta.profile.name', $this->rider1->name)
+            ->assertJsonPath('meta.partner_summary.pending_amount', 5300);
+
+        $this->actingAs($this->adminUser)
+            ->postJson("/api/v1/admin/deliveries/cod-partners/{$this->rider1->uuid}/collect")
+            ->assertOk()
+            ->assertJsonPath('data.collected_count', 2)
+            ->assertJsonPath('data.collected_amount', 5300)
+            ->assertJsonPath('data.partner_summary.pending_amount', 0)
+            ->assertJsonPath('data.partner_summary.collected_amount', 5300);
+
+        $this->actingAs($this->adminUser)
+            ->getJson('/api/v1/admin/deliveries/cod-reconciliation?status=collected')
+            ->assertOk()
+            ->assertJsonCount(2, 'data')
+            ->assertJsonPath('meta.summary.collected_amount', 5300);
     }
 }

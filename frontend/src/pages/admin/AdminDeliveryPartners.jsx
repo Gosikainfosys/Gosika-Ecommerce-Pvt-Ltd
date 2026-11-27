@@ -2,13 +2,14 @@ import React, { useEffect, useState } from 'react'
 import {
   Truck, CheckCircle2, XCircle, AlertCircle, Clock, Eye,
   Phone, Mail, MapPin, Plus, ShieldCheck, Ban, UserCheck,
-  RefreshCw, User
+  RefreshCw, User, Layers
 } from 'lucide-react'
 import api from '../../api/client'
 import PageHeader from '../../components/admin/PageHeader'
 import DataTable from '../../components/admin/DataTable'
 import FilterBar from '../../components/admin/FilterBar'
 import ConfirmDialog from '../../components/admin/ConfirmDialog'
+import Modal from '../../components/ui/Modal'
 import StatusBadge from '../../components/commerce/StatusBadge'
 import { formatDate, timeAgo } from '../../utils/format'
 import { useToast } from '../../context/ToastContext'
@@ -24,6 +25,8 @@ export default function AdminDeliveryPartners() {
   const [appliedDates, setAppliedDates] = useState({ from: '', to: '' })
   const [createOpen, setCreateOpen] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [zones, setZones] = useState([])
+  const [zoneModal, setZoneModal] = useState({ partner: null, ids: [], saving: false })
 
   const [form, setForm] = useState({
     name: '',
@@ -32,6 +35,7 @@ export default function AdminDeliveryPartners() {
     vehicle_type: 'Motorcycle',
     vehicle_number: '',
     service_areas: '',
+    shipping_zone_ids: [],
   })
 
   const [dialogState, setDialogState] = useState({
@@ -62,6 +66,42 @@ export default function AdminDeliveryPartners() {
   useEffect(() => {
     loadPartners()
   }, [statusFilter, search, appliedDates])
+
+  useEffect(() => {
+    api.get('/admin/shipping/zones', { params: { per_page: 100 }, skipCache: true })
+      .then(res => setZones(api.unwrapList(res.data)))
+      .catch(() => setZones([]))
+  }, [])
+
+  const zoneName = (id) => zones.find(zone => String(zone.id) === String(id))?.name || id
+  const assignedZoneNames = (partner) => (Array.isArray(partner.shipping_zone_ids) ? partner.shipping_zone_ids : [])
+    .map(zoneName)
+
+  const openZoneModal = (partner) => setZoneModal({
+    partner,
+    ids: Array.isArray(partner.shipping_zone_ids) ? partner.shipping_zone_ids : [],
+    saving: false,
+  })
+
+  const toggleZoneId = (id) => setZoneModal(current => ({
+    ...current,
+    ids: current.ids.includes(id) ? current.ids.filter(z => z !== id) : [...current.ids, id],
+  }))
+
+  const saveZones = async () => {
+    if (!zoneModal.partner) return
+    setZoneModal(current => ({ ...current, saving: true }))
+    try {
+      const targetId = zoneModal.partner.uuid || zoneModal.partner.id
+      await api.put(`/admin/delivery-partners/${targetId}/zones`, { shipping_zone_ids: zoneModal.ids })
+      toast.success(`Shipping zones updated for ${zoneModal.partner.name}.`)
+      setZoneModal({ partner: null, ids: [], saving: false })
+      loadPartners()
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to update shipping zones.')
+      setZoneModal(current => ({ ...current, saving: false }))
+    }
+  }
 
   const handleAction = (action, partner) => {
     setDialogState({
@@ -118,6 +158,7 @@ export default function AdminDeliveryPartners() {
         vehicle_type: form.vehicle_type,
         vehicle_number: form.vehicle_number,
         service_areas: form.service_areas ? form.service_areas.split(',').map(s => s.trim()) : ['Kathmandu Valley'],
+        shipping_zone_ids: form.shipping_zone_ids,
       })
       if (response.data?.meta?.invitation_sent === false) {
         toast.error(response.data?.message || 'Delivery partner created, but the invitation email could not be sent.')
@@ -125,7 +166,7 @@ export default function AdminDeliveryPartners() {
         toast.success(`Delivery partner created. An invitation link was sent to ${form.email}.`)
       }
       setCreateOpen(false)
-      setForm({ name: '', email: '', phone: '', vehicle_type: 'Motorcycle', vehicle_number: '', service_areas: '' })
+      setForm({ name: '', email: '', phone: '', vehicle_type: 'Motorcycle', vehicle_number: '', service_areas: '', shipping_zone_ids: [] })
       loadPartners()
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to register delivery partner.')
@@ -188,6 +229,21 @@ export default function AdminDeliveryPartners() {
       }
     },
     {
+      header: 'Assigned Zones',
+      render: item => {
+        const names = assignedZoneNames(item)
+        return names.length ? (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+            {names.map(name => (
+              <span key={name} className="chip chip-sm" style={{ background: '#eff6ff', color: '#1d4ed8', fontWeight: 700, fontSize: 10 }}>
+                {name}
+              </span>
+            ))}
+          </div>
+        ) : <span style={{ fontSize: 11, color: 'var(--muted)' }}>No zones assigned</span>
+      }
+    },
+    {
       header: 'Duty Status',
       render: item => (
         <span
@@ -218,6 +274,14 @@ export default function AdminDeliveryPartners() {
 
         return (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
+            <button
+              type="button"
+              className="btn btn-outline btn-xs"
+              onClick={() => openZoneModal(item)}
+              title="Assign shipping zones"
+            >
+              <Layers size={12} style={{ marginRight: 3 }} /> Zones
+            </button>
             {isPending && (
               <>
                 <button
@@ -448,6 +512,28 @@ export default function AdminDeliveryPartners() {
                 />
               </div>
 
+              <div>
+                <label className="label" style={{ fontSize: 12, fontWeight: 700 }}>Assigned Shipping Zones</label>
+                <div style={{ maxHeight: 140, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8, padding: 8 }}>
+                  {zones.length === 0 && <div style={{ fontSize: 11, color: 'var(--muted)' }}>No shipping zones configured yet.</div>}
+                  {zones.map(zone => (
+                    <label key={zone.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 2px', fontSize: 12, cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={form.shipping_zone_ids.includes(zone.id)}
+                        onChange={() => setForm(current => ({
+                          ...current,
+                          shipping_zone_ids: current.shipping_zone_ids.includes(zone.id)
+                            ? current.shipping_zone_ids.filter(id => id !== zone.id)
+                            : [...current.shipping_zone_ids, zone.id],
+                        }))}
+                      />
+                      <span>{zone.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
                 <button type="button" className="btn btn-outline btn-sm" onClick={() => setCreateOpen(false)}>Cancel</button>
                 <button type="submit" className="btn btn-primary btn-sm" disabled={creating}>
@@ -458,6 +544,48 @@ export default function AdminDeliveryPartners() {
           </div>
         </div>
       )}
+
+      {/* Zone assignment modal */}
+      <Modal
+        open={!!zoneModal.partner}
+        onClose={() => setZoneModal({ partner: null, ids: [], saving: false })}
+        title={`Assign Zones · ${zoneModal.partner?.name || ''}`}
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <button type="button" className="btn btn-outline btn-sm" onClick={() => setZoneModal({ partner: null, ids: [], saving: false })}>Cancel</button>
+            <button type="button" className="btn btn-primary btn-sm" onClick={saveZones} disabled={zoneModal.saving}>
+              {zoneModal.saving ? 'Saving…' : 'Save Zones'}
+            </button>
+          </div>
+        }
+      >
+        <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: 0 }}>
+          Select the shipping zones this rider may serve. Dispatch eligibility combines these zones with manual service areas.
+        </p>
+        <div style={{ display: 'grid', gap: 8 }}>
+          {zones.length === 0 && <div style={{ fontSize: 12, color: 'var(--muted)' }}>No shipping zones configured yet.</div>}
+          {zones.map(zone => (
+            <label
+              key={zone.id}
+              style={{
+                display: 'flex', alignItems: 'flex-start', gap: 10, padding: 10,
+                border: `1px solid ${zoneModal.ids.includes(zone.id) ? '#93c5fd' : 'var(--border)'}`,
+                background: zoneModal.ids.includes(zone.id) ? '#eff6ff' : '#fff',
+                borderRadius: 8, cursor: 'pointer',
+              }}
+              onClick={() => toggleZoneId(zone.id)}
+            >
+              <input type="checkbox" checked={zoneModal.ids.includes(zone.id)} onChange={() => {}} style={{ marginTop: 2 }} />
+              <span>
+                <span style={{ display: 'block', fontWeight: 700, fontSize: 13 }}>{zone.name}</span>
+                <span style={{ display: 'block', fontSize: 11, color: 'var(--muted)' }}>
+                  {(zone.provinces || []).join(', ') || 'No coverage labels'}
+                </span>
+              </span>
+            </label>
+          ))}
+        </div>
+      </Modal>
 
       {/* Confirmation Dialog */}
       <ConfirmDialog
