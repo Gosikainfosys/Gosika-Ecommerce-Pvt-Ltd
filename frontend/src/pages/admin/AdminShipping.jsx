@@ -11,32 +11,14 @@ import Pagination from '../../components/ui/Pagination'
 import { money, errorMessage } from '../../utils/format'
 import { useToast } from '../../context/ToastContext'
 import { useList } from '../../hooks/useApi'
-import { NEPAL_DISTRICTS as NEPAL_DISTRICTS_MAP } from '../../utils/nepalLocations'
 import PageHeader from '../../components/admin/PageHeader'
 import CoverageAreaBuilder from '../../components/admin/CoverageAreaBuilder'
 
-const EMPTY_ZONE = { name: '', provinces: '', standard_charge: 150, express_charge: 250, estimated_days: 2 }
+const EMPTY_ZONE = { name: '', provinces: [], standard_charge: 150, express_charge: 250, estimated_days: 2 }
 const EMPTY_COURIER = { name: '', type: 'Primary Fast Delivery Partner', coverage: '', contact_phone: '', endpoint: '' }
-const NEPAL_PROVINCES = Object.entries(NEPAL_DISTRICTS_MAP).map(([name, districts]) => ({
-  name: name.replace(' Province', ''),
-  districts: districts.slice(0, 6),
-})).sort((a, b) => a.name.localeCompare(b.name))
 
-function parseProvinceList(value) {
-  return String(value || '')
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter(Boolean)
-}
-
-function toggleProvinceSelection(currentValue, nextProvince) {
-  const selected = new Set(parseProvinceList(currentValue))
-  if (selected.has(nextProvince)) {
-    selected.delete(nextProvince)
-  } else {
-    selected.add(nextProvince)
-  }
-  return [...selected].join(', ')
+function coverageAreaLabel(area) {
+  return area?.label || area?.parent_label || area?.name || 'Unnamed coverage area'
 }
 
 export default function AdminShipping() {
@@ -60,6 +42,27 @@ export default function AdminShipping() {
     loading: couriersLoading, error: couriersError, reload: reloadCouriers,
   } = useList(couriersFetcher, { pageSize: 50 })
 
+  const {
+    items: allCoverageAreas,
+    loading: coverageAreasLoading,
+    error: coverageAreasError,
+    reload: reloadCoverageAreas,
+  } = useList(() => api.get('/admin/delivery-coverage/areas', { skipCache: true }))
+
+  const coverageAreas = allCoverageAreas.filter(
+    (area) => area.is_coverage_area && area.verification_status === 'verified' && area.is_active
+  )
+
+  const selectedAreaValues = Array.isArray(zoneForm.provinces) ? zoneForm.provinces : []
+  const coverageAreaOptions = coverageAreas.map((area) => ({
+    value: coverageAreaLabel(area),
+    label: coverageAreaLabel(area),
+    legacy: false,
+  }))
+  const legacyAreaOptions = selectedAreaValues
+    .filter((value) => !coverageAreaOptions.some((option) => option.value === value))
+    .map((value) => ({ value, label: value, legacy: true }))
+
   const openAddZone = () => {
     setZoneForm(EMPTY_ZONE)
     setZoneModal({ mode: 'add' })
@@ -68,7 +71,7 @@ export default function AdminShipping() {
   const openEditZone = (z) => {
     setZoneForm({
       name: z.name || '',
-      provinces: (z.provinces || []).join(', '),
+      provinces: Array.isArray(z.provinces) ? z.provinces.map(String) : [],
       standard_charge: z.standard_charge != null ? Number(z.standard_charge) : 150,
       express_charge: z.express_charge != null ? Number(z.express_charge) : 250,
       estimated_days: z.estimated_days != null ? Number(z.estimated_days) : 2,
@@ -76,19 +79,32 @@ export default function AdminShipping() {
     setZoneModal({ mode: 'edit', zone: z })
   }
 
-  const handleMapProvinceToggle = (provinceName) => {
-    setZoneForm((current) => ({
-      ...current,
-      provinces: toggleProvinceSelection(current.provinces, provinceName),
-    }))
+  const toggleAreaSelection = (value) => {
+    setZoneForm((current) => {
+      const selected = Array.isArray(current.provinces) ? current.provinces : []
+      return {
+        ...current,
+        provinces: selected.includes(value)
+          ? selected.filter((entry) => entry !== value)
+          : [...selected, value],
+      }
+    })
   }
 
   const saveZone = async (e) => {
     e.preventDefault()
+    if (!zoneForm.name.trim()) {
+      toast.error('Enter a zone title.')
+      return
+    }
+    if (selectedAreaValues.length === 0) {
+      toast.error('Select at least one created coverage area.')
+      return
+    }
     setBusy(true)
     const payload = {
       name: zoneForm.name.trim(),
-      provinces: zoneForm.provinces.split(',').map((s) => s.trim()).filter(Boolean),
+      provinces: selectedAreaValues,
       standard_charge: Number(zoneForm.standard_charge),
       express_charge: Number(zoneForm.express_charge),
       estimated_days: Number(zoneForm.estimated_days),
@@ -473,41 +489,50 @@ export default function AdminShipping() {
               />
             </div>
             <div className="form-group">
-              <label className="label">Covered Provinces / Delivery Region <span className="req">*</span></label>
-              <input
-                className="input"
-                required
-                value={zoneForm.provinces}
-                onChange={(e) => setZoneForm({ ...zoneForm, provinces: e.target.value })}
-                placeholder="e.g. Province 1, Bagmati"
-              />
-            </div>
-
-            <div className="form-group">
-              <label className="label">Map Coverage Picker</label>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
-                {NEPAL_PROVINCES.map((province) => {
-                  const selected = parseProvinceList(zoneForm.provinces).includes(province.name)
-                  return (
-                    <button
-                      key={province.name}
-                      type="button"
-                      onClick={() => handleMapProvinceToggle(province.name)}
-                      className={`btn btn-xs ${selected ? 'btn-primary' : 'btn-outline'}`}
-                      style={{
-                        justifyContent: 'space-between',
-                        textAlign: 'left',
-                        padding: '8px 10px',
-                        minHeight: 42,
-                        borderColor: selected ? 'transparent' : 'var(--border)',
-                      }}
-                    >
-                      <span>{province.name}</span>
-                      <span className="muted text-xs">{province.districts.length} hubs</span>
-                    </button>
-                  )
-                })}
-              </div>
+              <label className="label">Created Coverage Areas <span className="req">*</span></label>
+              {coverageAreasLoading ? (
+                <div className="muted text-xs">Loading created coverage areas…</div>
+              ) : coverageAreasError ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span className="muted text-xs">Unable to load coverage areas.</span>
+                  <button type="button" className="btn btn-outline btn-xs" onClick={reloadCoverageAreas}>Retry</button>
+                </div>
+              ) : coverageAreaOptions.length === 0 && legacyAreaOptions.length === 0 ? (
+                <EmptyState
+                  icon={Layers}
+                  title="No coverage areas yet"
+                  message="Create and verify a coverage area in Shipping & Delivery before adding a shipping zone."
+                />
+              ) : (
+                <>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
+                    {[...coverageAreaOptions, ...legacyAreaOptions].map((option) => {
+                      const selected = selectedAreaValues.includes(option.value)
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() => toggleAreaSelection(option.value)}
+                          className={`btn btn-xs ${selected ? 'btn-primary' : 'btn-outline'}`}
+                          style={{
+                            justifyContent: 'space-between',
+                            textAlign: 'left',
+                            padding: '8px 10px',
+                            minHeight: 42,
+                            borderColor: selected ? 'transparent' : 'var(--border)',
+                          }}
+                        >
+                          <span>{option.label}</span>
+                          <span className="muted text-xs">{option.legacy ? 'Legacy' : 'Coverage area'}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <p className="muted text-xs" style={{ marginTop: 6 }}>
+                    Only verified, active coverage areas created in Shipping &amp; Delivery can be selected.
+                  </p>
+                </>
+              )}
             </div>
 
             <div className="form-row">
