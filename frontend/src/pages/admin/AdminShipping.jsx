@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import {
   MapPin, Truck, Plus, Edit, Trash2, Power, Layers
 } from 'lucide-react'
@@ -15,10 +15,17 @@ import PageHeader from '../../components/admin/PageHeader'
 import CoverageAreaBuilder from '../../components/admin/CoverageAreaBuilder'
 
 const EMPTY_ZONE = { name: '', provinces: [], standard_charge: 150, express_charge: 250, estimated_days: 2 }
+const EMPTY_ZONE_HIERARCHY = { province: '', district: '', municipality: '', ward: '' }
 const EMPTY_COURIER = { name: '', type: 'Primary Fast Delivery Partner', coverage: '', contact_phone: '', endpoint: '' }
 
 function coverageAreaLabel(area) {
   return area?.label || area?.parent_label || area?.name || 'Unnamed coverage area'
+}
+
+function coverageWardKey(area) {
+  if (area?.ward_id) return String(area.ward_id)
+  if (area?.ward_number) return `n:${area.ward_number}`
+  return ''
 }
 
 export default function AdminShipping() {
@@ -26,6 +33,8 @@ export default function AdminShipping() {
   const [zoneModal, setZoneModal] = useState(null)
   const [courierModal, setCourierModal] = useState(null)
   const [zoneForm, setZoneForm] = useState(EMPTY_ZONE)
+  const [zoneHierarchy, setZoneHierarchy] = useState(EMPTY_ZONE_HIERARCHY)
+  const [zoneGeoOptions, setZoneGeoOptions] = useState({ provinces: [], districts: [], municipalities: [], wards: [] })
   const [courierForm, setCourierForm] = useState(EMPTY_COURIER)
   const [busy, setBusy] = useState(false)
 
@@ -49,35 +58,195 @@ export default function AdminShipping() {
     reload: reloadCoverageAreas,
   } = useList(() => api.get('/admin/delivery-coverage/areas', { skipCache: true }))
 
-  const coverageAreas = allCoverageAreas.filter(
-    (area) => area.is_coverage_area && area.verification_status === 'verified' && area.is_active
+  const coverageAreas = useMemo(
+    () => allCoverageAreas.filter(
+      (area) => area.is_coverage_area && area.verification_status === 'verified' && area.is_active
+    ),
+    [allCoverageAreas]
   )
 
   const selectedAreaValues = Array.isArray(zoneForm.provinces) ? zoneForm.provinces : []
-  const coverageAreaOptions = coverageAreas.map((area) => ({
-    value: coverageAreaLabel(area),
-    label: coverageAreaLabel(area),
-    legacy: false,
-  }))
   const legacyAreaOptions = selectedAreaValues
-    .filter((value) => !coverageAreaOptions.some((option) => option.value === value))
+    .filter((value) => !coverageAreas.some((area) => coverageAreaLabel(area) === value))
     .map((value) => ({ value, label: value, legacy: true }))
 
-  const openAddZone = () => {
-    setZoneForm(EMPTY_ZONE)
-    setZoneModal({ mode: 'add' })
+  const availableProvinceIds = useMemo(
+    () => new Set(coverageAreas.map((area) => Number(area.province_id)).filter(Boolean)),
+    [coverageAreas]
+  )
+
+  const districtsByProvince = useMemo(() => {
+    const map = new Map()
+    coverageAreas.forEach((area) => {
+      if (!area.province_id || !area.district_id) return
+      const key = Number(area.province_id)
+      if (!map.has(key)) map.set(key, new Set())
+      map.get(key).add(Number(area.district_id))
+    })
+    return map
+  }, [coverageAreas])
+
+  const municipalitiesByDistrict = useMemo(() => {
+    const map = new Map()
+    coverageAreas.forEach((area) => {
+      if (!area.district_id || !area.municipality_id) return
+      const key = Number(area.district_id)
+      if (!map.has(key)) map.set(key, new Set())
+      map.get(key).add(Number(area.municipality_id))
+    })
+    return map
+  }, [coverageAreas])
+
+  const wardsByMunicipality = useMemo(() => {
+    const map = new Map()
+    coverageAreas.forEach((area) => {
+      const wardKey = coverageWardKey(area)
+      if (!area.municipality_id || !wardKey) return
+      const key = Number(area.municipality_id)
+      if (!map.has(key)) map.set(key, new Set())
+      map.get(key).add(wardKey)
+    })
+    return map
+  }, [coverageAreas])
+
+  const updateHierarchy = (key, value) => {
+    setZoneHierarchy((current) => {
+      const next = { ...current, [key]: value }
+      if (key === 'province') {
+        next.district = ''
+        next.municipality = ''
+        next.ward = ''
+      }
+      if (key === 'district') {
+        next.municipality = ''
+        next.ward = ''
+      }
+      if (key === 'municipality') next.ward = ''
+      return next
+    })
   }
 
-  const openEditZone = (z) => {
-    setZoneForm({
-      name: z.name || '',
-      provinces: Array.isArray(z.provinces) ? z.provinces.map(String) : [],
-      standard_charge: z.standard_charge != null ? Number(z.standard_charge) : 150,
-      express_charge: z.express_charge != null ? Number(z.express_charge) : 250,
-      estimated_days: z.estimated_days != null ? Number(z.estimated_days) : 2,
-    })
-    setZoneModal({ mode: 'edit', zone: z })
+  const resetHierarchy = (values = []) => {
+    const match = coverageAreas.find((area) => values.includes(coverageAreaLabel(area)))
+    setZoneHierarchy(match ? {
+      province: String(match.province_id || ''),
+      district: String(match.district_id || ''),
+      municipality: String(match.municipality_id || ''),
+      ward: coverageWardKey(match),
+    } : EMPTY_ZONE_HIERARCHY)
   }
+
+  const resolvedCoverageArea = useMemo(() => {
+    const { province, district, municipality, ward } = zoneHierarchy
+    if (!province) return null
+
+    let candidates = coverageAreas.filter((area) => Number(area.province_id) === Number(province))
+    if (district) {
+      candidates = candidates.filter((area) => Number(area.district_id) === Number(district))
+      if (municipality) {
+        candidates = candidates.filter((area) => Number(area.municipality_id) === Number(municipality))
+        if (ward) {
+          return candidates.find((area) => coverageWardKey(area) === ward) || null
+        }
+        return candidates.find((area) => !coverageWardKey(area)) || null
+      }
+      return candidates.find((area) => !area.municipality_id) || null
+    }
+    return candidates.find((area) => !area.district_id) || null
+  }, [zoneHierarchy, coverageAreas])
+
+  useEffect(() => {
+    let cancelled = false
+    api.get('/platform/provinces', { skipCache: true })
+      .then((res) => {
+        if (!cancelled) {
+          setZoneGeoOptions((current) => ({
+            ...current,
+            provinces: api.unwrapList(res.data).filter((item) => availableProvinceIds.has(Number(item.id))),
+          }))
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setZoneGeoOptions((current) => ({ ...current, provinces: [] }))
+      })
+    return () => { cancelled = true }
+  }, [availableProvinceIds])
+
+  useEffect(() => {
+    if (!zoneHierarchy.province) {
+      setZoneGeoOptions((current) => ({ ...current, districts: [], municipalities: [], wards: [] }))
+      return undefined
+    }
+    let cancelled = false
+    const allowed = districtsByProvince.get(Number(zoneHierarchy.province)) || new Set()
+    api.get('/platform/districts', { params: { province_id: zoneHierarchy.province }, skipCache: true })
+      .then((res) => {
+        if (!cancelled) {
+          setZoneGeoOptions((current) => ({
+            ...current,
+            districts: api.unwrapList(res.data).filter((item) => allowed.has(Number(item.id))),
+            municipalities: [],
+            wards: [],
+          }))
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setZoneGeoOptions((current) => ({ ...current, districts: [], municipalities: [], wards: [] }))
+      })
+    return () => { cancelled = true }
+  }, [zoneHierarchy.province, districtsByProvince])
+
+  useEffect(() => {
+    if (!zoneHierarchy.district) {
+      setZoneGeoOptions((current) => ({ ...current, municipalities: [], wards: [] }))
+      return undefined
+    }
+    let cancelled = false
+    const allowed = municipalitiesByDistrict.get(Number(zoneHierarchy.district)) || new Set()
+    api.get('/platform/municipalities', { params: { district_id: zoneHierarchy.district }, skipCache: true })
+      .then((res) => {
+        if (!cancelled) {
+          setZoneGeoOptions((current) => ({
+            ...current,
+            municipalities: api.unwrapList(res.data).filter((item) => allowed.has(Number(item.id))),
+            wards: [],
+          }))
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setZoneGeoOptions((current) => ({ ...current, municipalities: [], wards: [] }))
+      })
+    return () => { cancelled = true }
+  }, [zoneHierarchy.district, municipalitiesByDistrict])
+
+  useEffect(() => {
+    if (!zoneHierarchy.municipality) {
+      setZoneGeoOptions((current) => ({ ...current, wards: [] }))
+      return undefined
+    }
+    let cancelled = false
+    const allowed = wardsByMunicipality.get(Number(zoneHierarchy.municipality)) || new Set()
+    api.get('/platform/wards', { params: { municipality_id: zoneHierarchy.municipality }, skipCache: true })
+      .then((res) => {
+        if (!cancelled) {
+          setZoneGeoOptions((current) => ({
+            ...current,
+            wards: api.unwrapList(res.data)
+              .map((item) => {
+                const value = allowed.has(String(item.id))
+                  ? String(item.id)
+                  : (allowed.has(`n:${item.ward_number}`) ? `n:${item.ward_number}` : null)
+                return value ? { id: value, ward_number: item.ward_number } : null
+              })
+              .filter(Boolean),
+          }))
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setZoneGeoOptions((current) => ({ ...current, wards: [] }))
+      })
+    return () => { cancelled = true }
+  }, [zoneHierarchy.municipality, wardsByMunicipality])
 
   const toggleAreaSelection = (value) => {
     setZoneForm((current) => {
@@ -89,6 +258,31 @@ export default function AdminShipping() {
           : [...selected, value],
       }
     })
+  }
+
+  const addResolvedArea = () => {
+    if (!resolvedCoverageArea) return
+    toggleAreaSelection(coverageAreaLabel(resolvedCoverageArea))
+    setZoneHierarchy((current) => ({ ...current, municipality: '', ward: '' }))
+  }
+
+  const openAddZone = () => {
+    setZoneForm(EMPTY_ZONE)
+    resetHierarchy([])
+    setZoneModal({ mode: 'add' })
+  }
+
+  const openEditZone = (z) => {
+    const values = Array.isArray(z.provinces) ? z.provinces.map(String) : []
+    setZoneForm({
+      name: z.name || '',
+      provinces: values,
+      standard_charge: z.standard_charge != null ? Number(z.standard_charge) : 150,
+      express_charge: z.express_charge != null ? Number(z.express_charge) : 250,
+      estimated_days: z.estimated_days != null ? Number(z.estimated_days) : 2,
+    })
+    resetHierarchy(values)
+    setZoneModal({ mode: 'edit', zone: z })
   }
 
   const saveZone = async (e) => {
@@ -497,7 +691,7 @@ export default function AdminShipping() {
                   <span className="muted text-xs">Unable to load coverage areas.</span>
                   <button type="button" className="btn btn-outline btn-xs" onClick={reloadCoverageAreas}>Retry</button>
                 </div>
-              ) : coverageAreaOptions.length === 0 && legacyAreaOptions.length === 0 ? (
+              ) : coverageAreas.length === 0 && legacyAreaOptions.length === 0 ? (
                 <EmptyState
                   icon={Layers}
                   title="No coverage areas yet"
@@ -505,32 +699,96 @@ export default function AdminShipping() {
                 />
               ) : (
                 <>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
-                    {[...coverageAreaOptions, ...legacyAreaOptions].map((option) => {
-                      const selected = selectedAreaValues.includes(option.value)
-                      return (
-                        <button
-                          key={option.value}
-                          type="button"
-                          onClick={() => toggleAreaSelection(option.value)}
-                          className={`btn btn-xs ${selected ? 'btn-primary' : 'btn-outline'}`}
-                          style={{
-                            justifyContent: 'space-between',
-                            textAlign: 'left',
-                            padding: '8px 10px',
-                            minHeight: 42,
-                            borderColor: selected ? 'transparent' : 'var(--border)',
-                          }}
-                        >
-                          <span>{option.label}</span>
-                          <span className="muted text-xs">{option.legacy ? 'Legacy' : 'Coverage area'}</span>
-                        </button>
-                      )
-                    })}
+                  <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))' }}>
+                    <label className="flex flex-col gap-2" style={{ minWidth: 0 }}>
+                      <span className="muted text-xs font-bold uppercase" style={{ letterSpacing: '0.04em' }}>Select province</span>
+                      <select
+                        className="input"
+                        value={zoneHierarchy.province}
+                        onChange={(event) => updateHierarchy('province', event.target.value)}
+                      >
+                        <option value="">Select province</option>
+                        {zoneGeoOptions.provinces.map((province) => (
+                          <option key={province.id} value={province.id}>{province.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-2" style={{ minWidth: 0 }}>
+                      <span className="muted text-xs font-bold uppercase" style={{ letterSpacing: '0.04em' }}>District</span>
+                      <select
+                        className="input"
+                        value={zoneHierarchy.district}
+                        onChange={(event) => updateHierarchy('district', event.target.value)}
+                        disabled={!zoneHierarchy.province}
+                      >
+                        <option value="">Whole district</option>
+                        {zoneGeoOptions.districts.map((district) => (
+                          <option key={district.id} value={district.id}>{district.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-2" style={{ minWidth: 0 }}>
+                      <span className="muted text-xs font-bold uppercase" style={{ letterSpacing: '0.04em' }}>Municipality</span>
+                      <select
+                        className="input"
+                        value={zoneHierarchy.municipality}
+                        onChange={(event) => updateHierarchy('municipality', event.target.value)}
+                        disabled={!zoneHierarchy.district}
+                      >
+                        <option value="">Whole municipality</option>
+                        {zoneGeoOptions.municipalities.map((municipality) => (
+                          <option key={municipality.id} value={municipality.id}>{municipality.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-2" style={{ minWidth: 0 }}>
+                      <span className="muted text-xs font-bold uppercase" style={{ letterSpacing: '0.04em' }}>Ward (optional)</span>
+                      <select
+                        className="input"
+                        value={zoneHierarchy.ward}
+                        onChange={(event) => updateHierarchy('ward', event.target.value)}
+                        disabled={!zoneHierarchy.municipality}
+                      >
+                        <option value="">Whole municipality</option>
+                        {zoneGeoOptions.wards.map((ward) => (
+                          <option key={ward.id} value={ward.id}>Ward {ward.ward_number}</option>
+                        ))}
+                      </select>
+                    </label>
                   </div>
-                  <p className="muted text-xs" style={{ marginTop: 6 }}>
-                    Only verified, active coverage areas created in Shipping &amp; Delivery can be selected.
-                  </p>
+
+                  <div className="flex items-center justify-between wrap gap-2" style={{ marginTop: 8 }}>
+                    <span className="muted text-xs">
+                      {resolvedCoverageArea
+                        ? `Selected: ${coverageAreaLabel(resolvedCoverageArea)}`
+                        : 'Choose a level from the created coverage areas.'}
+                    </span>
+                    <button
+                      type="button"
+                      className="btn btn-outline btn-sm"
+                      onClick={addResolvedArea}
+                      disabled={!resolvedCoverageArea}
+                    >
+                      <Plus size={14} /> Add to zone
+                    </button>
+                  </div>
+
+                  {selectedAreaValues.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                      {selectedAreaValues.map((value) => (
+                        <button
+                          key={value}
+                          type="button"
+                          className="chip chip-sm"
+                          style={{ border: '1px solid var(--border)', background: 'transparent', cursor: 'pointer' }}
+                          onClick={() => toggleAreaSelection(value)}
+                          title="Remove from zone"
+                        >
+                          {value} ×
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </>
               )}
             </div>
