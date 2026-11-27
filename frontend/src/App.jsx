@@ -119,6 +119,7 @@ import AdminDeliveries from './pages/admin/AdminDeliveries'
 import AdminDeliveryPartners from './pages/admin/AdminDeliveryPartners'
 import AdminDeliveryDashboard from './pages/admin/AdminDeliveryDashboard'
 import AdminCodReconciliation from './pages/admin/AdminCodReconciliation'
+import AdminCodPartnerDetail from './pages/admin/AdminCodPartnerDetail'
 import AdminSupport from './pages/admin/AdminSupport'
 import AdminCoupons from './pages/admin/AdminCoupons'
 import AdminPromotions from './pages/admin/AdminPromotions'
@@ -432,6 +433,7 @@ export default function App() {
         <Route path="fulfillment/zones" element={<PermissionGuard path="/admin/fulfillment/zones"><AdminShipping /></PermissionGuard>} />
         <Route path="fulfillment/coverage" element={<PermissionGuard path="/admin/fulfillment/coverage"><AdminCoverage /></PermissionGuard>} />
         <Route path="fulfillment/cod" element={<PermissionGuard path="/admin/fulfillment/cod"><AdminCodReconciliation /></PermissionGuard>} />
+        <Route path="fulfillment/cod/:id" element={<PermissionGuard path="/admin/fulfillment/cod"><AdminCodPartnerDetail /></PermissionGuard>} />
 
         {/* Finance & Ledger */}
         <Route path="finance/payments" element={<PermissionGuard path="/admin/finance/payments"><AdminPayments /></PermissionGuard>} />

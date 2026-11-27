@@ -1,10 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react'
-import {
-  Banknote, CheckCircle2, Clock, Download, RefreshCw, Search,
-  User, Phone, MapPin, Package
-} from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Banknote, CheckCircle2, Clock, Download, RefreshCw, Search, User } from 'lucide-react'
 import api from '../../api/client'
-import Drawer from '../../components/ui/Drawer'
 import ErrorState from '../../components/ui/ErrorState'
 import { Skeleton } from '../../components/ui/Skeleton'
 import { money, formatDateTime, errorMessage } from '../../utils/format'
@@ -19,17 +16,11 @@ const PARTNER_STATUSES = [
   ['all', 'All partners'],
 ]
 
-const DETAIL_STATUSES = [
-  ['pending', 'Pending'],
-  ['collected', 'Received'],
-  ['refunded', 'Fully refunded'],
-  ['all', 'All records'],
-]
-
 export default function AdminCodReconciliation() {
   const toast = useToast()
   const { user } = useAuth()
   const branding = useBranding()
+  const navigate = useNavigate()
 
   const [partners, setPartners] = useState([])
   const [summary, setSummary] = useState({})
@@ -44,20 +35,6 @@ export default function AdminCodReconciliation() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [collectingId, setCollectingId] = useState(null)
-
-  const [selectedId, setSelectedId] = useState(null)
-  const [detail, setDetail] = useState(null)
-  const [detailPage, setDetailPage] = useState(1)
-  const [detailStatus, setDetailStatus] = useState('pending')
-  const [detailSearchInput, setDetailSearchInput] = useState('')
-  const [detailSearch, setDetailSearch] = useState('')
-  const [detailDateFrom, setDetailDateFrom] = useState('')
-  const [detailDateTo, setDetailDateTo] = useState('')
-  const [detailDates, setDetailDates] = useState({ from: '', to: '' })
-  const [detailLoading, setDetailLoading] = useState(false)
-  const [detailError, setDetailError] = useState(null)
-  const [collectingPartner, setCollectingPartner] = useState(false)
-  const [collectingOrder, setCollectingOrder] = useState(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -83,31 +60,7 @@ export default function AdminCodReconciliation() {
     }
   }, [page, status, search, appliedDates])
 
-  const loadDetail = useCallback(async () => {
-    if (!selectedId) return
-    setDetailLoading(true)
-    setDetailError(null)
-    try {
-      const response = await api.get(`/admin/deliveries/cod-partners/${selectedId}`, {
-        params: {
-          page: detailPage,
-          per_page: 15,
-          status: detailStatus,
-          search: detailSearch,
-          date_from: detailDates.from || undefined,
-          date_to: detailDates.to || undefined,
-        },
-      })
-      setDetail(response.data)
-    } catch (loadError) {
-      setDetailError(loadError)
-    } finally {
-      setDetailLoading(false)
-    }
-  }, [selectedId, detailPage, detailStatus, detailSearch, detailDates])
-
   useEffect(() => { load() }, [load])
-  useEffect(() => { loadDetail() }, [loadDetail])
 
   const applySearch = (event) => {
     event.preventDefault()
@@ -116,49 +69,7 @@ export default function AdminCodReconciliation() {
   }
 
   const openProfile = (partner) => {
-    setSelectedId(partner.id)
-    setDetail(null)
-    setDetailPage(1)
-    setDetailStatus('pending')
-    setDetailSearch('')
-    setDetailSearchInput('')
-    setDetailDates({ from: '', to: '' })
-    setDetailDateFrom('')
-    setDetailDateTo('')
-  }
-
-  const closeProfile = () => {
-    setSelectedId(null)
-    setDetail(null)
-    setDetailError(null)
-  }
-
-  const recordPartnerCash = async () => {
-    if (!selectedId) return
-    setCollectingPartner(true)
-    try {
-      const response = await api.post(`/admin/deliveries/cod-partners/${selectedId}/collect`)
-      toast.success(`Recorded ${money(response.data?.data?.collected_amount || 0)} received from ${detail?.meta?.profile?.name || 'delivery partner'}.`)
-      closeProfile()
-      await load()
-    } catch (collectError) {
-      toast.error(errorMessage(collectError))
-    } finally {
-      setCollectingPartner(false)
-    }
-  }
-
-  const recordOrderCash = async (record) => {
-    setCollectingOrder(record.id)
-    try {
-      await api.post(`/admin/deliveries/cod-reconciliation/${record.id}/collect`)
-      toast.success(`Recorded ${money(record.cod_amount)} received for ${record.order_number || record.vendor_order_number}.`)
-      await Promise.all([loadDetail(), load()])
-    } catch (collectError) {
-      toast.error(errorMessage(collectError))
-    } finally {
-      setCollectingOrder(null)
-    }
+    navigate(`/admin/fulfillment/cod/${partner.id}`)
   }
 
   const exportPartners = () => {
@@ -200,44 +111,6 @@ export default function AdminCodReconciliation() {
     toast.success('Partner COD report exported.')
   }
 
-  const exportDetail = () => {
-    const records = detail?.data || []
-    exportReportFromRows({
-      columns: [
-        { label: 'Order' },
-        { label: 'Customer' },
-        { label: 'Delivered' },
-        { label: 'Original COD', align: 'right' },
-        { label: 'Refunded', align: 'right' },
-        { label: 'Net COD', align: 'right' },
-        { label: 'Status' },
-        { label: 'Received At' },
-        { label: 'Received By' },
-      ],
-      rows: records.map(record => [
-        record.order_number || record.vendor_order_number || '—',
-        record.customer_name || '—',
-        formatDateTime(record.delivered_at),
-        money(record.original_cod_amount || 0),
-        money(record.refunded_amount || 0),
-        money(record.cod_amount || 0),
-        record.status || '',
-        formatDateTime(record.cod_reconciled_at),
-        record.cod_reconciled_by || '—',
-      ]),
-      title: `${detail?.meta?.profile?.name || 'Delivery Partner'} COD History`,
-      subtitle: 'Order-level COD collections and refund adjustments for this delivery partner.',
-      sectionLabel: 'COD Order History',
-      fileName: `gosika_cod_partner_history_${new Date().toISOString().slice(0, 10)}`,
-      preparedBy: personLabel(user),
-      company: companyFromBranding(branding),
-      rangeLabel: detailDates.from || detailDates.to
-        ? `${detailDates.from || 'Start'} to ${detailDates.to || 'End'}`
-        : undefined,
-    })
-    toast.success('Partner COD history exported.')
-  }
-
   if (loading && partners.length === 0) {
     return (
       <div className="flex flex-col gap-4">
@@ -250,12 +123,6 @@ export default function AdminCodReconciliation() {
   if (error && partners.length === 0) {
     return <ErrorState message={errorMessage(error)} onRetry={load} />
   }
-
-  const profile = detail?.meta?.profile
-  const partnerSummary = detail?.meta?.partner_summary || {}
-  const detailPagination = detail?.meta?.pagination || { current_page: 1, last_page: 1, total: 0 }
-  const detailRows = detail?.data || []
-  const pendingAmount = Number(partnerSummary.pending_amount || 0)
 
   return (
     <div className="flex flex-col gap-4 pb-8">
@@ -433,134 +300,6 @@ export default function AdminCodReconciliation() {
         </div>
       </div>
 
-      <Drawer
-        open={!!selectedId}
-        onClose={closeProfile}
-        title={profile?.name ? `${profile.name} · COD Profile` : 'COD Partner Profile'}
-        panelClassName="cod-profile-drawer"
-      >
-        {detailLoading && !detail ? (
-          <Skeleton height={220} />
-        ) : detailError && !detail ? (
-          <ErrorState message={errorMessage(detailError)} onRetry={loadDetail} />
-        ) : detail ? (
-          <div className="flex flex-col gap-4">
-            <div style={{ background: '#f8fafc', border: '1px solid var(--border)', borderRadius: 12, padding: 16 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span className="avatar" style={{ width: 44, height: 44, background: '#eff6ff', color: '#2563eb' }}><User size={20} /></span>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 900, fontSize: 16, color: 'var(--ink)' }}>{profile?.name || 'Delivery partner'}</div>
-                  <div className="muted text-xs" style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Phone size={12} /> {profile?.phone || '—'}</span>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><MapPin size={12} /> {(profile?.service_areas || []).join(', ') || 'No service areas'}</span>
-                  </div>
-                </div>
-                <span className={`badge ${profile?.status === 'approved' ? 'badge-success' : 'badge-warning'}`}>{profile?.status || '—'}</span>
-              </div>
-              <div className="grid mt-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 8 }}>
-                <MiniStat label="Pending COD" value={money(partnerSummary.pending_amount || 0)} color="#b45309" />
-                <MiniStat label="Received COD" value={money(partnerSummary.collected_amount || 0)} color="#15803d" />
-                <MiniStat label="Refunded" value={money(partnerSummary.refunded_amount || 0)} color="#dc2626" />
-                <MiniStat label="Orders" value={`${partnerSummary.pending_count || 0} pending / ${partnerSummary.order_count || 0} total`} color="#1d4ed8" />
-              </div>
-              <div className="flex gap-2 mt-3">
-                <button type="button" className="btn btn-outline btn-sm" onClick={exportDetail} disabled={detailRows.length === 0}>
-                  <Download size={14} /> Export history
-                </button>
-                {pendingAmount > 0 && (
-                  <button type="button" className="btn btn-primary btn-sm" onClick={recordPartnerCash} disabled={collectingPartner}>
-                    <Banknote size={14} /> {collectingPartner ? 'Saving…' : `Collect all · ${money(pendingAmount)}`}
-                  </button>
-                )}
-              </div>
-            </div>
-
-            <div>
-              <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Package size={15} style={{ color: 'var(--muted)' }} /> Order History
-              </div>
-              <div className="flex gap-2 wrap mb-2">
-                {DETAIL_STATUSES.map(([value, label]) => (
-                  <button
-                    key={value}
-                    type="button"
-                    className={`btn btn-xs ${detailStatus === value ? 'btn-primary' : 'btn-outline'}`}
-                    onClick={() => { setDetailPage(1); setDetailStatus(value) }}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              <form
-                onSubmit={(event) => { event.preventDefault(); setDetailPage(1); setDetailSearch(detailSearchInput.trim()) }}
-                style={{ position: 'relative', marginBottom: 8 }}
-              >
-                <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted)' }} />
-                <input className="input" value={detailSearchInput} onChange={e => setDetailSearchInput(e.target.value)} placeholder="Search order…" style={{ paddingLeft: 30, height: 34 }} />
-              </form>
-              <div className="flex items-center gap-2 wrap mb-3">
-                <input className="input" type="date" value={detailDateFrom} onChange={e => setDetailDateFrom(e.target.value)} style={{ height: 32, width: 140 }} />
-                <span className="muted text-xs">to</span>
-                <input className="input" type="date" value={detailDateTo} onChange={e => setDetailDateTo(e.target.value)} style={{ height: 32, width: 140 }} />
-                <button type="button" className="btn btn-outline btn-xs" onClick={() => { setDetailPage(1); setDetailDates({ from: detailDateFrom, to: detailDateTo }) }}>Apply</button>
-              </div>
-              {detailLoading && <Skeleton height={120} />}
-              {detailError && <div className="alert alert-error">{errorMessage(detailError)}</div>}
-              {!detailLoading && detailRows.length === 0 && (
-                <div className="muted text-xs" style={{ padding: 20, textAlign: 'center', border: '1px dashed var(--border)', borderRadius: 8 }}>
-                  No COD records match these filters.
-                </div>
-              )}
-              {!detailLoading && detailRows.length > 0 && (
-                <div style={{ display: 'grid', gap: 8 }}>
-                  {detailRows.map(record => (
-                    <div key={record.id} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 12 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'flex-start' }}>
-                        <div>
-                          <div style={{ fontWeight: 800, fontSize: 13 }}>{record.order_number || record.vendor_order_number || 'Order'}</div>
-                          <div className="muted text-xs">{record.customer_name || '—'} · {formatDateTime(record.delivered_at)}</div>
-                        </div>
-                        <div style={{ textAlign: 'right' }}>
-                          <div style={{ fontWeight: 900, color: record.status === 'collected' ? '#15803d' : '#b45309' }}>{money(record.cod_amount || 0)}</div>
-                          <div className="muted text-xs">{record.status === 'collected' ? 'Received' : record.status === 'refunded' ? 'Fully refunded' : 'Pending'}</div>
-                        </div>
-                      </div>
-                      {Number(record.refunded_amount) > 0 && (
-                        <div className="muted text-xs mt-1" style={{ color: '#dc2626' }}>
-                          {money(record.refunded_amount)} refunded from {money(record.original_cod_amount)} COD
-                        </div>
-                      )}
-                      {record.status === 'collected' && (
-                        <div className="muted text-xs mt-1">
-                          {record.cod_reconciled_by ? `By ${record.cod_reconciled_by} · ` : ''}{formatDateTime(record.cod_reconciled_at)}
-                        </div>
-                      )}
-                      {record.status === 'pending' && (
-                        <button
-                          type="button"
-                          className="btn btn-outline btn-xs mt-2"
-                          disabled={collectingOrder === record.id}
-                          onClick={() => recordOrderCash(record)}
-                        >
-                          <CheckCircle2 size={12} /> {collectingOrder === record.id ? 'Saving…' : 'Record received'}
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-              <div className="flex items-center justify-between mt-3">
-                <span className="muted text-xs">{detailPagination.total || 0} records</span>
-                <div className="flex items-center gap-2">
-                  <button type="button" className="btn btn-outline btn-xs" disabled={detailPage <= 1 || detailLoading} onClick={() => setDetailPage(current => current - 1)}>Previous</button>
-                  <span className="muted text-xs">{detailPagination.current_page || detailPage} / {detailPagination.last_page || 1}</span>
-                  <button type="button" className="btn btn-outline btn-xs" disabled={detailPage >= (detailPagination.last_page || 1) || detailLoading} onClick={() => setDetailPage(current => current + 1)}>Next</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : null}
-      </Drawer>
     </div>
   )
 }
@@ -574,15 +313,6 @@ function SummaryCard({ label, amount, display, count, Icon, color, background, s
       </div>
       <div style={{ fontSize: 23, fontWeight: 900, color }}>{display ?? money(amount || 0)}</div>
       <div className="muted text-xs mt-1">{count || 0} {suffix || `delivered COD order${count === 1 ? '' : 's'}`}</div>
-    </div>
-  )
-}
-
-function MiniStat({ label, value, color }) {
-  return (
-    <div style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 8, padding: 10 }}>
-      <div className="muted text-xs" style={{ fontWeight: 700 }}>{label}</div>
-      <div style={{ fontSize: 14, fontWeight: 900, color, marginTop: 2 }}>{value}</div>
     </div>
   )
 }
