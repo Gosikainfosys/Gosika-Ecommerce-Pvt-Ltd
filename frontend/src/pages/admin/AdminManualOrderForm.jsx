@@ -337,21 +337,6 @@ export default function AdminManualOrderForm() {
     setCustomerDropdownOpen(false)
   }
 
-  const chooseManualCustomer = () => {
-    const name = customerQuery.trim()
-    if (name.length < 2) {
-      toast.error('Type a customer name first, then choose "Create new customer".')
-      return
-    }
-    setCustomerId('')
-    setManualCustomer(true)
-    setCustomerDropdownOpen(false)
-    setShippingAddress((current) => ({
-      ...current,
-      full_name: current.full_name || name,
-    }))
-  }
-
   const handleMapAddressChange = (location) => {
     setShippingAddress((current) => ({
       ...current,
@@ -447,7 +432,7 @@ export default function AdminManualOrderForm() {
             label="Customer"
             required
             value={customerQuery}
-            placeholder="Search customer name, phone, or email"
+            placeholder="Search or type a new customer name"
             options={customerOptions}
             loading={customerSearchLoading}
             open={customerDropdownOpen}
@@ -455,9 +440,13 @@ export default function AdminManualOrderForm() {
             onFocus={() => setCustomerDropdownOpen(true)}
             onBlur={() => setCustomerDropdownOpen(false)}
             onChange={(query) => {
+              const typed = query.trim()
               setCustomerQuery(query)
               setCustomerId('')
-              setManualCustomer(false)
+              setManualCustomer(typed.length >= 2)
+              if (typed.length >= 2 && !/^[+\d\s()-]+$/.test(typed) && !typed.includes('@')) {
+                setShippingAddress((current) => ({ ...current, full_name: typed }))
+              }
               setCustomerDropdownOpen(true)
             }}
             onSelect={(customer) => selectCustomer(customer.id)}
@@ -469,19 +458,6 @@ export default function AdminManualOrderForm() {
                 </span>
               </span>
             )}
-            footer={customerQuery.trim().length >= 2 && !manualCustomer && !customerId ? (
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                style={{ width: '100%', justifyContent: 'flex-start' }}
-                onMouseDown={(event) => {
-                  event.preventDefault()
-                  chooseManualCustomer()
-                }}
-              >
-                <Plus size={14} /> Create new customer “{customerQuery.trim()}”
-              </button>
-            ) : null}
             hint={manualCustomer
               ? 'A new customer will be created from the shipping name and phone entered below.'
               : 'Select an existing customer, or just type a new name to create a walk-in customer.'}
